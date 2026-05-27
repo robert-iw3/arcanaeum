@@ -1,0 +1,58 @@
+rule iranian_apt_cni_campaign_ttps {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects multiple tactics, techniques, and procedures (TTPs) associated with an Iranian state-sponsored threat actor campaign targeting Middle East Critical National Infrastructure (CNI). This rule identifies the use of specific open-source proxy tools for C2 and lateral movement, suspicious scheduled task creation for persistence, and potential web exploitation attempts against ZKTeco ZKBioTime software."
+    false_positives = "Legitimate use of proxy tools like ngrok or plink by developers or administrators. Benign scheduled task creation by legitimate software or administrators. Vulnerability scanning activity targeting ZKTeco software."
+    tags = "IRAN, APT, CNI, PROXY, PERSISTENCE, EXPLOIT"
+    tactic = "TA0011, TA0003, TA0001"
+    technique = "T1090, T1053.005, T1190"
+
+  events:
+    // Event 1: Detects execution of proxy tools used by the actor.
+    $proxy.metadata.event_type = "PROCESS_LAUNCH"
+    $proxy.principal.hostname = $hostname
+    $proxy.principal.user.userid = $user_id
+    // Looks for plink, ngrok, glider, or ReverseSocks5 process execution.
+    re.regex($proxy.target.process.file.full_path, `\\(plink|ngrok|glider|reversesocks5)\.exe$`) nocase
+
+    // Event 2: Detects suspicious scheduled task creation.
+    $task.metadata.event_type = "PROCESS_LAUNCH"
+    $task.principal.hostname = $hostname
+    $task.principal.user.userid = $user_id
+    // Looks for schtasks.exe being used to create a new task.
+    re.regex($task.target.process.file.full_path, `\\schtasks\.exe$`) nocase
+    re.regex($task.target.process.command_line, `\/create\s`) nocase
+    // Suspicious tasks often execute scripts or other LOLBINs.
+    // This may be noisy and could be tuned to be more specific.
+    re.regex($task.target.process.command_line, `\/tr\s+['"]?.*(powershell|cmd|wscript|cscript|mshta|rundll32|bitsadmin|certutil|regsvr32).*['"]?`) nocase
+
+    // Event 3: Detects potential exploitation of ZKTeco ZKBioTime software.
+    $exploit.metadata.event_type = "NETWORK_HTTP"
+    $exploit.principal.hostname = $hostname
+    $exploit.principal.ip = $source_ip
+    $exploit.target.hostname = $target_hostname
+    // The report mentions exploitation of ZKTeco ZKBioTime. This may generate FPs from scanners.
+    // This regex looks for URIs containing the product name, which could indicate an attempt to target it.
+    re.regex($exploit.target.url.path, `ZKBioTime`) nocase
+
+  outcome:
+    // The risk score is weighted based on the detected activity.
+    $risk_score = if($proxy, 45, 0) + if($task, 35, 0) + if($exploit, 55, 0)
+    $principal_hostname = $hostname
+    $principal_user_userid = $user_id
+    $source_address = if($exploit, $source_ip, "")
+    $target_hostname = if($exploit, $target_hostname, "")
+
+    // Provides context on which TTP was observed.
+    $tactic = array_distinct(if($proxy, "Command and Control", "") + if($task, "Persistence", "") + if($exploit, "Initial Access", ""))
+    $technique = array_distinct(if($proxy, "Proxy", "") + if($task, "Scheduled Task/Job: Scheduled Task", "") + if($exploit, "Exploit Public-Facing Application", ""))
+    $technique_id = array_distinct(if($proxy, "T1090", "") + if($task, "T1053.005", "") + if($exploit, "T1190", ""))
+
+    // Collects command line or URL for investigation.
+    $command_line = if($proxy, $proxy.target.process.command_line, if($task, $task.target.process.command_line, ""))
+    $url = if($exploit, $exploit.target.url.full_url, "")
+
+  condition:
+    $proxy or $task or $exploit
+}

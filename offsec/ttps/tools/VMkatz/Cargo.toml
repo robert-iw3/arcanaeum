@@ -1,0 +1,39 @@
+[package]
+name = "vmkatz"
+version = "1.3.0"
+edition = "2021"
+license = "MIT"
+
+[features]
+default = ["vmware", "vbox", "qemu", "hyperv", "sam", "ntds.dit", "carve", "dump", "vmfs"]
+vmware = ["dep:memmap2"]
+vbox = []
+qemu = ["dep:memmap2"]
+hyperv = ["dep:memmap2"]
+sam = ["dep:ntfs", "dep:md-5", "dep:sha2"]
+"ntds.dit" = ["sam"]
+carve = []
+dump = []
+vmfs = ["sam"]
+
+[profile.release]
+opt-level = "z"
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[dependencies]
+memmap2 = { version = "0.9", optional = true }
+ntfs = { version = "0.4", optional = true }
+md-5 = { version = "0.10", optional = true }
+sha2 = { version = "0.10", optional = true }
+aes = "0.8"
+des = "0.8"
+cbc = "0.1"
+clap = { version = "4", features = ["derive"] }
+thiserror = "2"
+anyhow = "1"
+hex = "0.4"
+log = "0.4"
+memchr = "2"

@@ -1,0 +1,45 @@
+// Name: Malicious PyTorch Model Leading to Command Execution
+// Author: RW
+// Date: 2025-08-14
+// Description: Detects a Python process spawning a shell or other suspicious utility. This can be an indicator of
+// Remote Code Execution (RCE) resulting from loading a malicious PyTorch model. Vulnerabilities in PyTorch's
+// deserialization mechanisms (pickle) or the TorchScript engine (e.g., CVE-2025-32434 via malicious operators
+// like aten::save) can be exploited to run arbitrary commands.
+// False Positive Sensitivity: Medium
+
+let suspicious_processes = dynamic([
+    "sh",
+    "bash",
+    "dash",
+    "ksh",
+    "zsh",
+    "tcsh",
+    "csh",
+    "nc",
+    "ncat",
+    "netcat",
+    "wget",
+    "curl",
+    "powershell.exe",
+    "pwsh.exe"
+]);
+DeviceProcessEvents
+| where ActionType == "ProcessCreated"
+// Look for processes initiated by a Python interpreter, which would host the PyTorch library.
+| where InitiatingProcessFileName has_any ("python", "python3", "python.exe", "python3.exe")
+// Detects the creation of suspicious child processes like shells or networking tools.
+| where FileName in~ (suspicious_processes)
+    // Also detects shells launched to execute a command via -c flag, a common pattern for RCE payloads.
+    or (ProcessCommandLine has_all ("-c", "sh") or ProcessCommandLine has_all ("-c", "bash"))
+// FP Tuning: Legitimate applications, such as data science platforms or administrative scripts, may spawn shells from Python.
+// Exclude known safe parent processes or scripts by filtering on the InitiatingProcessCommandLine.
+// For example: | where InitiatingProcessCommandLine !contains "legitimate_script.py"
+| project
+    Timestamp = TimeGenerated,
+    DeviceName,
+    SuspiciousProcess = FileName,
+    SuspiciousProcessCommandLine = ProcessCommandLine,
+    ParentProcess = InitiatingProcessFileName,
+    ParentProcessCommandLine = InitiatingProcessCommandLine,
+    ParentProcessId = InitiatingProcessId,
+    ProcessId

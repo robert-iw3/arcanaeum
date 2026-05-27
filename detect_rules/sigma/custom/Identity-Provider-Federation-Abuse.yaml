@@ -1,0 +1,34 @@
+title: Identity Provider Federation Abuse
+id: 355021bc-42e4-43ff-8fd3-5d38073f6ddd
+status: experimental
+description: Detects the modification of domain federation settings or the creation of a new Identity Provider (IdP). Adversaries, such as SCATTERED SPIDER, may abuse federation trusts by adding a malicious IdP they control. This allows them to forge authentication tokens for any user in the victim's domain, bypassing MFA and gaining persistent access.
+references:
+  - Threat Intel ID: 6e487ba759c8e80223efef2a739cd68b6586a6454f568bafdb580d896b47660a
+author: RW
+date: 2025-08-19
+tags:
+  - attack.modify_authentication_process
+  - attack.t1556
+logsource:
+  category: cloud
+detection:
+  # Detects modification of federation settings in Entra ID
+  entra_federation_change:
+    product: azure
+    service: auditlogs
+    category: 'DirectoryManagement'
+    result: 'success'
+    activityDisplayName:
+      - 'Set domain authentication'
+      - 'Set federation settings on domain'
+  # Detects creation of a new Identity Provider in Okta
+  okta_idp_creation:
+    product: okta
+    event_type: 'system.idp.lifecycle.create'
+    outcome.result: 'SUCCESS'
+  condition: 1 of them
+falsepositives:
+  - Legitimate changes to domain federation settings, such as adding a new trusted IdP during a merger, acquisition, or integration with a new SaaS application.
+  - Initial setup of identity federation.
+  - These changes are typically rare and should be performed by authorized identity administrators. Any unexpected modification should be investigated.
+level: high

@@ -1,0 +1,34 @@
+title: Zmap Scanning by CRYSTALRAY
+id: e588dfe5-55af-4064-a2d2-d79e0249c7e8
+status: experimental
+description: Detects the use of zmap to scan for common web services with CSV output, a technique used by the CRYSTALRAY threat actor for reconnaissance.
+references:
+  - https://www.sysdig.com/blog/crystalray-rising-threat-actor-exploiting-oss-tools
+author: RW
+date: 2025-08-07
+tags:
+  - attack.reconnaissance
+  - attack.t1595.002
+  - threat_actor.crystalray
+  - tool.zmap
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection_process:
+    Image|endswith: '/zmap'     # Detects the execution of the zmap tool
+  selection_details:
+    CommandLine|contains|all:
+      - '-p'       # Port scanning flag is used
+      - '--output-module=csv'       # Output is specified as CSV format
+      - '-w'       # A whitelist/input file is used, common for CIDR block lists
+  selection_ports:
+    CommandLine|contains:     # Scans for at least one of the common web ports targeted by CRYSTALRAY
+      - '80'
+      - '8090'
+      - '7001'
+      - '61616'
+  condition: all of selection_*
+falsepositives:
+  - Legitimate network scanning or security research may use zmap. This detection is tuned to the specific combination of parameters used by CRYSTALRAY to reduce false positives. If this is too specific for your environment, consider removing parts of the 'selection_details' condition.
+level: high

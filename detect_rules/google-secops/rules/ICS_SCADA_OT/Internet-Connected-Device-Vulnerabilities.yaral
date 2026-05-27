@@ -1,0 +1,45 @@
+rule exploitation_attempt_against_internet_connected_der {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects potential exploitation attempts against internet-connected Industrial Control System (ICS) devices, particularly Distributed Energy Resources (DER) like solar inverters. This rule identifies probes for common web vulnerabilities and traffic from known scanning tools, which are often precursors to exploitation of remote services."
+    tactic = "TA0001"
+    technique = "T1190" // T0882 is deprecated and maps to T1190
+    tags = "ICS, OT, DER, SOLAR, INITIAL_ACCESS, EXPLOITATION"
+    false_positives = "Benign security research scanners that are not part of a malicious campaign. Legitimate, but unusual, administrative activity using tools like curl or wget. False matches on substrings in URLs or user agents."
+
+  events:
+    // This rule is best applied to logs from internet-facing firewalls, WAFs, or network sensors (IDS/IPS) with HTTP inspection.
+    $event.metadata.event_type = "NETWORK_CONNECTION"
+
+    // CRITICAL: This reference list must be populated with the public IP addresses of your internet-facing DER/OT assets to be effective.
+    $event.target.ip in %internet_facing_der_ips
+
+    // Filter for traffic originating from the public internet.
+    not net.ip_in_range_cidr($event.principal.ip, "10.0.0.0/8") and
+    not net.ip_in_range_cidr($event.principal.ip, "172.16.0.0/12") and
+    not net.ip_in_range_cidr($event.principal.ip, "192.168.0.0/16")
+
+    // Detects probes for common web vulnerabilities or traffic from scanning tools.
+    (
+      // Identifies probes for common web vulnerabilities often found in embedded devices.
+      re.regex($event.network.http.url, `(?i)/etc/passwd|cmd\.exe|id_rsa|phpinfo\.php|setup\.cgi|\.\.%2f|\.\./`)
+      or
+      // Identifies traffic from user agents associated with network scanning or exploitation tools.
+      // Note: curl/wget may be used for legitimate purposes but are suspicious when targeting sensitive DER assets from the internet.
+      re.regex($event.network.http.user_agent, `(?i)nmap|masscan|zgrab|metasploit|shodan\.io|censys|curl|wget`)
+    )
+
+  outcome:
+    // A medium risk score is assigned as this is an attempt, not a confirmed compromise.
+    $risk_score = 60
+    $principal_ip = array_distinct($event.principal.ip)
+    $target_ip = array_distinct($event.target.ip)
+    $target_hostname = array_distinct($event.target.hostname)
+    $suspicious_url = array_distinct($event.network.http.url)
+    $suspicious_user_agent = array_distinct($event.network.http.user_agent)
+    $network_protocol = array_distinct($event.network.application_protocol)
+
+  condition:
+    $event
+}

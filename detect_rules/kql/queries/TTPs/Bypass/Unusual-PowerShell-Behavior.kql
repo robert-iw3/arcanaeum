@@ -1,0 +1,65 @@
+// Name: PowerShell Post-AMSI-Bypass Activity
+// Author: RW
+// Date: 2025-07-31
+// Tactic: Execution, Defense Evasion
+// Technique: T1059.001, PowerShell; T1562.001, Impair Defenses: Disable or Modify Tools
+// Description: Detects suspicious PowerShell commands (e.g., 'amsiutils', 'Invoke-Mimikatz') executing shortly after a separate PowerShell command indicative of an in-memory AMSI bypass, such as the 'AMSI Write Raid' technique. This correlation suggests a successful defense evasion followed by malicious command execution.
+// False Positive Sensitivity: Medium.
+// Security testing, red team exercises, or complex administrative scripts that manipulate memory could trigger this rule.
+// If false positives occur, consider tuning the 'suspicious_payload_indicators' or excluding trusted parent processes or script paths.
+
+let timeframe = 1d;
+let correlation_window = 5m;
+
+// Define indicators for the AMSI Write Raid bypass technique
+let bypass_indicators = dynamic([
+    "Add-Type",
+    "DllImport",
+    "kernel32",
+    "ReadProcessMemory",
+    "GetProcAddress",
+    "Marshal",
+    "::Copy"
+]);
+
+// Define indicators of commands typically blocked by AMSI. The article specifically uses "amsiutils" as the proof.
+let suspicious_payload_indicators = dynamic([
+    "amsiutils",
+    "Invoke-Mimikatz",
+    "Invoke-Expression",
+    "DownloadString"
+]);
+
+// Find potential AMSI bypass events based on memory manipulation characteristics
+let AmsiBypassAttempts = DeviceProcessEvents
+| where Timestamp > ago(timeframe)
+| where FileName in~ ("powershell.exe", "pwsh.exe")
+| where ProcessCommandLine has_all (bypass_indicators)
+| project BypassTimestamp = Timestamp, DeviceId, DeviceName, AccountName, BypassInitiatingProcess = InitiatingProcessFileName, BypassCommandLine = ProcessCommandLine;
+
+// Find suspicious PowerShell commands that are likely to be executed after a successful bypass
+let SuspiciousCommands = DeviceProcessEvents
+| where Timestamp > ago(timeframe)
+| where FileName in~ ("powershell.exe", "pwsh.exe")
+| where ProcessCommandLine has_any (suspicious_payload_indicators)
+// Filter out the bypass command itself from being flagged as the suspicious follow-on command
+| where not (ProcessCommandLine has_all (bypass_indicators))
+| project SuspiciousCommandTimestamp = Timestamp, DeviceId, SuspiciousCommandLine = ProcessCommandLine, SuspiciousProcessInitiator = InitiatingProcessFileName;
+
+// Correlate the two event types happening in close succession on the same host
+AmsiBypassAttempts
+| join kind=inner (
+    SuspiciousCommands
+) on DeviceId
+// Ensure the suspicious command happens AFTER the bypass attempt and within the defined correlation window
+| where SuspiciousCommandTimestamp > BypassTimestamp and (SuspiciousCommandTimestamp - BypassTimestamp) < correlation_window
+| project
+    Timestamp = SuspiciousCommandTimestamp,
+    DeviceName,
+    AccountName,
+    BypassTimestamp,
+    BypassInitiatingProcess,
+    BypassCommandLine,
+    SuspiciousCommandTimestamp,
+    SuspiciousProcessInitiator,
+    SuspiciousCommandLine

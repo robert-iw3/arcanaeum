@@ -1,0 +1,56 @@
+{
+  "data": {
+    "type": "signal_correlation",
+    "attributes": {
+      "name": "CCP Network Device Exploitation TTPs",
+      "enabled": true,
+      "cases": [
+        {
+          "name": "SSH Backdoor Activation",
+          "status": "high",
+          "query": "source:cisco OR source:paloalto OR source:linux OR source:firewall (\"service sshd_operns start\" OR network.destination.port:57722 OR network.destination.port:/^\\d{3,5}22$/)"
+        },
+        {
+          "name": "Suspicious ACL Modifications",
+          "status": "high",
+          "query": "source:cisco OR source:paloalto OR source:linux OR source:firewall (\"access-list 10\" OR \"access-list 20\" OR \"access-list 50\")"
+        },
+        {
+          "name": "Unauthorized User Creation",
+          "status": "high",
+          "query": "source:cisco OR source:paloalto OR source:linux OR source:firewall (\"useradd cisco\" OR \"vi /etc/sudoers\")"
+        },
+        {
+          "name": "Packet Capture Activity",
+          "status": "high",
+          "query": "source:cisco OR source:paloalto OR source:linux OR source:firewall (\"monitor capture\" OR \"span\" OR \"erspan\" OR \"mycap.pcap\" OR \"tac.pcap\" OR \"1.pcap\")"
+        }
+      ],
+      "group_by_fields": ["host", "user"],
+      "distinct_fields": ["case_id"],
+      "correlation": {
+        "expression": "distinct_count >= 2",
+        "timeframe": "1h"
+      },
+      "message": "CCP Network Device Exploitation TTPs: {distinct_count} distinct techniques on host {host} by user {user}. Techniques: {case_names}. Details: {message OR network.destination.ip OR network.destination.port}. Timeframe: {first_activity} to {last_activity}",
+      "severity": "high",
+      "tags": [
+        "security:attack",
+        "tactic:TA0003",
+        "tactic:TA0005",
+        "tactic:TA0006",
+        "tactic:TA0007",
+        "tactic:TA0011",
+        "technique:T1021.004",
+        "technique:T1562.004",
+        "technique:T1136.001",
+        "technique:T1040",
+        "technique:T1059.008",
+        "technique:T1571"
+      ],
+      "options": {
+        "evaluation_window": "1h"
+      }
+    }
+  }
+}

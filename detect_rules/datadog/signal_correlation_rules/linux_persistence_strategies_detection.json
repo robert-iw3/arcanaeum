@@ -1,0 +1,59 @@
+{
+  "data": {
+    "type": "signal_correlation",
+    "attributes": {
+      "name": "Linux Persistence Strategies Detection",
+      "enabled": true,
+      "cases": [
+        {
+          "name": "Nohup Reverse Shell Persistence",
+          "status": "high",
+          "query": "source:linux @process.name:nohup @process.cmdline:\"*bash -c*\" (@process.cmdline:\"*/dev/tcp/*\" OR @process.cmdline:\"*/dev/udp/*\") | aggregate count by @host.name, @usr.name, @process.parent_name, @process.name, @process.cmdline"
+        },
+        {
+          "name": "Shell Config Modification for Persistence",
+          "status": "high",
+          "query": "source:linux (@process.cmdline:\"* > *\" OR @process.cmdline:\"* >> *\") (@process.cmdline:\"*.bashrc*\" OR @process.cmdline:\"*.profile*\" OR @process.cmdline:\"*.bash_profile*\") (@process.cmdline:\"*nc *\" OR @process.cmdline:\"*netcat*\" OR @process.cmdline:\"*/dev/tcp/*\" OR @process.cmdline:\"*/dev/udp/*\" OR @process.cmdline:\"*bash -i*\" OR @process.cmdline:\"*python*import socket*\" OR @process.cmdline:\"*perl*use Socket*\") | aggregate count by @host.name, @usr.name, @process.parent_name, @process.name, @process.cmdline"
+        },
+        {
+          "name": "Systemd Service Persistence",
+          "status": "high",
+          "query": "source:linux (@process.cmdline:\"* > *\" OR @process.cmdline:\"* >> *\" OR @process.name:tee) (@process.cmdline:\"*/etc/systemd/system/*.service*\" OR @process.cmdline:\"*/.config/systemd/user/*.service*\") (@process.cmdline:\"*Restart=always*\" OR @process.cmdline:\"*Restart=on-failure*\") (@process.cmdline:\"*/dev/tcp/*\" OR @process.cmdline:\"*/dev/udp/*\" OR @process.cmdline:\"*nc *\" OR @process.cmdline:\"*netcat *\" OR @process.cmdline:\"*bash -i*\") | aggregate count by @host.name, @usr.name, @process.parent_name, @process.name, @process.cmdline"
+        },
+        {
+          "name": "Cron Job Persistence for Reverse Shell",
+          "status": "high",
+          "query": "source:linux (@process.name:crontab OR ((@process.cmdline:\"* > *\" OR @process.cmdline:\"* >> *\") AND (@process.cmdline:\"*/etc/cron*\" OR @process.cmdline:\"*/var/spool/cron*\"))) (@process.cmdline:\"*/dev/tcp/*\" OR @process.cmdline:\"*/dev/udp/*\" OR @process.cmdline:\"*nc *\" OR @process.cmdline:\"*netcat *\" OR @process.cmdline:\"*bash -i*\") | aggregate count by @host.name, @usr.name, @process.parent_name, @process.name, @process.cmdline"
+        },
+        {
+          "name": "Unexpected Outbound Connection from Shell or Scripting Process",
+          "status": "high",
+          "query": "source:linux @network.direction:outbound @network.destination.port:(4444 OR 8080 OR 53 OR 80 OR 443) (@process.name:(bash OR sh OR zsh OR ksh OR csh OR perl OR php OR ruby OR pwsh OR nc OR netcat OR ncat) OR @process.name:python*) | aggregate count by @network.destination.ip, @network.source.ip, @usr.name, @network.destination.port, values(@process.name) as process_name"
+        }
+      ],
+      "group_by_fields": ["@host.name", "@network.source.ip", "@usr.name"],
+      "distinct_fields": ["case_id"],
+      "correlation": {
+        "expression": "distinct_count >= 2",
+        "timeframe": "1h"
+      },
+      "message": "Linux Persistence Activity Detected: {distinct_count} distinct TTPs on host {@host.name}, source IP {@network.source.ip}, or user {@usr.name}. Techniques: {case_names}. Details: {@process.cmdline OR @network.destination.ip}. Timeframe: {first_activity} to {last_activity}",
+      "severity": "high",
+      "tags": [
+        "security:attack",
+        "tactic:TA0003",
+        "tactic:TA0005",
+        "tactic:TA0011",
+        "technique:T1059.004",
+        "technique:T1546.004",
+        "technique:T1543.002",
+        "technique:T1053.003",
+        "technique:T1071",
+        "technique:T1571"
+      ],
+      "options": {
+        "evaluation_window": "1h"
+      }
+    }
+  }
+}

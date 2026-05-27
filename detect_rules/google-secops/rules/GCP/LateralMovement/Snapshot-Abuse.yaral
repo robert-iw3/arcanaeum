@@ -1,0 +1,60 @@
+rule gcp_snapshot_abuse_for_data_access {
+  meta:
+    description = "Detects a sequence of actions where a user creates a snapshot from a VM disk, creates a new disk from that snapshot, and attaches it to another instance. This pattern is a known lateral movement and data access technique used to exfiltrate or access data from disks the user may not have direct instance access to."
+    author = "RW"
+    date = "2025-08-20"
+    tags = "GCP, LATERAL_MOVEMENT, COLLECTION, DATA_EXFILTRATION, GCLOUD, SNAPSHOT"
+    tactic = "TA0008, TA0009"
+    technique = "T1530"
+    false_positives = "Legitimate disaster recovery procedures, VM migrations, or system backups performed by administrators or automated systems. Tuning is recommended to exclude known administrative service accounts or users."
+
+  events:
+    // Event 1: A snapshot is created from a source disk.
+    $snapshot_create.metadata.event_type = "PROCESS_LAUNCH"
+    $snapshot_create.principal.user.userid = $user
+    $snapshot_create.principal.hostname = $hostname
+    re.regex($snapshot_create.target.process.file.full_path, `gcloud(\.py|\.sh|\.cmd)?$`)
+    re.regex($snapshot_create.target.process.command_line, `\scompute\s+(beta\s+)?(snapshots|instant-snapshots)\s+create\s`)
+    $snapshot_name = re.capture($snapshot_create.target.process.command_line, `\screate\s+([^\s]+)`)
+    $source_disk = re.capture($snapshot_create.target.process.command_line, `--source-disk(?:=|\s+)([^\s]+)`)
+
+    // Event 2: A new disk is created from the previously created snapshot.
+    $disk_create.metadata.event_type = "PROCESS_LAUNCH"
+    $disk_create.principal.user.userid = $user
+    $disk_create.principal.hostname = $hostname
+    re.regex($disk_create.target.process.file.full_path, `gcloud(\.py|\.sh|\.cmd)?$`)
+    re.regex($disk_create.target.process.command_line, `\scompute\s+(beta\s+)?disks\s+create\s`)
+    re.regex($disk_create.target.process.command_line, `--source-(snapshot|instant-snapshot)(?:=|\s+)` + $snapshot_name + `\b`)
+    $new_disk_name = re.capture($disk_create.target.process.command_line, `\screate\s+([^\s]+)`)
+
+    // Event 3: The newly created disk is attached to an instance.
+    $disk_attach.metadata.event_type = "PROCESS_LAUNCH"
+    $disk_attach.principal.user.userid = $user
+    $disk_attach.principal.hostname = $hostname
+    re.regex($disk_attach.target.process.file.full_path, `gcloud(\.py|\.sh|\.cmd)?$`)
+    re.regex($disk_attach.target.process.command_line, `\scompute\s+instances\s+attach-disk\s`)
+    re.regex($disk_attach.target.process.command_line, `--disk(?:=|\s+)` + $new_disk_name + `\b`)
+    $target_instance = re.capture($disk_attach.target.process.command_line, `\sattach-disk\s+([^\s]+)`)
+
+    // Placeholder for tuning: Exclude known administrative users or service accounts.
+    // not $user in %gcp_admin_users
+
+  match:
+    // Correlate these three actions by the user over a 1-hour window.
+    $user, $hostname, $snapshot_name, $new_disk_name over 1h
+
+  outcome:
+    $risk_score = 80
+    $principal_user = $user
+    $principal_hostname = $hostname
+    $source_disk_name = array_distinct($source_disk)
+    $created_snapshot_name = $snapshot_name
+    $created_disk_name = $new_disk_name
+    $attached_to_instance = array_distinct($target_instance)
+    $snapshot_create_command = array_distinct($snapshot_create.target.process.command_line)
+    $disk_create_command = array_distinct($disk_create.target.process.command_line)
+    $disk_attach_command = array_distinct($disk_attach.target.process.command_line)
+
+  condition:
+    $snapshot_create and $disk_create and $disk_attach
+}

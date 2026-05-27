@@ -1,0 +1,38 @@
+rule gcp_dhcp_hijacking_attempt {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects a potential DHCP hijacking attempt, indicated by a single host (identified by its MAC address) being assigned multiple different IP addresses via DHCP in a short period. This technique can be used to perform man-in-the-middle attacks, such as redirecting traffic intended for the GCP metadata service to an attacker-controlled server for privilege escalation."
+    false_positives = "This activity could occur legitimately in environments with network flapping or where devices frequently roam between different subnets. Tuning the time window and event count threshold may be required."
+    tags = "GCP, DHCP, PRIVILEGE_ESCALATION, MITM, T1557, T1557.001"
+    tactic = "TA0004"
+    technique = "T1557.001"
+
+  events:
+    // Look for DHCP network events.
+    $dhcp.metadata.event_type = "NETWORK_DHCP"
+
+    // Correlate by the MAC address of the device receiving the lease.
+    $dhcp.target.mac = $mac
+    // Capture the IP address assigned in the DHCP transaction.
+    $dhcp.network.dhcp.assigned_ip = $assigned_ip
+
+  match:
+    // Group events by MAC address over a 15 minute window.
+    $mac over 15m
+
+  outcome:
+    // High risk score due to potential for privilege escalation or MitM.
+    $risk_score = 70
+    $mac_address = array_distinct($mac)
+    $assigned_ips = array_distinct($assigned_ip)
+    $hostnames = array_distinct($dhcp.target.hostname)
+    $dhcp_servers = array_distinct($dhcp.principal.ip) // The source of the DHCP packets.
+    $event_count = count_distinct($dhcp.metadata.id)
+
+  condition:
+    // Trigger if a single MAC address is assigned more than one unique IP address.
+    // This is a strong indicator of the DHCP hijacking technique described in the reference,
+    // where an attacker forces IP changes to redirect traffic.
+    $dhcp and count_distinct($assigned_ip) > 1
+}

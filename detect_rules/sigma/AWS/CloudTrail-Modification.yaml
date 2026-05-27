@@ -1,0 +1,29 @@
+title: AWS CloudTrail Logging Disabled or Tampered
+id: e9870125-382d-43ca-be78-3c4650cf8146
+status: experimental
+description: Detects attempts to disable or tamper with AWS CloudTrail logging. Attackers may perform this action to evade detection by stopping security event logging.
+references:
+  - https://cloud.hacktricks.wiki/en/pentesting-cloud/aws-security/index.html
+author: RW
+date: 2025-08-19
+tags:
+  - attack.defense_evasion
+  - attack.t1562.008
+  - cloud
+  - aws
+logsource:
+  service: aws.cloudtrail
+  category: cloud
+detection:
+  selection:
+    eventName:
+      - 'StopLogging'       # Stops the logging of a trail
+      - 'DeleteTrail'       # Deletes a trail
+      - 'UpdateTrail'       # Updates a trail's configuration, could be used to disable logging features
+      - 'PutEventSelectors' # Modifies event selectors, could be used to filter out security events
+    errorCode:              # Filter for successful API calls only
+  condition: selection
+falsepositives:
+  - Legitimate and authorized administrative changes to CloudTrail configuration. These actions are typically rare and should be performed by a small set of privileged users.
+  - Decommissioning of AWS accounts or specific trails that are no longer needed.
+level: high

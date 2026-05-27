@@ -1,0 +1,103 @@
+// Name: UNC6384 (Mustang Panda) Multi-IOC Detection
+// Author: RW
+// Date: 2025-08-26
+// Description: This rule detects multiple indicators of compromise (IOCs) and tactics, techniques, and procedures (TTPs) associated with a
+// UNC6384 campaign targeting diplomats, as reported by Google. This includes file hashes, network indicators, and persistence mechanisms
+// related to the STATICPLUGIN, CANONSTAGER, and SOGU.SEC malware families.
+// False Positive Sensitivity: Medium
+// References: https://cloud.google.com/blog/topics/threat-intelligence/prc-nexus-espionage-targets-diplomats
+
+let FileHashes = dynamic([
+    "65c42a7ea18162a92ee982eded91653a5358a7129c7672715ce8ddb6027ec124", // STATICPLUGIN (AdobePlugins.exe)
+    "3299866538aff40ca85276f87dd0cefe4eafe167bd64732d67b06af4f3349916", // MSI Package (20250509.bmp)
+    "e787f64af048b9cb8a153a0759555785c8fd3ee1e8efbca312a29f2acb1e4011", // CANONSTAGER (cnmpaui.dll)
+    "cc4db3d8049043fa62326d0b3341960f9a0cf9b54c2fbbdffdbd8761d99add79"  // Encrypted SOGU.SEC (cnmplog.dat)
+]);
+let NetworkIOCs = dynamic([
+    "mediareleaseupdates.com",
+    "103.79.120.72", // Hosting IP
+    "166.88.2.90"      // C2 IP
+]);
+let RunKeyPath = "\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\\CanonPrinter";
+let RunKeyValue = "cnmpaui.exe";
+
+union
+(
+    // Detects creation of malicious files by hash
+    DeviceFileEvents
+    | where SHA256 in (FileHashes)
+    | extend
+        DetectionMethod = "Malicious File Hash Match",
+        ThreatActor = "UNC6384",
+        MalwareFamily = "STATICPLUGIN/CANONSTAGER/SOGU.SEC"
+    | project
+        TimeGenerated,
+        DeviceName,
+        DetectionMethod,
+        ThreatActor,
+        MalwareFamily,
+        FileName,
+        FolderPath,
+        SHA256,
+        InitiatingProcessCommandLine
+),
+(
+    // Detects network connections to known malicious domains/IPs
+    DeviceNetworkEvents
+    | where RemoteUrl has_any (NetworkIOCs) or RemoteIP in (NetworkIOCs)
+    | extend
+        DetectionMethod = "Malicious Network Connection",
+        ThreatActor = "UNC6384",
+        MalwareFamily = "STATICPLUGIN/SOGU.SEC"
+    | project
+        TimeGenerated,
+        DeviceName,
+        DetectionMethod,
+        ThreatActor,
+        MalwareFamily,
+        InitiatingProcessFileName,
+        RemoteUrl,
+        RemoteIP
+),
+(
+    // Detects registry key used for persistence
+    DeviceRegistryEvents
+    | where ActionType == "RegistryValueSet"
+    | where RegistryKey endswith RunKeyPath and RegistryValueData has RunKeyValue
+    // FP Note: Legitimate Canon software might use a similar path. Investigate the initiating process if alerts occur.
+    | extend
+        DetectionMethod = "CanonPrinter Persistence Registry Key",
+        ThreatActor = "UNC6384",
+        MalwareFamily = "CANONSTAGER"
+    | project
+        TimeGenerated,
+        DeviceName,
+        DetectionMethod,
+        ThreatActor,
+        MalwareFamily,
+        RegistryKey,
+        RegistryValueData,
+        InitiatingProcessCommandLine
+),
+(
+    // Detects the specific DLL side-loading of CANONSTAGER
+    DeviceImageLoadEvents
+    | where InitiatingProcessFileName =~ "cnmpaui.exe" and FileName =~ "cnmpaui.dll"
+    | extend
+        DetectionMethod = "CANONSTAGER DLL Side-loading",
+        ThreatActor = "UNC6384",
+        MalwareFamily = "CANONSTAGER"
+    | project
+        TimeGenerated,
+        DeviceName,
+        DetectionMethod,
+        ThreatActor,
+        MalwareFamily,
+        FileName,
+        FolderPath,
+        InitiatingProcessFileName,
+        SHA1 // SHA1 of the loaded DLL can be useful for correlation
+)
+// Note: Other indicators from the report, such as the SOGU.SEC User Agent and Mutex, are not included
+// as they are not readily available in standard M365 Defender tables. This logic would need to be
+// adapted for other data sources like proxy logs or specialized EDR tooling.

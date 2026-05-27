@@ -1,0 +1,43 @@
+// Name: LOLBin Writes Hex or Blob Data to Registry
+// Author: RW
+// Date: 2025-08-08
+// Description: Detects when a common LOLBin writes a long hexadecimal string or a large, space-less data blob to a registry key under HKCU.
+//              This behavior is often associated with staging encoded payloads or shellcode.
+// MITRE ATT&CK: T1112 (Modify Registry)
+
+let lookback = 1d;
+// Define the list of LOLBins to monitor.
+let lolbins = dynamic(["powershell.exe", "pwsh.exe", "powershell_ise.exe", "reg.exe", "wscript.exe", "cscript.exe", "mshta.exe", "rundll32.exe"]);
+// Define the minimum length for a data blob. Adjust as needed.
+let blob_length_threshold = 100;
+// Define the regex pattern to detect long hexadecimal strings.
+let hex_pattern = @"\b(0x)?[A-Fa-f0-9]{15,}\b";
+
+DeviceRegistryEvents
+| where Timestamp > ago(lookback)
+| where ActionType == "RegistryValueSet"
+// Focus on user-writable keys, a common target for malware staging.
+| where RegistryKey has "HKEY_CURRENT_USER"
+| where InitiatingProcessFileName in~ (lolbins)
+| where isnotempty(RegistryValueData)
+| extend RegValueLength = strlen(RegistryValueData)
+// Detect either a long hex string or a large data blob with no spaces.
+| where RegistryValueData matches regex hex_pattern or (RegValueLength > blob_length_threshold and not(RegistryValueData contains " "))
+// Add a field to identify which pattern was matched for easier analysis.
+| extend MatchType = case(
+    RegistryValueData matches regex hex_pattern, "HexPattern",
+    "BlobPattern"
+  )
+// Potential for False Positives: Legitimate software may store configuration or license data as blobs or long hex strings.
+// Consider adding exclusions for known benign processes, command lines, or registry key paths.
+// Example: | where not (InitiatingProcessFileName == 'powershell.exe' and RegistryKey contains 'SomeBenignSoftware')
+| project
+    Timestamp,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RegistryKey,
+    RegistryValueName,
+    RegistryValueData,
+    RegValueLength,
+    MatchType

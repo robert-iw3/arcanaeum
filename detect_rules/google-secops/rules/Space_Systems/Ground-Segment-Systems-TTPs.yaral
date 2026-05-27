@@ -1,0 +1,224 @@
+/*
+Rule 1 of 5: XSS/CSRF on Mission Control Software
+Description: This rule searches web traffic for indicators of Cross-Site Scripting (XSS) or Cross-Site Request Forgery (CSRF) attacks targeting known Mission Control Software (MCS) URL paths.
+*/
+rule xss_csrf_on_mcs {
+  meta:
+    author = "RW"
+    date = "2025-08-15"
+    description = "Detects potential XSS/CSRF attacks against Mission Control Software (MCS) web interfaces."
+    false_positive_sensitivity = "Medium"
+    references = "https://www.blackhat.com/us-25/briefings/schedule/#burning-trashing-spacecraft-crashing-a-collection-of-vulnerabilities-that-will-end-your-space-mission-41536"
+    tactic = "Initial Access"
+    technique = "T1190"
+
+  events:
+    $e.metadata.event_type = "NETWORK_HTTP"
+    // FP Tuning: Update the regex to match your specific MCS URL paths.
+    (
+      re.regex($e.target.url, `.*/yamcs/.*`) or
+      re.regex($e.target.url, `.*/openc3/.*`) or
+      re.endswith($e.target.url, "yamcs.html") or
+      re.endswith($e.target.url, "cosmos.html")
+    )
+    // FP Tuning: Refine the XSS patterns to reduce noise from legitimate but unusual URL parameters.
+    // This regex looks for common XSS payloads in the URL.
+    re.regex($e.target.url, `(?i)(<script|javascript:|onerror=|onload=|alert\(|<img>|<iframe>|document\.cookie|xss\.rocks|burpcollaborator)`)
+
+  outcome:
+    $risk_score = 65
+    $detection_name = "XSS/CSRF on MCS"
+    $description_out = "Potential XSS/CSRF attack targeting MCS. Payload found in URL."
+    $src_ip = $e.principal.ip
+    $dest_ip = $e.target.ip
+    $user_id = $e.principal.user.userid
+    $details = $e.target.url
+
+  condition:
+    $e
+}
+
+/*
+Rule 2 of 5: Anomalous MCS Commands or Data Transfer
+Description: This rule detects anomalous command frequency or large data transfers from operator workstations to the Mission Control Centre (MCC), which could indicate a compromised workstation.
+*/
+rule anomalous_mcs_commands_or_data_transfer {
+  meta:
+    author = "RW"
+    date = "2025-08-15"
+    description = "Detects anomalous command frequency or large data transfers from operator workstations to the MCC."
+    false_positive_sensitivity = "Medium"
+    references = "https://www.blackhat.com/us-25/briefings/schedule/#burning-trashing-spacecraft-crashing-a-collection-of-vulnerabilities-that-will-end-your-space-mission-41536"
+    tactic = "Exfiltration, Command and Control"
+    technique = "T1030, T1041"
+
+  events:
+    // FP Tuning: Define the IP ranges for your operator workstations and MCC servers.
+    $operator_ips = "10.1.1.0/24"
+    $mcc_ips = "10.2.2.5" or "10.2.2.6"
+
+    $e.metadata.event_type = "NETWORK_CONNECTION"
+    // Filter for traffic from operator workstations to the MCC.
+    strings.cidr_match($e.principal.ip, $operator_ips)
+    $e.target.ip = $mcc_ips
+    $total_bytes = $e.network.sent_bytes
+
+  match:
+    $src_ip, $dest_ip over 10m
+
+  outcome:
+    $risk_score = 50
+    $detection_name = "Anomalous MCS Commands or Data Transfer"
+    $description_out = "Anomalous command frequency or large data transfer observed from Operator Workstation to MCC."
+    // FP Tuning: Adjust thresholds based on established operational baselines.
+    $connection_threshold = 500
+    $bytes_threshold = 104857600 // 100MB
+
+    $total_bytes_sent = sum($total_bytes)
+    $connection_count = count(#e)
+    $details = "Connections in 10min: " + $connection_count + ", Bytes Sent: " + $total_bytes_sent
+
+  condition:
+    // Alert if either the connection count or data volume exceeds the defined threshold.
+    $connection_count > $connection_threshold or $total_bytes_sent > $bytes_threshold
+}
+
+/*
+Rule 3 of 5: Potential Rogue Ground Station Network Activity
+Description: This rule identifies network traffic between the ground station network and any unauthorized external IP address, which could indicate C2 activity or a rogue ground station.
+*/
+rule rogue_ground_station_activity {
+  meta:
+    author = "RW"
+    date = "2025-08-15"
+    description = "Detects unauthorized external IP communication with the Ground Station Network."
+    false_positive_sensitivity = "Medium"
+    references = "https://visionspace.com/nasa-cfs-version-aquila-software-vulnerability-assessment/"
+    tactic = "Command and Control"
+    technique = "T1090"
+
+  events:
+    // FP Tuning: Define your ground station network CIDR and create a reference list of all authorized external peers.
+    $ground_station_network = "192.168.50.0/24"
+    $authorized_peers = %authorized_ground_station_peers // Placeholder for reference list
+
+    $e.metadata.event_type = "NETWORK_CONNECTION"
+    // Identify traffic where one participant is the ground station network.
+    (strings.cidr_match($e.principal.ip, $ground_station_network) or strings.cidr_match($e.target.ip, $ground_station_network))
+
+    // Determine which IP is internal (ground station) and which is external.
+    $external_ip = if(strings.cidr_match($e.principal.ip, $ground_station_network), $e.target.ip, $e.principal.ip)
+
+    // Filter out traffic to authorized peers and private/internal networks.
+    not $external_ip in $authorized_peers
+    and not (
+      strings.cidr_match($external_ip, "10.0.0.0/8") or
+      strings.cidr_match($external_ip, "172.16.0.0/12") or
+      strings.cidr_match($external_ip, "192.168.0.0/16")
+    )
+
+  outcome:
+    $risk_score = 70
+    $detection_name = "Potential Rogue Ground Station Network Activity"
+    $description_out = "Unauthorized external IP communicating with the Ground Station Network."
+    $src_ip = $e.principal.ip
+    $dest_ip = $e.target.ip
+    $details = "Ground Station IP: " + if(strings.cidr_match($e.principal.ip, $ground_station_network), $e.principal.ip, $e.target.ip) + ", Unauthorized External IP: " + $external_ip
+
+  condition:
+    $e
+}
+
+/*
+Rule 4 of 5: Potential Memory Corruption Exploit
+Description: This rule looks for multiple application crashes of critical space mission software, which could indicate attempts to exploit memory corruption vulnerabilities.
+*/
+rule memory_corruption_on_mission_software {
+  meta:
+    author = "RW"
+    date = "2025-08-15"
+    description = "Detects multiple crashes of a critical space mission process, indicating potential memory corruption exploits."
+    false_positive_sensitivity = "Medium"
+    references = "https://visionspace.com/crashing-cryptolib/"
+    tactic = "Execution, Privilege Escalation"
+    technique = "T1068"
+
+  events:
+    // Filter for Windows Application Crash events (Event ID 1000).
+    $e.metadata.product_log_name = "Application"
+    $e.metadata.product_event_type = "1000"
+    $e.metadata.vendor_name = "Microsoft"
+    $e.metadata.product_name = "Windows"
+
+    // FP Tuning: Update this regex with the process names used in your environment.
+    re.regex($e.target.process.file.full_path, `(?i)(\\yamcs\.exe|\\openc3\.exe|\\fprime-gds\.exe|\\mission_control\.exe)$`)
+
+    $hostname = $e.principal.hostname
+    $process_name = $e.target.process.file.full_path
+
+  match:
+    $hostname, $process_name over 1h
+
+  outcome:
+    $risk_score = 75
+    $detection_name = "Potential Memory Corruption Exploit"
+    $description_out = "Multiple application crashes observed for a critical space mission process."
+    // FP Tuning: Adjust crash count threshold. Some applications may be unstable and crash occasionally.
+    $crash_threshold = 1
+    $crash_count = count(#e)
+    $details = "Crashed Process: " + $process_name + ", Crash Count: " + $crash_count
+    $dest_ip = any($e.principal.ip)
+    $process = $process_name
+
+  condition:
+    $crash_count > $crash_threshold
+}
+
+/*
+Rule 5 of 5: Anomalous C2 Command (Baseline Deviation)
+Description: This rule identifies new command patterns (port:bytes) from the MCC to a spacecraft endpoint that have not been seen in a historical baseline, potentially indicating spacecraft hijacking.
+*/
+rule anomalous_c2_command_baseline_deviation {
+  meta:
+    author = "RW"
+    date = "2025-08-15"
+    description = "Detects new command patterns from MCC to Spacecraft Endpoint not seen in a historical baseline."
+    false_positive_sensitivity = "Medium"
+    references = "https://securitybynature.fr/post/hacking-cryptolib/"
+    tactic = "Command and Control"
+    technique = "T1071"
+
+  events:
+    // FP Tuning: This rule requires a pre-populated reference list named 'historical_mcc_commands'.
+    // This list should contain known-good command patterns (e.g., "port:bytes_sent") and be
+    // updated periodically by a separate process or scheduled query.
+    $historical_commands = %historical_mcc_commands
+
+    // FP Tuning: Define the IP addresses for your MCC and spacecraft endpoints.
+    $mcc_ips = "10.2.2.5" or "10.2.2.6"
+    $spacecraft_ips = "10.99.1.1"
+
+    $e.metadata.event_type = "NETWORK_CONNECTION"
+    // Filter for traffic from the MCC to the Spacecraft Endpoint.
+    $e.principal.ip = $mcc_ips
+    $e.target.ip = $spacecraft_ips
+
+    // Create the command pattern string (port:bytes) for comparison.
+    $command_pattern = $e.target.port + ":" + $e.network.sent_bytes
+
+    // The core logic: check if the observed command pattern is NOT in the historical baseline.
+    not $command_pattern in $historical_commands
+
+  match:
+    $src_ip, $dest_ip over 1d
+
+  outcome:
+    $risk_score = 80
+    $detection_name = "Anomalous C2 Command (Baseline Deviation)"
+    $description_out = "New command pattern (Port:Bytes) observed from MCC to Spacecraft Endpoint not seen in the last 30 days."
+    $unique_anomalous_commands = array_distinct($command_pattern)
+    $details = "Anomalous Commands: " + strings.join($unique_anomalous_commands, ", ")
+
+  condition:
+    $e
+}

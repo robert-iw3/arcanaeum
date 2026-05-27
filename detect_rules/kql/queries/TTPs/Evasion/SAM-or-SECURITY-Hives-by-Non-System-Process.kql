@@ -1,0 +1,54 @@
+// Name: Suspicious Access to SAM or SECURITY Hives by Non-System Process
+// Author: RW
+// Date: 2025-08-24
+// Description: Detects when a process not running as SYSTEM accesses the SAM or SECURITY registry hives.
+// This behavior is suspicious and could indicate an attacker using techniques like "Silent Harvest" which
+// leverages SeBackupPrivilege to bypass normal ACLs for credential access from an administrator context.
+// MITRE ATT&CK: T1134.001, T1003.002
+// False Positive Sensitivity: Medium
+
+let sensitiveHives = dynamic([
+    "HKEY_LOCAL_MACHINE\\SAM\\",
+    "HKEY_LOCAL_MACHINE\\SECURITY\\"
+]);
+
+// FP Mitigation: Legitimate processes that may access these hives.
+// This list may require tuning for your environment.
+let legitimateProcesses = dynamic([
+    "lsass.exe",
+    "services.exe",
+    "svchost.exe",
+    "MsMpEng.exe",
+    "sense.exe",
+    "System"
+]);
+
+DeviceRegistryEvents
+// Look for registry operations on sensitive hives.
+| where RegistryKey has_any (sensitiveHives)
+// The technique described allows an Administrator to perform this action, not just SYSTEM.
+// We explicitly exclude the SYSTEM account to focus on this anomalous behavior.
+| where InitiatingProcessAccountSid != "S-1-5-18"
+// Exclude known legitimate processes.
+| where InitiatingProcessFileName !in (legitimateProcesses)
+// FP Mitigation: Backup software and other security tools are common sources of false positives as they often use SeBackupPrivilege.
+// Add process names or folder paths for legitimate tools used in your environment to this list.
+| where not(InitiatingProcessFolderPath has_any ("Veeam", "Veritas", "Commvault", "BackupExec", "Splunk")) // Example placeholder for tuning
+// Group events by the initiating process to create a single alert.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    ActionTypes = make_set(ActionType, 10),
+    AccessedKeys = make_set(RegistryKey, 10),
+    EventCount = count()
+    by DeviceId,
+       DeviceName,
+       InitiatingProcessId,
+       InitiatingProcessFileName,
+       InitiatingProcessFolderPath,
+       InitiatingProcessCommandLine,
+       InitiatingProcessAccountSid,
+       InitiatingProcessAccountName,
+       InitiatingProcessParentFileName
+// Filter for processes that access multiple keys, which is more indicative of dumping vs. a single accidental read.
+| where EventCount > 2

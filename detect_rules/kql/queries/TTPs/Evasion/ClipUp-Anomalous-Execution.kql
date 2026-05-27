@@ -1,0 +1,24 @@
+// Name: ClipUp.exe Anomalous Execution
+// Author: RW
+// Date: 2025-08-23
+// Description: Detects the execution of the legitimate Windows binary ClipUp.exe with command-line arguments that indicate it is being used to
+// write to sensitive system directories, such as the Windows Defender folder. This is a technique used to tamper with or disable security products.
+// False Positives: Unlikely, as ClipUp.exe's legitimate use for license migration does not typically involve writing to these protected directories.
+// MITRE ATT&CK: T1036.001
+
+DeviceProcessEvents
+// Detect the execution of ClipUp.exe, a legitimate Windows binary.
+| where FileName =~ "clipup.exe"
+// Ensure it's the legitimate binary from the System32 folder to avoid simple masquerading.
+| where FolderPath endswith @"\System32\"
+// The abuse technique uses the '-ppl' flag to specify an output log file path.
+| where ProcessCommandLine has "-ppl"
+// Look for command lines where the specified path is a sensitive system or security product directory.
+| where ProcessCommandLine has_any (
+        @"\ProgramData\Microsoft\Windows Defender\",
+        @"\Program Files\Windows Defender\",
+        @"\Program Files (x86)\Windows Defender\"
+    )
+    // The research also notes the use of short paths (e.g., PROGRA~1) to bypass path parsing issues.
+    or ProcessCommandLine matches regex @"-ppl\s+.*PROGRA~\d"
+| project-reorder TimeGenerated, DeviceName, FileName, FolderPath, ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessCommandLine

@@ -1,0 +1,54 @@
+//    Ping-Pong Amplification DoS Attack
+//    A high volume of symmetric traffic was observed, which is characteristic of this attack pattern where packets are looped
+//    between vulnerable tunneling hosts. This attack can cause a denial of service by consuming significant network and compute resources.
+//    Tactics = "Denial of Service"
+//    Techniques = "Network Denial of Service"
+//    Author = "RW"
+//    Date = "2025-08-14"
+
+let timeframe = 15m;
+// This threshold defines the minimum traffic volume in bytes for a single direction of a flow to be considered suspicious.
+// It's a critical tuning parameter. Start with a high value (e.g., 500MB) and adjust based on your environment's baseline traffic.
+let volume_threshold_bytes = 500000000;
+// This ratio ensures the traffic between two hosts is roughly symmetrical, a key indicator of the Ping-Pong attack.
+// A value of 0.7 means the smaller flow must be at least 70% of the larger flow.
+let symmetry_ratio_threshold = 0.7;
+// This query uses VMConnection data. If you use a different network logging solution (e.g., firewall logs),
+// you will need to adapt the query. Firewall logs may offer better visibility into tunneling protocols (IPIP, GRE).
+let all_flows = VMConnection
+| where TimeGenerated > ago(timeframe)
+// To simplify correlation, create unified Source, Destination, and Bytes fields regardless of the original direction.
+| extend Source = iif(Direction == "outbound", Computer, RemoteIp),
+         Destination = iif(Direction == "outbound", RemoteIp, Computer),
+         Bytes = iif(Direction == "outbound", BytesSent, BytesReceived)
+| where isnotempty(Source) and isnotempty(Destination)
+// The Ping-Pong attack often involves two hosts within the same network.
+// Filtering for private IP ranges helps focus on internal loops and reduces false positives from legitimate high-volume internet traffic.
+// Note: This might miss attacks involving one internal and one external vulnerable host.
+| where ipv4_is_private(Source) and ipv4_is_private(Destination)
+// Exclude self-talk.
+| where Source != Destination;
+// Summarize the total bytes transferred between each source and destination pair.
+let summarized_flows = all_flows
+| summarize TotalBytes = sum(Bytes) by Source, Destination, bin(TimeGenerated, timeframe);
+// Join the summarized flows with themselves to find pairs of hosts with high-volume, two-way communication.
+summarized_flows
+| as T1
+| join kind=inner (
+    summarized_flows
+    | as T2
+  ) on $left.Source == $right.Destination and $left.Destination == $right.Source
+// Ensure each pair is reported only once to avoid duplicate alerts.
+| where T1.Source < T1.Destination
+// Apply the volume threshold to both directions of the communication.
+| where T1.TotalBytes > volume_threshold_bytes and T2.TotalBytes > volume_threshold_bytes
+// Calculate the symmetry ratio and apply the threshold.
+| extend SymmetryRatio = todouble(min_of(T1.TotalBytes, T2.TotalBytes)) / max_of(T1.TotalBytes, T2.TotalBytes)
+| where SymmetryRatio >= symmetry_ratio_threshold
+| project
+    TimeGenerated,
+    Host1 = T1.Source,
+    Host2 = T1.Destination,
+    Host1_to_Host2_Bytes = T1.TotalBytes,
+    Host2_to_Host1_Bytes = T2.TotalBytes,
+    SymmetryRatio

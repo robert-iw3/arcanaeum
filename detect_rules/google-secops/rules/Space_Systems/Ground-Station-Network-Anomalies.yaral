@@ -1,0 +1,61 @@
+rule ground_station_brute_force_with_success {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects a high number of failed login attempts followed by a successful login from the same source IP address to critical ground station infrastructure. This pattern is indicative of a brute-force or password spray attack used to gain initial access."
+    reference = "id-76c7b8b0b6d27f004dcbec4248f3eaded30e1641a5a37b59d97465c08c28876d"
+    tactic = "TA0006, TA0001"
+    technique = "T1110, T1078, T1190"
+    false_positives = "This may trigger on users who legitimately forget their password and make multiple attempts before succeeding. Tuning the failure count threshold and maintaining the 'ground_station_assets' and 'trusted_ip_ranges' reference lists is crucial."
+    severity = "MEDIUM"
+
+  events:
+    // Event for failed user logins
+    $failures.metadata.event_type = "USER_LOGIN"
+    $failures.security_result.action = "BLOCK"
+    $failures.principal.hostname = $hostname
+    $failures.principal.ip = $ip
+    $failures.principal.user.userid = $user
+
+    // Event for a subsequent successful login from the same source
+    $success.metadata.event_type = "USER_LOGIN"
+    $success.security_result.action = "ALLOW"
+    $success.principal.hostname = $hostname
+    $success.principal.ip = $ip
+    $success.principal.user.userid = $user
+
+    // Filter for events targeting critical ground station assets.
+    // The reference list '%ground_station_assets' should be populated with the hostnames of VPN servers, management consoles, etc.
+    $hostname in %ground_station_assets
+
+    // Exclude logins from known trusted IP ranges to reduce noise.
+    // The reference list '%trusted_ip_ranges' should be populated with your corporate and VPN IP ranges.
+    not net.ip_in_range_cidr($ip, %trusted_ip_ranges)
+
+  match:
+    // Correlate failures and successes by source IP, user, and target host over a 30-minute window.
+    $ip, $user, $hostname over 30m
+
+  outcome:
+    // Set a risk score for the detection.
+    $risk_score = 45
+
+    // Consolidate key fields for the alert.
+    $principal_ip = array_distinct($ip)
+    $principal_user_userid = array_distinct($user)
+    $target_hostname = array_distinct($hostname)
+
+    // Count the number of failed and successful attempts.
+    $failed_login_count = count_distinct($failures.metadata.id)
+    $successful_login_count = count_distinct($success.metadata.id)
+    $event_count = $failed_login_count + $successful_login_count
+
+    // Capture the time window of the activity.
+    $first_failure_time = min($failures.metadata.event_timestamp)
+    $last_success_time = max($success.metadata.event_timestamp)
+
+  condition:
+    // The condition for the alert to trigger: more than 10 failures and at least one success.
+    // The failure count threshold can be adjusted based on environmental norms.
+    #failures > 10 and #success >= 1
+}

@@ -1,0 +1,51 @@
+// Name: Curly COMrades Proxy Tool Usage
+// Author: RW
+// Date: 2025-08-13
+// Description: Detects the use of proxy tools like resocks, ssh.exe, and stunnel.exe, often masquerading as legitimate
+//              software or running from unusual locations, a TTP of the Curly COMrades group.
+// False Positives: Medium. Legitimate use of ssh.exe or stunnel.exe is possible, but the combination of masqueraded names
+// and paths specified in this rule is highly suspicious. Review the process ancestry and network connections to confirm malicious activity.
+// MITRE ATT&CK: T1090, T1090.001, T1090.002, T1090.003, T1090.004
+
+(
+    // Detects resocks proxy tool execution from known actor paths
+    let resocksPaths = dynamic([
+        @"c:\programdata\drm.exe",
+        @"c:\programdata\microsoft\drm\server\drm.exe",
+        @"c:\programdata\oracle\java.oracle_jre_usage\java.exe",
+        @"c:\programdata\oracle\java\java.exe",
+        @"c:\programdata\rs.exe",
+        @"c:\programdata\vmware\vmware tools\vmtools.exe"
+    ]);
+    DeviceProcessEvents
+    | where strcat(FolderPath, '\\', FileName) in~ (resocksPaths)
+    // The tool is often run with a --key argument for the connection key
+    | where ProcessCommandLine has "--key"
+    | extend Tactic = "Command and Control", Technique = "T1090.002", Activity = "Resocks Proxy Tool Execution", SuspiciousEntity = FileName
+    | project-reorder TimeGenerated, DeviceName, Tactic, Technique, Activity, SuspiciousEntity, ProcessCommandLine, InitiatingProcessCommandLine
+)
+| union
+(
+    // Detects ssh.exe masquerading as other processes in unusual locations
+    DeviceProcessEvents
+    | where ProcessVersionInfoOriginalFileName =~ "ssh.exe"
+    | where
+        (FolderPath =~ @"C:\ProgramData\Microsoft\UEV\Templates\" and FileName =~ "Template.exe" and ProcessCommandLine has "-F") or
+        (FolderPath =~ @"C:\Program Files (x86)\Google\" and FileName =~ "chrome.exe" and ProcessCommandLine has_all ("Update", "-N"))
+    // FP Note: While specific, a legitimate but compromised tool could be named chrome.exe. Context is key.
+    | extend Tactic = "Command and Control", Technique = "T1090.001", Activity = "Masqueraded SSH Proxy Tool", SuspiciousEntity = FileName
+    | project-reorder TimeGenerated, DeviceName, Tactic, Technique, Activity, SuspiciousEntity, ProcessCommandLine, InitiatingProcessCommandLine
+)
+| union
+(
+    // Detects stunnel/tstunnel.exe masquerading as other processes
+    DeviceProcessEvents
+    | where ProcessVersionInfoOriginalFileName in~ ("stunnel.exe", "tstunnel.exe")
+    | where
+        (FolderPath =~ @"c:\programdata\samsung\printer\" and FileName =~ "printer.exe") or
+        (FolderPath =~ @"c:\programdata\microsoft\crypto\rsa\" and FileName =~ "certutils.exe")
+    // Stunnel is typically run with a configuration file
+    | where ProcessCommandLine has ".conf"
+    | extend Tactic = "Command and Control", Technique = "T1090", Activity = "Masqueraded Stunnel Proxy Tool", SuspiciousEntity = FileName
+    | project-reorder TimeGenerated, DeviceName, Tactic, Technique, Activity, SuspiciousEntity, ProcessCommandLine, InitiatingProcessCommandLine
+)

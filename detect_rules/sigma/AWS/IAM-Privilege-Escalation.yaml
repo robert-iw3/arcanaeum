@@ -1,0 +1,50 @@
+title: AWS IAM Privilege Escalation and Persistence Chain
+id: 5ed1c345-bd9d-4fc8-ad9f-5c878b4b11cb
+status: experimental
+description: |
+  Detects a chain of suspicious AWS API calls originating from the same IP address, indicative of an attacker moving from initial access to privilege escalation and persistence.
+  This sequence, as detailed in the reference, involves discovering users, creating or updating login profiles for console access, creating new users and keys, and attaching high-privilege policies.
+references:
+  - https://expel.com/blog/incident-report-from-cli-to-console-chasing-an-attacker-in-aws/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.privilege_escalation
+  - attack.persistence
+  - attack.discovery
+  - attack.t1078.004
+  - attack.t1098
+  - attack.t1087.004
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  # This rule correlates multiple events and should be implemented in a SIEM that can group events by a common field (sourceIPAddress) over a short time window (e.g., 1 hour).
+  discovery:
+    # Attacker enumerates users
+    eventName: 'ListUsers'
+    errorCode:
+  manipulation:
+    # Attacker creates or updates a password to gain console access
+    eventName:
+      - 'CreateLoginProfile'
+      - 'UpdateLoginProfile'
+    errorCode:
+  persistence_user:
+    # Attacker creates a new user for persistence
+    eventName: 'CreateUser'
+    errorCode:
+  persistence_key:
+    # Attacker creates a new access key for the user
+    eventName: 'CreateAccessKey'
+    errorCode:
+  privesc:
+    # Attacker attaches a high-privilege policy
+    eventName: 'AttachUserPolicy'
+    requestParameters.policyArn|endswith: '/AdministratorAccess' # Specific policy mentioned in the report
+    errorCode:
+  condition: all of them by sourceIPAddress
+falsepositives:
+  - Legitimate administrative activity, although this specific sequence is highly suspicious, especially the attachment of the AdministratorAccess policy.
+  - Infrastructure-as-code (IaC) tools like Terraform or CloudFormation might perform these actions, but typically use a specific user agent and role, which can be used for filtering.
+level: high

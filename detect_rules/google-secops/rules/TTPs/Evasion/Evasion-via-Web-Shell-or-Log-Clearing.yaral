@@ -1,0 +1,61 @@
+rule defense_evasion_web_shell_or_log_clearing {
+
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    tactic = "TA0005"
+    technique = "T1211, T1070.001"
+    false_positives = "Legitimate administrative scripts may clear logs, though this is uncommon. Legitimate web applications may also spawn shell processes for administrative or operational tasks. Exclude known administrative accounts and legitimate parent-child process relationships."
+
+  events:
+    $process.metadata.event_type = "PROCESS_LAUNCH"
+
+    (
+      // Pattern 1: Potential Web Shell (T1211) - A web server process spawning a shell.
+      $process.principal.process.file.name in (
+        "w3wp.exe", "httpd.exe", "nginx.exe", "tomcat.exe", "caddy.exe", "lighttpd.exe", "php-cgi.exe"
+      )
+      and
+      $process.target.process.file.name in (
+        "cmd.exe", "powershell.exe", "pwsh.exe", "sh.exe", "bash.exe", "cscript.exe", "wscript.exe"
+      )
+    )
+    or
+    (
+      // Pattern 2: Indicator Removal (T1070.001) - Clearing Windows Event Logs.
+      (
+        $process.target.process.file.name = "wevtutil.exe" and
+        re.regex($process.target.process.command_line, `(?i)\s(cl|clear-log)[\s$]`)
+      )
+      or
+      (
+        $process.target.process.file.name in ("powershell.exe", "pwsh.exe") and
+        re.regex($process.target.process.command_line, `(?i)Clear-EventLog`)
+      )
+    )
+
+    // False Positive Tuning: Exclude legitimate administrative activity.
+    // Example: $process.principal.user.userid not in ("admin_account1", "sys_maint")
+    // Example: not re.regex($process.target.process.command_line, "app_deployment.ps1")
+
+  outcome:
+    // Risk score can be adjusted based on environment sensitivity.
+    $risk_score = 40
+
+    // Distinguish between the two detection patterns for easier analysis.
+    $detection_pattern = if(
+        $process.principal.process.file.name in ("w3wp.exe", "httpd.exe", "nginx.exe", "tomcat.exe", "caddy.exe", "lighttpd.exe", "php-cgi.exe"),
+        "Potential Web Shell (T1211)",
+        "Indicator Removal - Log Clearing (T1070.001)"
+    )
+
+    // Key fields for investigation.
+    $principal_hostname = array_distinct($process.principal.hostname)
+    $principal_user = array_distinct($process.principal.user.userid)
+    $parent_process = array_distinct($process.principal.process.file.full_path)
+    $child_process = array_distinct($process.target.process.file.full_path)
+    $command_line = array_distinct($process.target.process.command_line)
+
+  condition:
+    $process
+}

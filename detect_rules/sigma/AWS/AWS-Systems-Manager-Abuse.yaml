@@ -1,0 +1,28 @@
+title: AWS Systems Manager Remote Execution
+id: 94e26ec0-6970-4e11-9459-6c20dde82550
+status: experimental
+description: >-
+  Detects the use of AWS Systems Manager (SSM) to remotely execute commands or start interactive sessions on EC2 instances. Attackers with sufficient IAM permissions can abuse 'SendCommand' or 'StartSession' to run malicious scripts or gain shell access for lateral movement and credential harvesting, often bypassing network-level controls like security groups.
+references:
+  - https://unit42.paloaltonetworks.com/cloud-lateral-movement-techniques/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.execution
+  - attack.lateral_movement
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    eventSource: 'ssm.amazonaws.com'
+    eventName:
+      - 'SendCommand' # API call to execute a script or command on managed instances
+      - 'StartSession' # API call to start an interactive shell session on a managed instance
+    errorCode:      # Filter for successful API calls
+  condition: selection
+falsepositives:
+  - This is a very common activity for legitimate system administration, automation, and remote management.
+  - It is highly recommended to baseline normal SSM usage and filter out trusted roles or user identities that are authorized to perform these actions.
+  - Correlate with other suspicious activity from the source user/role.
+level: medium

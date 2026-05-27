@@ -1,0 +1,58 @@
+// Name: Ground Station Network Anomalies - Brute Force
+// Author: RW
+// Date: 2025-08-15
+// Tactic: Credential Access, Initial Access
+// Technique: T1110, T1190
+// Description: This rule detects a potential brute-force or password spray attack against critical ground station infrastructure, such
+// as VPNs or management servers. It identifies a high number of failed logon attempts followed by a successful logon from the same
+// source IP address. This pattern is indicative of an attacker attempting to gain initial access by guessing credentials.
+// False Positive Sensitivity: Medium. This detection may trigger on users who legitimately forget their password and make multiple attempts
+// before succeeding. The 'failed_logon_threshold' can be tuned to reduce noise.
+//
+// Data sources: CommonSecurityLog (for VPN/Firewall logs), SigninLogs (for Azure AD), DeviceLogonEvents (for Windows)
+// Note: This query uses CommonSecurityLog as an example. You may need to adapt field names and success/failure indicators for your specific log sources.
+
+let timeframe = 30m;
+// Key parameter: Define the threshold for failed logon attempts to be considered a brute-force attempt.
+let failed_logon_threshold = 10;
+// Key parameter: Populate this list with the hostnames or IP addresses of your critical ground station assets (e.g., VPN concentrators, management servers).
+let ground_station_servers = dynamic([]); // e.g., dynamic(['vpn.contoso.com', 'ground-mgmt-srv-01']);
+// Key parameter: Add any trusted IP addresses to this list to prevent false positives from known sources like vulnerability scanners.
+let trusted_ips = dynamic([]);
+
+// Find successful logons to target systems
+let successful_logons =
+    CommonSecurityLog
+    | where TimeGenerated > ago(timeframe)
+    // The field for the target device name may vary (e.g., DeviceName, Computer, DestinationHostName).
+    | where DeviceName in (ground_station_servers) or isempty(ground_station_servers)
+    // The success indicator will vary by log source. Examples: "success", "logged in", "established".
+    | where Activity has_any ("success", "logged in", "established")
+    | where not(SourceIp in (trusted_ips))
+    | project SuccessTime = TimeGenerated, SourceIp, DestinationUserName, DeviceName;
+
+// Find multiple failed logons from a single source IP
+let failed_logons =
+    CommonSecurityLog
+    | where TimeGenerated > ago(timeframe)
+    | where DeviceName in (ground_station_servers) or isempty(ground_station_servers)
+    // The failure indicator will vary by log source. Examples: "fail", "denied", "failed logon".
+    | where Activity has_any ("fail", "denied")
+    | where not(SourceIp in (trusted_ips))
+    | summarize FailedLogonCount = count(), StartTime = min(TimeGenerated), EndTime = max(TimeGenerated) by SourceIp, DestinationUserName, DeviceName
+    | where FailedLogonCount > failed_logon_threshold;
+
+// Join failed logon attempts with a subsequent success from the same IP
+failed_logons
+| join kind=inner (
+    successful_logons
+) on SourceIp, DeviceName
+// Ensure the success happened during or shortly after the burst of failures.
+| where SuccessTime between (StartTime .. (EndTime + 5m))
+| project
+    StartTime,
+    SuccessTime,
+    SourceIp,
+    DestinationUserName,
+    DeviceName,
+    FailedLogonCount

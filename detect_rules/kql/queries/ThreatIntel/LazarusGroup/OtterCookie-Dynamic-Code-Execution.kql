@@ -1,0 +1,34 @@
+// Name: Lazarus Group OtterCookie Dynamic Code Execution
+// Author: RW
+// Date: 2025-07-31
+// Severity: Medium
+// Description: Detects the execution of common script interpreters with command-line arguments containing 'eval()'. This technique is used by the Lazarus Group's OtterCookie malware to dynamically execute malicious code received from a C2 server, helping to evade static analysis.
+// Tactic: Execution
+// Technique: T1059 - Command and Scripting Interpreter
+
+let script_interpreters = dynamic([
+    "node.exe",
+    "wscript.exe",
+    "cscript.exe"
+]); // Common script interpreters used to execute JavaScript-based malware.
+
+DeviceProcessEvents
+| where TimeGenerated > ago(1d)
+// Filter for process creation events involving the specified script interpreters.
+| where FileName in~ (script_interpreters)
+// The core detection logic looks for the 'eval(' function call within the process command line.
+| where ProcessCommandLine has "eval("
+// Potential for False Positives: Legitimate administrative or development scripts may use 'eval()'.
+// To reduce noise, consider excluding known-good parent processes or specific command lines associated with legitimate applications in your environment.
+// | where InitiatingProcessFileName !in ("<trusted_app.exe>") // Placeholder for tuning
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    FileName,
+    ProcessCommandLine,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessParentFileName,
+    ProcessId,
+    ParentProcessId

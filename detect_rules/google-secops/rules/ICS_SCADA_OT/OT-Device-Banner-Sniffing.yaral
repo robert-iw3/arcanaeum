@@ -1,0 +1,43 @@
+rule ot_protocol_scanning {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects a single source IP attempting to connect to multiple devices on common OT/ICS ports (Modbus, DNP3, EtherNet/IP) within a short timeframe. This behavior indicates reconnaissance or banner sniffing activity. The rule triggers when a source makes more than 5 connections to these ports within 5 minutes. This threshold is an approximation for scanning distinct hosts and may need tuning."
+    reference = "https://isc.sans.edu/diary/lt+appears+that+the+number+of+industrial+devices+accessible+from+the+internet+has+risen+by+30+thousand+over+the+past+three+years/30860"
+    tactic = "TA0043"
+    technique = "T1046"
+    tags = "OT, ICS, SCANNING, RECONNAISSANCE, MODBUS, DNP3, ETHERNET_IP"
+    false_positives = "Authorized vulnerability scanners, asset inventory tools, or centralized OT management consoles that perform discovery scans. These should be added to the exclusion list."
+
+  events:
+    // Match network connections to common OT protocol ports.
+    $conn.metadata.event_type = "NETWORK_CONNECTION"
+    $conn.target.port = 502 or $conn.target.port = 20000 or $conn.target.port = 44818
+
+    // Use the source IP as the key for grouping events.
+    $conn.principal.ip = $source_ip
+
+    // Exclude known legitimate scanners to reduce false positives.
+    // Consider using a reference list for easier management: not $source_ip in %known_ot_scanners
+    not net.ip_in_range_cidr($source_ip, [
+      "192.168.1.100" // Placeholder for an authorized vulnerability scanner
+    ])
+
+  match:
+    // Group events by the source IP over a 5 minute window.
+    $source_ip over 5m
+
+  outcome:
+    // Risk score is set to medium-high for active reconnaissance against sensitive OT assets.
+    $risk_score = 65
+    $principal_ip = $source_ip
+    $event_count = count_distinct($conn.metadata.id)
+    $distinct_target_count = count_distinct($conn.target.ip)
+    $target_ips = array_distinct($conn.target.ip)
+    $distinct_target_ports = array_distinct($conn.target.port)
+
+  condition:
+    // Trigger if more than 5 connections are made from the source.
+    // This is a strong indicator of scanning activity. The distinct target count is in the outcome section for analyst review.
+    #conn > 5
+}

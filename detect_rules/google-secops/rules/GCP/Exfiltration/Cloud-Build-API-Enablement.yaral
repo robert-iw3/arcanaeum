@@ -1,0 +1,38 @@
+rule gcp_cloud_build_api_enabled {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects when the Google Cloud Build API is enabled in a project. While this can be a legitimate action for setting up CI/CD pipelines, attackers can also enable this API as a preliminary step to export compute images or other data for exfiltration."
+    false_positives = "Legitimate enablement of the Cloud Build API by developers or administrators for CI/CD or other build-related tasks."
+    tags = "GCP, EXFILTRATION, CLOUD_BUILD"
+    tactic = "TA0010"
+    technique = "T1537"
+
+  events:
+    // Filter for GCP audit logs related to enabling a service.
+    $event.metadata.event_type = "GCP_CLOUDAUDIT_LOG"
+    $event.metadata.method_name = "google.api.serviceusage.v1.ServiceUsage.EnableService"
+
+    // Specifically look for the enablement of the Cloud Build API.
+    re.regex($event.resource.name, `/services/cloudbuild.googleapis.com$`)
+
+    // Capture the project ID where the API was enabled.
+    $project_id = re.capture($event.resource.name, `projects/([^/]+)/`)
+
+  outcome:
+    // A moderate risk score, as this can be a legitimate administrative action.
+    $risk_score = 35
+    // Actor and resource information.
+    $principal_ip = array_distinct($event.principal.ip)
+    $principal_user_userid = array_distinct($event.principal.user.userid)
+    $project_id = array_distinct($project_id)
+    $service_enabled = array_distinct($event.resource.name)
+
+  condition:
+    // The condition is met if the event is found.
+    $event
+    // To reduce false positives, consider excluding known DevOps service accounts or projects
+    // where this activity is expected. For example:
+    // and not $principal_user_userid in %gcp_devops_service_accounts
+    // and not $project_id in %gcp_ci_cd_projects
+}

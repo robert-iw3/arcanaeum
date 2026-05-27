@@ -1,0 +1,55 @@
+stages:
+  - generate
+  - upload
+
+crowdstrike_generate:
+  stage: generate
+  image: python:3.12
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "release"'
+      changes:
+        - crowdstrike/queries/*
+      when: always
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}-pip
+    paths:
+      - .cache/pip
+  variables:
+    PIP_CACHE_DIR: .cache/pip
+  script:
+    - set -e
+    - cd crowdstrike
+    - pip install crowdstrike-falconpy>=1.5.2 pyyaml>=6.0.1
+    - python pipeline.py --generate
+  artifacts:
+    paths:
+      - crowdstrike/import/
+    expire_in: 7 days
+    when: always
+
+crowdstrike_upload:
+  stage: upload
+  image: python:3.12
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "release"'
+      changes:
+        - crowdstrike/queries/*
+      when: always
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}-pip
+    paths:
+      - .cache/pip
+  variables:
+    PIP_CACHE_DIR: .cache/pip
+    FALCON_CLIENT_ID: $FALCON_CLIENT_ID
+    FALCON_CLIENT_SECRET: $FALCON_CLIENT_SECRET
+    RULEGROUP_ID: $RULEGROUP_ID
+  environment:
+    name: production
+  dependencies:
+    - crowdstrike_generate
+  script:
+    - set -e
+    - cd crowdstrike
+    - pip install crowdstrike-falconpy>=1.5.2 pyyaml>=6.0.1
+    - python pipeline.py --upload --rulegroup_id $RULEGROUP_ID

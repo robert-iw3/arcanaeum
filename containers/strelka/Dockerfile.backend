@@ -1,0 +1,12 @@
+FROM ghcr.io/target/strelka-backend:latest
+
+RUN apt-get update && apt-get install -y cron git yara && apt-get clean
+
+COPY update-yara.sh /app/update-yara.sh
+RUN chmod +x /app/update-yara.sh
+
+RUN echo "0 2 * * * /app/update-yara.sh >> /var/log/cron.log 2>&1" > /etc/cron.d/update-yara && \
+    chmod 0644 /etc/cron.d/update-yara && \
+    crontab /etc/cron.d/update-yara
+
+CMD ["sh", "-c", "cron && python3 /app/strelka.py"]

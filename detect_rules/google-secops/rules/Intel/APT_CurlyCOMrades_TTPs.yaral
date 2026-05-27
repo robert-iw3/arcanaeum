@@ -1,0 +1,86 @@
+rule CurlyCOMrades_Activity_Cluster
+{
+  meta:
+    description = "Detects a cluster of activities associated with the Curly COMrades threat actor. This includes credential dumping (NTDS.dit, LSASS), data exfiltration via cURL, use of proxy tools (resocks, ssh, stunnel), and a novel COM hijacking persistence technique involving NGEN tasks."
+    author = "RW"
+    date = "2025-08-16"
+    reference = "https://businessinsights.bitdefender.com/curly-comrades-new-threat-actor-targeting-geopolitical-hotbeds"
+    tags = "CURLY_COMRADES, CREDENTIAL_ACCESS, EXFILTRATION, COMMAND_AND_CONTROL, PERSISTENCE, WINDOWS"
+    tactic = "TA0003, TA0005, TA0007, TA0010, TA0011"
+    technique = "T1003.001, T1003.002, T1003.003, T1041, T1048, T1090, T1090.001, T1090.002, T1546.015"
+    false_positives = "Legitimate administrative or security tools might perform similar actions (e.g., procdump, ssh, stunnel). The rule is scoped to specific paths and command-line patterns observed in the report to reduce false positives. Review the full context of any alerts."
+
+  events:
+    // Event for Credential Dumping activities
+    $cred_dump.metadata.event_type = "PROCESS_LAUNCH"
+    $cred_dump.principal.hostname = $hostname
+    (
+      // NTDS.dit or SYSTEM hive extraction from Volume Shadow Copy
+      re.regex($cred_dump.target.process.command_line, `(?i)copy\s+/y\s+\\\\\\?\\GLOBALROOT\\Device\\HarddiskVolumeShadowCopy.*\Windows\\(NTDS\\NTDS\.dit|system32\\config\\system)\s+c:\\Users\\Public\\documents`) or
+
+      // LSASS memory dump using procdump from C:\ProgramData
+      (re.regex($cred_dump.target.process.file.full_path, `(?i)^c:\\programdata\\.*procdump.exe$`) and re.regex($cred_dump.target.process.command_line, `(?i)-ma\s+.*lsass`)) or
+
+      // LSASS memory dump using comsvcs.dll
+      (strings.ends_with(lower($cred_dump.target.process.file.full_path), "rundll32.exe") and re.regex($cred_dump.target.process.command_line, `(?i)comsvcs\.dll,\s*(MiniDump|#24)`) and strings.contains($cred_dump.target.process.command_line, "full")) or
+
+      // LSASS dump with custom tools from C:\ProgramData
+      re.regex($cred_dump.target.process.file.full_path, `(?i)^c:\\programdata\\(TB|TSB|TBD|Results)\.exe$`)
+    )
+
+    // Event for Data Exfiltration activity
+    $exfil.metadata.event_type = "PROCESS_LAUNCH"
+    $exfil.principal.hostname = $hostname
+    // Detects curl used for uploading files from common staging directories
+    strings.ends_with(lower($exfil.target.process.file.full_path), "curl.exe")
+    and re.regex($exfil.target.process.command_line, `(?i)(--upload-file|-T\s|(-X\s+POST)|-d\s+@)`)
+    and re.regex($exfil.principal.process.file.full_path, `(?i)^c:\\(programdata|users\\public\\documents)\\.*`)
+
+    // Event for Proxy Tool usage
+    $proxy.metadata.event_type = "PROCESS_LAUNCH"
+    $proxy.principal.hostname = $hostname
+    (
+      // Resocks proxy tool execution from known actor paths with --key argument
+      (re.regex($proxy.target.process.file.full_path, `(?i)^c:\\programdata\\(drm\.exe|microsoft\\drm\\server\\drm\.exe|oracle\\java.*\\java\.exe|rs\.exe|vmware\\vmware tools\\vmtools\.exe)$`) and strings.contains($proxy.target.process.command_line, "--key")) or
+
+      // Masqueraded ssh.exe for proxying
+      ($proxy.target.process.file.original_file_name = "ssh.exe" and (re.regex($proxy.target.process.file.full_path, `(?i)^C:\\ProgramData\\Microsoft\\UEV\\Templates\\Template\.exe$`) or re.regex($proxy.target.process.file.full_path, `(?i)^C:\\Program Files \(x86\)\\Google\\chrome\.exe$`))) or
+
+      // Masqueraded stunnel/tstunnel.exe for proxying
+      ($proxy.target.process.file.original_file_name in ("stunnel.exe", "tstunnel.exe") and (re.regex($proxy.target.process.file.full_path, `(?i)^c:\\programdata\\samsung\\printer\\printer\.exe$`) or re.regex($proxy.target.process.file.full_path, `(?i)^c:\\programdata\\microsoft\\crypto\\rsa\\certutils\.exe$`)))
+    )
+
+    // Event for COM Hijacking Persistence
+    $persistence.metadata.event_type = "REGISTRY_MODIFICATION"
+    $persistence.principal.hostname = $hostname
+    // Detects modification of specific NGEN Task CLSIDs
+    re.regex($persistence.target.registry.key.path, `(?i)SOFTWARE\\Classes\\CLSID\\{(de434264-8fe9-4c0b-a83b-89ebeebff78e|613fba38-a3df-4ab8-9674-5604984a299a)}\\InprocServer32`)
+    and $persistence.target.registry.value_name = "CodeBase"
+    and re.regex($persistence.target.registry.value_data, `(?i)^c:\\programdata\\.*`)
+
+  match:
+    $hostname over 24h
+
+  outcome:
+    // Risk score is calculated based on the variety of malicious activities observed.
+    $risk_score = 40
+    $risk_score = $risk_score + if(#cred_dump > 0, 25, 0)
+    $risk_score = $risk_score + if(#exfil > 0, 15, 0)
+    $risk_score = $risk_score + if(#proxy > 0, 15, 0)
+    $risk_score = $risk_score + if(#persistence > 0, 30, 0)
+
+    $principal_hostname = $hostname
+    $event_count = #cred_dump + #exfil + #proxy + #persistence
+
+    // Collect distinct indicators for each activity type to provide context in the alert.
+    $cred_dump_commands = array_distinct($cred_dump.target.process.command_line)
+    $exfil_commands = array_distinct($exfil.target.process.command_line)
+    $proxy_commands = array_distinct($proxy.target.process.command_line)
+    $persistence_reg_keys = array_distinct($persistence.target.registry.key.path)
+    $persistence_reg_values = array_distinct($persistence.target.registry.value_data)
+    $persistence_initiating_processes = array_distinct($persistence.principal.process.command_line)
+
+  condition:
+    // The rule will trigger if any of the defined malicious activities are detected.
+    1 of ($cred_dump, $exfil, $proxy, $persistence)
+}

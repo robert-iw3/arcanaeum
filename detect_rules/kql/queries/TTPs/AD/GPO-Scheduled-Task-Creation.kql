@@ -1,0 +1,65 @@
+// Rule Title: GPO Modified to Include Scheduled Task
+// Author: RW
+// Date: 2025-08-12
+//
+// References:
+// - https://www.synacktiv.com/publications/gpoddity-exploiting-active-directory-gpos-through-ntlm-relaying-and-more
+// - https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-gpac/13333232-d52a-46a3-959f-63311ad74197 (Scheduled Tasks CSE GUID)
+//
+// MITRE ATT&CK: T1053.005 - Scheduled Task/Job: Scheduled Task, T1484.001 - Group Policy Modification
+//
+// Description:
+// Detects when a Group Policy Object (GPO) is modified to include the Scheduled Tasks Client-Side Extension (CSE).
+// This indicates that a policy to create, modify, or delete a scheduled task is being configured within the GPO.
+// While this is a legitimate administrative action, attackers can abuse it to deploy malicious scheduled tasks for persistence or execution.
+// This alert serves as an early warning to investigate the content of the GPO change.
+//
+// False Positives:
+// Legitimate administrative activity where a new GPO is created to manage scheduled tasks, or an existing GPO is modified to do so for the first time.
+// It is crucial to tune the 'known_gpo_admins' list to exclude routine administrative accounts.
+//
+// Triage Steps:
+// 1. Identify the user who made the change ('SubjectUserName'). Is this an authorized administrator?
+// 2. Identify the GPO that was modified ('ObjectDN'). What is its purpose and what systems does it apply to?
+// 3. Manually inspect the GPO's corresponding files on the SYSVOL share (e.g., \\<domain>\SYSVOL\<domain>\Policies\<GPO_GUID>\Machine\Preferences\ScheduledTasks\ScheduledTasks.xml).
+// 4. Look for the specific task being configured. Analyze its command line, arguments, and execution context for suspicious activity (e.g., running PowerShell from a non-standard location, obfuscated commands, etc.).
+// 5. Correlate this change with any file modification events on the SYSVOL share for the specific GPO.
+
+let timeframe = 1d;
+// Define a list of legitimate administrator accounts that perform GPO changes.
+// This list should be customized for your environment to reduce potential false positives.
+let known_gpo_admins = dynamic([
+    "Administrator",
+    "SYSTEM"
+    // Example: "CONTOSO\\gpo_admin_user", "gpo_service_account"
+]);
+// GUID for the Scheduled Tasks Client-Side Extension
+let ScheduledTaskCSE_GUID = "{A2E30F80-D7DE-411d-99C3-236F796636B8}";
+SecurityEvent
+| where TimeGenerated > ago(timeframe)
+// Event ID 5136 indicates a directory service object was modified.
+| where EventID == 5136
+// Focus on GPO objects.
+| where ObjectClass == "groupPolicyContainer"
+// Focus on the attributes that list the enabled Client-Side Extensions.
+| where AttributeLDAPDisplayName in ("gPCMachineExtensionNames", "gPCUserExtensionNames")
+// Check if the new attribute value contains the GUID for the Scheduled Tasks CSE.
+| where AttributeValue has ScheduledTaskCSE_GUID
+| extend OldAttributeValue = tostring(parse_xml(EventData).EventData.Data[1]['#text'])
+// Alert only when the Scheduled Tasks CSE is newly added, which is a more significant change.
+| where not(OldAttributeValue has ScheduledTaskCSE_GUID)
+| extend SubjectUserName = tostring(SubjectUserName)
+// Exclude changes made by computer accounts (ending in '$') and known administrators.
+| where not(SubjectUserName endswith "$" or SubjectUserName in (known_gpo_admins))
+| project
+    TimeGenerated,
+    Computer,
+    SubjectUserName,
+    ObjectDN,
+    AttributeLDAPDisplayName,
+    AttributeValue,
+    OldAttributeValue
+| extend
+    timestamp = TimeGenerated,
+    AccountCustomEntity = SubjectUserName,
+    HostCustomEntity = Computer

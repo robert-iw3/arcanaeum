@@ -1,0 +1,38 @@
+// Name: Process Injection into RegAsm.exe
+// Author: RW
+// Date: 2025-08-12
+// MITRE ATT&CK: T1055
+// Description: Detects process injection activity targeting the legitimate .NET Assembly Registration Tool (RegAsm.exe).
+//              This technique is used by infostealers like Nova to evade defenses by running malicious code within the
+//              address space of a trusted Microsoft utility.
+// False Positive Sensitivity: Medium. Legitimate applications, particularly security software or system management tools,
+// may perform process injection. Tuning may be required by excluding trusted parent processes or signers specific to your environment.
+
+DeviceEvents
+// Look for CreateRemoteThread events, a common indicator of process injection
+| where ActionType == "CreateRemoteThread"
+// The target of the injection is RegAsm.exe
+| where TargetProcessFileName =~ "regasm.exe"
+// Exclude injections from legitimate Microsoft processes to reduce noise.
+// This list may need to be expanded based on your environment.
+| where InitiatingProcessFolderPath !startswith @"C:\Windows\System32\"
+// Further reduce false positives by focusing on suspicious initiators
+| where
+    // The injecting process is running from a common temporary or user-writable location
+    InitiatingProcessFolderPath has_any (@"C:\Users\", @"C:\Temp\", @"C:\Windows\Temp\", @"C:\ProgramData\")
+    // Or the injecting process is not signed by a trusted authority
+    or InitiatingProcessSignerType != "Signed"
+// Exclude self-injection, which is typically not malicious
+| where InitiatingProcessId != TargetProcessId
+| project
+    TimeGenerated,
+    DeviceName,
+    ActionType,
+    InjectingProcess = InitiatingProcessFileName,
+    InjectingProcessCommandLine = InitiatingProcessCommandLine,
+    InjectingProcessFolderPath = InitiatingProcessFolderPath,
+    InjectingProcessSigner = InitiatingProcessSignerInfo,
+    TargetProcess = TargetProcessFileName,
+    TargetProcessCommandLine = TargetProcessCommandLine,
+    AccountName = InitiatingProcessAccountName,
+    AccountDomain = InitiatingProcessAccountDomain

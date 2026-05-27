@@ -1,0 +1,37 @@
+rule linux_cron_job_persistence {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects the creation or modification of a cron job to establish persistence. This technique involves adding entries to cron files or using the crontab utility to schedule the execution of malicious commands, such as reverse shells."
+    tactic = "TA0003"
+    technique = "T1053.003"
+    false_positives = "Legitimate administrative scripts may modify cron jobs. However, the combination of cron modification and suspicious command patterns (like reverse shells) is a strong indicator of malicious activity. Tuning might be needed to exclude known administrative tools or scripts."
+
+  events:
+    // Catches process launch events on Linux systems.
+    $process.metadata.event_type = "PROCESS_LAUNCH"
+    $process.metadata.product_name = "Linux"
+
+    // The command line either uses the 'crontab' utility or writes directly to a cron file/directory.
+    // This is a key indicator of cron job modification.
+    (
+      re.regex($process.target.process.command_line, `crontab`) or
+      re.regex($process.target.process.command_line, `(\/etc\/crontab|\/etc\/cron\.d\/|\/var\/spool\/cron)`)
+    )
+
+    // The command line also includes patterns commonly used for reverse shells or other malicious callbacks.
+    re.regex($process.target.process.command_line, `(\/dev\/(tcp|udp)\/|nc\s|netcat\s|ncat\s|bash\s+-i)`)
+
+  outcome:
+    // A high risk score is assigned due to the strong indication of a malicious persistence mechanism.
+    $risk_score = 75
+    $principal_hostname = $process.principal.hostname
+    $principal_user = $process.principal.user.userid
+    $target_process_command_line = $process.target.process.command_line
+    $target_process_pid = $process.target.process.pid
+    $parent_process_command_line = $process.principal.process.command_line
+    $parent_process_pid = $process.principal.process.pid
+
+  condition:
+    $process
+}

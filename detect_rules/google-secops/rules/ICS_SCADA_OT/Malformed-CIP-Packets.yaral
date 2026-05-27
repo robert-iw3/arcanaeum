@@ -1,0 +1,32 @@
+rule malformed_cip_packet_detected {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects malformed Common Industrial Protocol (CIP) packets that do not conform to protocol specifications. Attackers may send such packets to probe for vulnerabilities, trigger a denial-of-service, or attempt to exploit memory corruption bugs in the target device's protocol stack. This rule relies on a network sensor (e.g., Zeek, Suricata) that can parse CIP and flag protocol violations."
+    reference = "https://github.com/ICSVillage"
+    tags = "ICS, CIP, FUZZING, DENIAL_OF_SERVICE"
+    tactic = "TA0040, TA0043"
+    technique = "T1499.002"
+    false_positives = "Bugs or limitations in the network sensor's CIP parser. Non-compliant but benign third-party devices. Proprietary vendor extensions to the CIP protocol that are not understood by the parser."
+
+  events:
+    // This rule requires logs from a network sensor capable of deep packet inspection for CIP.
+    $e.metadata.event_type = "NETWORK_CONNECTION"
+    $e.target.port = 44818 // Standard port for EtherNet/IP explicit messaging.
+
+    // Detects events where the CIP parser has identified a protocol violation.
+    // Note: The UDM field path and error strings are examples and may need to be adjusted based on the specific log source and parser implementation.
+    re.regex($e.network.application_protocol_details.cip.error_message, `malformed|invalid length|protocol violation|unexpected data|invalid object path`) nocase
+
+  outcome:
+    // A risk score of 70 indicates a high-severity event, as it could be a precursor to exploitation or a DoS attack.
+    $risk_score = 70
+    $principal_ip = array_distinct($e.principal.ip)
+    $target_ip = array_distinct($e.target.ip)
+    $target_port = array_distinct($e.target.port)
+    $error_message = array_distinct($e.network.application_protocol_details.cip.error_message)
+    $event_count = count_distinct($e.metadata.id)
+
+  condition:
+    $e
+}

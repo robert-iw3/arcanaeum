@@ -1,0 +1,50 @@
+// Name: Potential SEO Poisoning or Malvertising Click
+// Description: Detects when a user navigates from a common search engine or social media platform to a URL that appears
+// to be a direct download link for a potentially malicious file type (e.g., .exe, .zip, .iso).
+// This pattern is indicative of SEO poisoning or malvertising campaigns used to distribute malware.
+// Author: RW
+// Date: 2025-08-18
+// MITRE TTPs: T1566.001, T1566.002
+
+// Define search engines and social media platforms that could be abused.
+let ReferrerDomains = dynamic([
+    "google.com", "bing.com", "yahoo.com", "duckduckgo.com", "yandex.ru",
+    "youtube.com", "tiktok.com", "instagram.com", "facebook.com", "twitter.com", "t.co", "linkedin.com"
+]);
+
+// Define suspicious file extensions often used for malware delivery.
+let SuspiciousExtensions = dynamic([
+    ".exe", ".dll", ".msi", ".bat", ".cmd", ".ps1", ".vbs", ".iso", ".img", ".zip", ".rar", ".7z"
+]);
+
+DeviceNetworkEvents
+| where TimeGenerated > ago(1h)
+| where isnotempty(ReferrerUrl) and isnotempty(RemoteUrl)
+// Check if the referrer is a known search engine or social media site.
+| where parse_url(ReferrerUrl).Host has_any (ReferrerDomains)
+// Check if the destination URL contains a suspicious file extension.
+| where RemoteUrl has_any (SuspiciousExtensions)
+// FP Filtering: Exclude known safe download sources. This list should be customized for your environment.
+| where not(parse_url(RemoteUrl).Host has_any ("windowsupdate.microsoft.com", "download.microsoft.com", "dl.google.com", "adobe.com", "ninite.com"))
+// Further FP reduction: Ensure the referrer is different from the destination host to avoid self-referrals.
+| where parse_url(ReferrerUrl).Host != parse_url(RemoteUrl).Host
+// Summarize to reduce noise from the same user/process/URL combination.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    EventCount = count()
+    by
+    DeviceName,
+    InitiatingProcessFileName,
+    ActorUsername = InitiatingProcessAccountUpn,
+    RemoteUrl,
+    ReferrerUrl
+| project
+    StartTime,
+    EndTime,
+    DeviceName,
+    ActorUsername,
+    InitiatingProcessFileName,
+    RemoteUrl,
+    ReferrerUrl,
+    EventCount

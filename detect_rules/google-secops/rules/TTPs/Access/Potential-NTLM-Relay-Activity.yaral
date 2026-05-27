@@ -1,0 +1,55 @@
+rule potential_ntlm_relay_activity {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects a potential NTLM relay attack where a single source IP address is observed successfully authenticating to multiple targets using a variety of different machine accounts. This pattern is indicative of a tool like ntlmrelayx being used to relay coerced authentications."
+    tactic = "TA0006"
+    technique = "T1557.001"
+    false_positives = "Legitimate administrative servers, vulnerability scanners, or software deployment systems that authenticate to multiple hosts as part of their normal function. These systems should be added to an exclusion list."
+
+  events:
+    // Filter for successful NTLM network logons (Windows Event ID 4624)
+    $login.metadata.event_type = "USER_LOGIN"
+    $login.metadata.product_event_type = "4624"
+    $login.security_result.action = "ALLOW"
+    $login.network.auth_protocol = "NTLM"
+    $login.security_result.network.logon_type = "NETWORK"
+
+    // Focus on machine accounts, which are the primary target of coercion attacks leading to relay.
+    re.regex($login.principal.user.userid, `\$$`)
+
+    // The source of the login is the potential attacker's machine.
+    $attacker_ip = $login.principal.ip
+    $victim_account = $login.principal.user.userid
+
+    // In a relay, the source machine name (victim) should not be the same as the target machine.
+    $login.principal.hostname != $login.target.hostname
+
+    // Exclude local and known-benign source IPs.
+    // Consider creating a reference list for known admin servers, scanners, etc.
+    not net.ip_in_range_cidr($attacker_ip, "127.0.0.0/8")
+    not net.ip_in_range_cidr($attacker_ip, "::1/128")
+
+  match:
+    // Group events by the potential attacker's IP over a 1-hour window.
+    $attacker_ip over 1h
+
+  outcome:
+    // A single source IP authenticating on behalf of multiple distinct machine accounts is highly suspicious.
+    $victim_account_count = count_distinct($victim_account)
+    $risk_score = if($victim_account_count > 5, 70, 50)
+
+    // Consolidate data for investigation.
+    $principal_ip = array_distinct($attacker_ip)
+    $victim_accounts = array_distinct($victim_account)
+    $victim_hostnames = array_distinct($login.principal.hostname)
+    $target_hostnames = array_distinct($login.target.hostname)
+    $event_count = count($login.metadata.id)
+    $start_time = min($login.metadata.event_timestamp)
+    $end_time = max($login.metadata.event_timestamp)
+
+  condition:
+    // The threshold for the number of distinct machine accounts a single source IP authenticates with.
+    // This value may need tuning for your environment.
+    $victim_account_count > 3
+}

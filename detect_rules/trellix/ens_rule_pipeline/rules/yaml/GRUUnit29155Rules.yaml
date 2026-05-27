@@ -1,0 +1,70 @@
+- type: expert
+  name: Detect WhisperGate PowerShell Execution (Encoded Sleep)
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "powershell.exe" -v "pwsh.exe" }
+       }
+       Target {
+          Match PROCESS {
+             Include OBJECT_NAME { -v "**" }
+             Include -access "CREATE"
+             Include -command_line "*-enc UwB0AGEAcgB0AC0AUwBsAGUAZQBwACAALQBzACAAMQAwAA==*"
+          }
+       }
+    }
+  action: Report
+  severity: Critical
+  enabled: true
+  description: "Detects PowerShell with Base64-encoded 'Start-Sleep -s 10' command — direct, high-fidelity IOC from WhisperGate stage 2 (2022 destructive wiper attributed to Russian actors). Extremely specific; very low false positives unless legitimate scripts use identical encoding. Tune minimally."
+- type: expert
+  name: Detect Windows Defender Exclusion Modification (WhisperGate)
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "powershell.exe" -v "pwsh.exe" }
+       }
+       Target {
+          Match PROCESS {
+             Include OBJECT_NAME { -v "**" }
+             Include -access "CREATE"
+             Include -command_line "*Set-MpPreference*ExclusionPath*"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects PowerShell adding exclusions to Windows Defender — evasion TTP from WhisperGate and similar GRU wipers. Tune for legitimate admin scripts."
+- type: firewall
+  name: Detect Outbound Connections to GRU C2 Domains (Unit 29155)
+  application: "**"
+  direction: out
+  protocol: "TCP"
+  port: "80,443,53"
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects outbound HTTP/HTTPS (80/443) and DNS (53) traffic to known GRU C2 infrastructure (e.g., interlinks.top, historical C2 for GhostSpider/Demodex). Used in 2024-2025 CISA advisories (AA24-249A). Domain/IP filtering not native; use Web Control for precision. Tune for legitimate traffic."
+- type: firewall
+  name: Detect Ngrok and Proxy Connections (Jump Host Tooling)
+  application: "**"
+  direction: out
+  protocol: TCP
+  port: "80,443"
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects connections to ngrok.com or 3proxy.ru — common for attacker jump hosts/C2 in 2025 campaigns. Can be noisy with legitimate services; tune exclusions or use Web Control for domain blocking."
+- type: firewall
+  name: Detect Iodine DNS Tunneling
+  application: "**"
+  direction: out
+  protocol: UDP
+  port: "53"
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects DNS traffic potentially for Iodine tunneling (e.g., suspicious subdomains like dns.test*.domain.me). Used in advanced persistence/lateral movement. Specific domain filtering not supported; enrich with external DNS logs or threat intel feeds for suspicious domains (e.g., ProtonM..."

@@ -1,0 +1,83 @@
+{
+  "name": "Suspicious SQL Server Activity",
+  "queries": [
+    {
+      "name": "high_risk_sql_procedure_enabled",
+      "query": "@winlog.event_id:15457 AND @winlog.event_data.Data1:(\"xp_cmdshell\" OR \"Ole Automation Procedures\") AND @winlog.event_data.Data2:1",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "sql_clr_enabled",
+      "query": "@winlog.event_id:15457 AND @winlog.event_data.Data1:\"clr enabled\" AND @winlog.event_data.Data2:1",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "sql_clr_strict_security_disabled",
+      "query": "@winlog.event_id:15457 AND @winlog.event_data.Data1:\"clr strict security\" AND @winlog.event_data.Data2:0",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "suspicious_sql_startup_procedure",
+      "query": "@winlog.event_id:17135 AND @winlog.event_data.Data1:(*xp_* OR *sp_* OR *cmdshell* OR *shell* OR *exec*)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "sql_server_spawning_shell",
+      "query": "@process.parent.name:\"sqlservr.exe\" AND @process.name:(cmd.exe OR powershell.exe)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "suspicious_sqlcmd_exe_usage",
+      "query": "@process.name:\"sqlcmd.exe\" AND @process.cmdline:(*xp_cmdshell* OR *sp_oacreate* OR *sp_add_trusted_assembly* OR *sp_configure* OR *OPENROWSET* OR \"*-o *\" OR *--outputfile* OR \"*http://*\" OR \"*-t 0*\" OR *--query_timeout=0*)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "potential_sql_clr_assembly_loaded",
+      "query": "@file.name:*.dll AND @file.path:*\\\\Microsoft\\\\ SQL\\\\ Server\\\\*\\\\MSSQL\\\\Binn\\\\*",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "suspicious_invoke_sqlcmd_usage",
+      "query": "@winlog.event_id:4104 AND @winlog.event_data.ScriptBlockText:*Invoke-Sqlcmd* AND (@winlog.event_data.ScriptBlockText:*xp_cmdshell* OR @winlog.event_data.ScriptBlockText:*sp_oacreate* OR @winlog.event_data.ScriptBlockText:*sp_add_trusted_assembly* OR @winlog.event_data.ScriptBlockText:*sp_configure* OR @winlog.event_data.ScriptBlockText:*OPENROWSET* OR @winlog.event_data.ScriptBlockText:\"*-QueryTimeout 0*\")",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    }
+  ],
+  "cases": [
+    {
+      "name": "Suspicious SQL Server Activity",
+      "status": "high",
+      "condition": "event_count_0 >= 1 OR event_count_1 >= 1 OR event_count_2 >= 1 OR event_count_3 >= 1 OR event_count_4 >= 1 OR event_count_5 >= 1 OR event_count_6 >= 1 OR event_count_7 >= 1"
+    }
+  ],
+  "options": {
+    "evaluation_window": 3600,
+    "keep_alive": 3600,
+    "max_signal_duration": 3600,
+    "correlation_based_signal": {
+      "correlation_inputs": [
+        {
+          "rule_id": "suspicious_sql_server_correlation"
+        }
+      ],
+      "correlated_by_fields": [
+        "@host",
+        "@usr"
+      ],
+      "distinct_fields": [
+        "case_id"
+      ]
+    }
+  },
+  "message": "Suspicious SQL Activity: {{distinct_count}} type(s) on host {{host}} by user {{usr}}: {{case_names}}",
+  "type": "correlation_based_signal",
+  "tags": [],
+  "is_enabled": true
+}

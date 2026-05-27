@@ -1,0 +1,56 @@
+{
+  "data": {
+    "type": "signal_correlation",
+    "attributes": {
+      "name": "ECScape Privilege Escalation in Amazon ECS Detection",
+      "enabled": true,
+      "cases": [
+        {
+          "name": "Unauthorized IMDS Credential Access",
+          "status": "high",
+          "query": "source:endpoint @process.command_line:*169.254.169.254/latest/meta-data/iam/security-credentials* -@process.name:ecs-agent | where @container_id IS NOT NULL OR @process.name != dockerd | eval firstTime=min(@timestamp), lastTime=max(@timestamp) | format_time(firstTime, '%Y-%m-%d %H:%M:%S'), format_time(lastTime, '%Y-%m-%d %H:%M:%S') | fill_null(@container_id, 'N/A')"
+        },
+        {
+          "name": "Unusual ECS API Calls",
+          "status": "high",
+          "query": "source:cloudtrail @eventName:(DiscoverPollEndpoint OR Poll) -@userAgent:*amazon-ecs-agent* | eval firstTime=min(@timestamp), lastTime=max(@timestamp) | rename @userIdentity.arn AS principal_arn, @sourceIPAddress AS src_ip | format_time(firstTime, '%Y-%m-%d %H:%M:%S'), format_time(lastTime, '%Y-%m-%d %H:%M:%S')"
+        },
+        {
+          "name": "Suspicious AWS API Calls",
+          "status": "high",
+          "query": "source:cloudtrail @invokedBy:ecs-tasks.amazonaws.com @eventName:(AssumeRole OR CreatePolicy OR AttachRolePolicy OR PutRolePolicy OR CreateUser OR CreateAccessKey OR UpdateAssumeRolePolicy OR RegisterContainerInstance OR DeregisterContainerInstance OR CreateSecret OR PutSecretValue OR CreateFunction OR RunInstances) | eval firstTime=min(@timestamp), lastTime=max(@timestamp), assumed_role_arn=values(@requestParameters.roleArn), policy_arn=values(@requestParameters.policyArn) | rename @userIdentity.arn AS task_role_arn, @sourceIPAddress AS src_ip | format_time(firstTime, '%Y-%m-%d %H:%M:%S'), format_time(lastTime, '%Y-%m-%d %H:%M:%S')"
+        },
+        {
+          "name": "Abnormal Container Credential Access",
+          "status": "high",
+          "query": "source:network @network.destination.ip:169.254.170.2 | eval firstTime=min(@timestamp), lastTime=max(@timestamp) | rename @network.source.host AS src_host, @process.name AS process | format_time(firstTime, '%Y-%m-%d %H:%M:%S'), format_time(lastTime, '%Y-%m-%d %H:%M:%S') | fill_null(@container_id, 'N/A')"
+        },
+        {
+          "name": "Compromised ECS Agent Behavior",
+          "status": "high",
+          "query": "source:cloudtrail @eventName:RegisterContainerInstance | bucket(@timestamp, 1d) AS _time | groupby _time, @sourceIPAddress, @userIdentity.arn, @awsRegion | eval count=count(), distinct_user_agents=distinct_count(@userAgent), user_agents=values(@userAgent), cluster=values(@requestParameters.cluster) | where count > 1 | rename @sourceIPAddress AS src_ip, @userIdentity.arn AS principal_arn | format_time(_time, '%Y-%m-%d')"
+        }
+      ],
+      "group_by_fields": ["@host", "@sourceIPAddress", "@userIdentity.arn"],
+      "distinct_fields": ["case_id"],
+      "correlation": {
+        "expression": "distinct_count >= 2",
+        "timeframe": "1h"
+      },
+      "message": "ECScape Privilege Escalation Detection: {distinct_count} distinct TTPs detected on host {@host}, source IP {@sourceIPAddress}, or principal {@userIdentity.arn}. Techniques: {case_names}. Details: {@eventName OR @process.command_line OR @process.name OR @network.destination.ip OR @requestParameters.roleArn OR @requestParameters.cluster}. Timeframe: {first_activity} to {last_activity}",
+      "severity": "high",
+      "tags": [
+        "security:attack",
+        "tactic:TA0004",
+        "tactic:TA0006",
+        "technique:T1548",
+        "technique:T1552.004",
+        "environment:aws",
+        "service:ecs"
+      ],
+      "options": {
+        "evaluation_window": "1h"
+      }
+    }
+  }
+}

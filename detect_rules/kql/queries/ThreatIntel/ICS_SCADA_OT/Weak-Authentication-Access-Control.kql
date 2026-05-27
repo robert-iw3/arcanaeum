@@ -1,0 +1,75 @@
+// Name: Weak Authentication or Access to ICS/OT Systems
+// Description: Detects attempts to bypass or exploit weak authentication and access controls in ICS/OT systems.
+// This includes brute-force login attempts and connections to sensitive OT remote services from unauthorized sources.
+// Author: RW
+// Date: 2025-08-17
+//
+// MITRE ATT&CK for ICS Information:
+// Tactic: Initial Access (TA0108)
+// Technique: Brute Force (T0806), Exploitation of Remote Services (T0866)
+//
+// False Positive Sensitivity: Medium
+//
+// Comments:
+// This rule requires authentication logs from OT devices (e.g., via an OT security platform) and network flow logs (e.g., CommonSecurityLog, VMConnection) that have visibility into the OT network.
+// False positives can occur from misconfigured applications, network scanners, or incomplete lists of authorized workstations.
+// Tuning Steps:
+// 1. Populate 'ot_network_range' with your specific OT/ICS subnets.
+// 2. Populate 'known_engineering_workstations' with IPs of legitimate HMIs, engineering workstations, and management servers.
+// 3. Adjust the 'brute_force_failure_threshold' based on your environment's baseline authentication failures.
+// 4. Customize the 'ics_remote_ports' list to match the protocols used in your environment.
+
+// --- Rule Parameters ---
+let ot_network_range = dynamic(["10.10.0.0/16", "192.168.50.0/24"]); // Placeholder: Define your OT subnets.
+let known_engineering_workstations = dynamic(["10.0.1.10", "10.0.1.11"]); // Placeholder: Define trusted management hosts.
+let brute_force_time_window = 10m;
+let brute_force_failure_threshold = 15;
+// Common ICS ports: S7, Modbus, IEC-104, DNP3, EtherNet/IP, BACnet
+let ics_remote_ports = dynamic([102, 502, 2404, 20000, 44818, 47808]);
+
+// --- Pattern 1: Brute Force (T0806) ---
+// Looks for a high number of failed logins to an OT asset. Assumes an OT security platform log source.
+let brute_force_attempts =
+    OTSecurityData // Placeholder for OT security platform logs. Could also be SecurityEvent (EventID 4625).
+    | where EventType has "Authentication" and EventResult has "Failure"
+    | where isnotempty(SourceIp) and isnotempty(DestinationIp)
+    | where ipv4_is_in_any_range(DestinationIp, ot_network_range)
+    | summarize StartTime = min(TimeGenerated), EndTime = max(TimeGenerated), FailedLogonCount = count() by SourceIP = SourceIp, DestinationIP, User = column_ifexists("User", "Unknown"), bin(TimeGenerated, brute_force_time_window)
+    | where FailedLogonCount > brute_force_failure_threshold
+    | extend
+        Activity = "Potential Brute Force Against OT Asset",
+        Technique = "Brute Force (T0806)",
+        Tactic = "Initial Access",
+        DestinationPorts = "[]";
+
+// --- Pattern 2: Unauthorized Connection to Remote Services (T0866) ---
+// Looks for connections to sensitive OT ports from non-standard systems.
+let remote_service_connections =
+    CommonSecurityLog // Or VMConnection, firewall logs
+    | where isnotempty(DestinationIP) and isnotempty(SourceIP)
+    | where ipv4_is_in_any_range(DestinationIP, ot_network_range)
+    | where not(ipv4_is_in_any_range(SourceIP, known_engineering_workstations))
+    | where DestinationPort in (ics_remote_ports)
+    | summarize StartTime = min(TimeGenerated), EndTime = max(TimeGenerated), DestinationPorts = make_set(DestinationPort), ConnectionCount = count() by SourceIP, DestinationIP, bin(TimeGenerated, 1h)
+    | extend
+        Activity = "Unauthorized Connection to OT Remote Service",
+        Technique = "Exploitation of Remote Services (T0866)",
+        Tactic = "Initial Access",
+        User = "N/A",
+        FailedLogonCount = 0;
+
+// --- Combine and Summarize Results ---
+union brute_force_attempts, remote_service_connections
+| project-rename DestinationDevice = DestinationIP
+| summarize
+    StartTime = min(StartTime),
+    EndTime = max(EndTime),
+    Tactics = make_set(Tactic),
+    Techniques = make_set(Technique),
+    Activities = make_set(Activity),
+    Users = make_set(User),
+    DestinationPorts = make_set(DestinationPorts),
+    TotalFailedLogons = sum(FailedLogonCount)
+    by SourceIP, DestinationDevice
+| extend
+    DestinationPorts = tostring(DestinationPorts)

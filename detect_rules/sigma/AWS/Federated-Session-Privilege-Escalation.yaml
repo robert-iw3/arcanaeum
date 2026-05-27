@@ -1,0 +1,37 @@
+title: AWS Federated Session Privilege Escalation
+description: |
+  Detects a federated user session attaching or putting a highly privileged IAM policy to a user. Adversaries can leverage a lingering federated session, created from a compromised IAM user, to escalate privileges by attaching policies like AdministratorAccess. This allows the adversary to gain broader permissions within the environment.
+references:
+  - https://www.crowdstrike.com/en-us/blog/how-adversaries-persist-with-aws-user-federation/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.t1136
+  - attack.t1098.001
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  common:
+    # The action was performed by a federated user
+    userIdentity.type: 'FederatedUser'
+    eventSource: 'iam.amazonaws.com'
+  selection_attach:
+    eventName: 'AttachUserPolicy'
+    # Detects attaching a known highly-privileged AWS managed policy. This list should be reviewed and customized for your environment.
+    requestParameters.policyArn|endswith:
+      - '/AdministratorAccess'
+      - '/IAMFullAccess'
+      - '/PowerUserAccess'
+  selection_put:
+    eventName: 'PutUserPolicy'
+    # Detects creating a highly-privileged inline policy by looking for wildcard permissions.
+    # This may generate false positives if inline policies with wildcards are used for legitimate purposes.
+    requestParameters.policyDocument|contains|all:
+      - '"Effect":"Allow"'
+      - '"Action":"*"'
+      - '"Resource":"*"'
+  condition: common and (selection_attach or selection_put)
+falsepositives:
+  - Legitimate administrative actions performed by a federated user from a custom identity broker or proxy application. It is important to baseline normal administrative activity performed by federated users in your environment.
+level: high

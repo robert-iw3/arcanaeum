@@ -1,0 +1,38 @@
+title: AWS Console Login Without MFA From Atypical Country
+id: 03f560bf-60c0-4c01-8e30-292a787560d5
+status: experimental
+description: |
+  Detects a successful AWS Console login by an IAM user from an atypical country without the use of multi-factor authentication (MFA).
+  This pattern is indicative of compromised credentials being used for initial access, as highlighted in the reference report where an attacker logged in from an unusual location to begin their attack chain.
+references:
+  - https://expel.com/blog/incident-report-from-cli-to-console-chasing-an-attacker-in-aws/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.initial_access
+  - attack.t1078.004
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    # Corresponds to a console login event
+    eventName: 'ConsoleLogin'
+    # Ensures the login was successful
+    responseElements.ConsoleLogin: 'Success'
+    # Filters for logins by IAM users, which are associated with long-term credentials
+    userIdentity.type: 'IAMUser'
+    # Filters for logins where MFA was not used
+    additionalEventData.MFAUsed: 'No'
+  filter_known_countries:
+    # This field may vary depending on the SIEM's GeoIP enrichment.
+    # Common examples include 'source.geo.country_name', 'geoip.country_name', etc.
+    source.geo.country_name:
+      - 'United States'
+      # Add other common/expected countries for your organization here.
+      # E.g., 'Canada', 'United Kingdom', 'Germany'
+  condition: selection and not filter_known_countries
+falsepositives:
+  - Legitimate user logins from new or unlisted countries, such as employees who are traveling.
+  - The 'filter_known_countries' list must be customized to your organization's typical operating locations to be effective and reduce noise.
+level: medium

@@ -1,0 +1,106 @@
+title: Misuse of Signed Tools
+description: >-
+  Detects various techniques involving the misuse of legitimate, signed Windows binaries (LOLBins).
+  Adversaries leverage these trusted executables to bypass application control, execute malicious code,
+  and evade defenses, as highlighted in the referenced intelligence. This rule covers masquerading
+  (renaming system tools), suspicious command-line patterns for tools like Regsvr32 and Bitsadmin,
+  unusual parent-child relationships for MSBuild, and suspicious processes spawned by logon scripts.
+references:
+  - https://attack.mitre.org/techniques/T1036/003/
+  - https://attack.mitre.org/techniques/T1218/
+  - https://attack.mitre.org/techniques/T1197/
+  - https://attack.mitre.org/techniques/T1037/001/
+author: RW
+date: 2025-08-18
+tags:
+  - attack.defense_evasion
+  - attack.execution
+  - attack.t1036.003
+  - attack.t1218
+  - attack.t1197
+  - attack.t1037.001
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  # Pattern 1: Detects a system binary that has been renamed to masquerade as a different file.
+  selection_masquerade:
+    OriginalFileName:
+      - 'cmd.exe'
+      - 'powershell.exe'
+      - 'pwsh.exe'
+      - 'cscript.exe'
+      - 'wscript.exe'
+      - 'mshta.exe'
+      - 'rundll32.exe'
+      - 'regsvr32.exe'
+  filter_masquerade_match:
+    Image|endswith:
+      - '\cmd.exe'
+      - '\powershell.exe'
+      - '\pwsh.exe'
+      - '\cscript.exe'
+      - '\wscript.exe'
+      - '\mshta.exe'
+      - '\rundll32.exe'
+      - '\regsvr32.exe'
+  filter_masquerade_path:
+    Image|startswith:
+      - 'C:\Windows\System32\'
+      - 'C:\Windows\SysWOW64\'
+      - 'C:\Windows\WinSxS\'
+
+  # Pattern 2: Detects suspicious command-line usage of common LOLBins.
+  selection_regsvr32:
+    Image|endswith: '\regsvr32.exe'
+    CommandLine|contains: '/s' # Silent flag is common for malicious use.
+    CommandLine|contains:
+      - 'scrobj.dll'
+      - 'http:'
+      - 'https:'
+  selection_bitsadmin:
+    Image|endswith: '\bitsadmin.exe'
+    CommandLine|contains|all:
+      - '/transfer'
+      - 'http' # Covers both http and https
+
+  # Pattern 3: Detects MSBuild being launched by a non-standard parent process.
+  selection_msbuild:
+    Image|endswith: '\msbuild.exe'
+  filter_msbuild_legit_parent:
+    ParentImage|endswith:
+      - '\devenv.exe'
+      - '\explorer.exe'
+      - '\cmd.exe'
+      - '\powershell.exe'
+      - '\pwsh.exe'
+      - '\VsBuild.exe'
+
+  # Pattern 4: Detects suspicious child processes spawned by the logon script handler.
+  selection_gpscript_parent:
+    ParentImage|endswith: '\gpscript.exe'
+  selection_gpscript_child:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+      - '\cmd.exe'
+      - '\whoami.exe'
+      - '\net.exe'
+      - '\net1.exe'
+      - '\systeminfo.exe'
+      - '\reg.exe'
+      - '\certutil.exe'
+      - '\bitsadmin.exe'
+
+  condition: >
+    (selection_masquerade and not filter_masquerade_match and not filter_masquerade_path) or
+    selection_regsvr32 or
+    selection_bitsadmin or
+    (selection_msbuild and not filter_msbuild_legit_parent) or
+    (selection_gpscript_parent and selection_gpscript_child)
+falsepositives:
+  - Legitimate software installers or custom applications may execute renamed copies of system binaries.
+  - Developer environments may use MSBuild in automated build pipelines with non-standard parent processes.
+  - Legitimate software updaters (e.g., Google Update) may use Bitsadmin to download files.
+  - Legitimate logon scripts may use tools like 'net.exe' to map network drives. Consider excluding specific, known-good command lines if they generate noise.
+level: medium

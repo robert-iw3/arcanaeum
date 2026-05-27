@@ -1,0 +1,66 @@
+rule system_time_manipulation_gntm {
+
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects the execution of commands used to manually change the system time. This behavior is aligned with the SPARTA GNTM (GNSS and Time Manipulation Threats) pattern. Adversaries may manipulate system time to disrupt time-sensitive operations, evade time-based security controls, or affect log timestamps."
+    reference = "https://medium.com/the-aerospace-corporation/indicators-of-behavior-iobs-in-sparta-v3-0-c42ab0683100, https://sparta.aerospace.org/related-work/iob"
+    tags = "attack.defense_evasion, attack.impact"
+    tactic = "TA0005, TA0040"
+    technique = "T1562.001, T1499.003"
+    false_positives = "Legitimate time changes performed by administrators., Legitimate NTP client synchronization processes not included in the filter."
+
+  events:
+    $process.metadata.event_type = "PROCESS_LAUNCH"
+    $process.principal.hostname = $hostname
+
+    // Selection: Detects common utilities used for time manipulation on Windows and Linux.
+    (
+      // Windows time utilities
+      (
+        re.regex($process.target.process.file.full_path, `\\net\.exe$`) nocase and
+        re.regex($process.target.process.command_line, `\s+time\s+.*\/set`) nocase
+      ) or
+      (
+        re.regex($process.target.process.file.full_path, `\\(powershell|pwsh)\.exe$`) nocase and
+        re.regex($process.target.process.command_line, `Set-Date`) nocase
+      ) or
+      (
+        re.regex($process.target.process.file.full_path, `\\w32tm\.exe$`) nocase and
+        re.regex($process.target.process.command_line, `\/resync`) nocase
+      ) or
+
+      // Linux time utilities
+      (
+        re.regex($process.target.process.file.full_path, `/(date|timedatectl|hwclock|ntpdate)$`) and
+        (
+          re.regex($process.target.process.command_line, `(\s-s\s|--set)`) or
+          re.regex($process.target.process.command_line, `set-time`) or
+          re.regex($process.target.process.command_line, `--systohc`)
+        )
+      )
+    )
+
+    // Filter: Excludes common system accounts and services that legitimately manage time.
+    // This section may require tuning for your specific environment.
+    and not (
+      re.regex($process.principal.user.userid, `(SYSTEM|LOCAL SERVICE|root)`) nocase and
+      re.regex($process.principal.process.file.full_path, `(svchost\.exe|services\.exe|chronyd|ntpd)$`) nocase
+    )
+
+  match:
+    $hostname over 10m
+
+  outcome:
+    $risk_score = 35
+    $principal_hostname = array_distinct($process.principal.hostname)
+    $principal_user_userid = array_distinct($process.principal.user.userid)
+    $principal_process_command_line = array_distinct($process.principal.process.command_line)
+    $principal_process_file_full_path = array_distinct($process.principal.process.file.full_path)
+    $target_process_command_line = array_distinct($process.target.process.command_line)
+    $target_process_file_full_path = array_distinct($process.target.process.file.full_path)
+    $event_count = count_distinct($process.metadata.id)
+
+  condition:
+    $process
+}

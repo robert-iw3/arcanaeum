@@ -1,0 +1,44 @@
+// title: Salty 2FA Phishing Kit Detection
+// description: Detects various web-based indicators of the Salty 2FA phishing kit.
+// This rule identifies the unique landing page domain structure, Cloudflare evasion, anti-analysis techniques, and the specific data exfiltration pattern.
+// references:
+//   - https://any.run/cybersecurity-blog/salty2fa-technical-analysis/
+// author: RW
+// date: 2025-08-20
+// tags:
+//   - attack.initial_access
+//   - attack.t1566
+//   - attack.exfiltration
+//   - attack.t1041
+//   - attack.defense_evasion
+//   - attack.t1622
+//   - threat_actor.storm-1575
+//   - phishing.salty_2fa
+// level: high
+
+// Note: Replace 'CommonSecurityLog' with your web proxy log table name.
+// You may also need to adjust field names like 'RequestURL', 'RequestMethod', 'ResponsePayload', and 'RequestPayload' to match your schema.
+CommonSecurityLog
+| where
+    // --- Salty 2FA Exfiltration Pattern ---
+    // This section is highly specific and has a low chance of false positives.
+    (
+        RequestMethod =~ "POST"
+        and RequestURL has ".ru"
+        and RequestURL matches regex @"/\d{5,6}\.php$"
+        and RequestPayload has "request=" and RequestPayload has "session="
+    )
+    or
+    // --- Salty 2FA Landing Page Pattern ---
+    // This section may have a higher chance of false positives. Consider adding known good domains to an exclusion list.
+    (
+        RequestURL matches regex @".*\.[a-z]{2}\.com(/|$)"
+        and
+        (
+            // Landing page content with Cloudflare and Microsoft themes
+            (ResponsePayload has "challenges.cloudflare.com/turnstile/" and ResponsePayload has "Microsoft" and ResponsePayload has "Sign in")
+            or
+            // Anti-analysis/debugging technique
+            (ResponsePayload has "new Date()" and ResponsePayload has "debugger")
+        )
+    )

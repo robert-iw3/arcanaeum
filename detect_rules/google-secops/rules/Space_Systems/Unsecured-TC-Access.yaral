@@ -1,0 +1,65 @@
+rule unsecured_telecommand_access_exploitation {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects when a satellite control application spawns a suspicious child process (e.g., a shell) shortly after receiving an inbound network connection from an unauthorized external IP address. This pattern may indicate that an attacker has exploited an unsecured telecommand (TC) interface to execute arbitrary commands on a ground control system."
+    tactic = "TA0002"
+    technique = "T1203"
+    false_positives = "Legitimate remote administration, software updates, or diagnostic scripts could trigger this rule. Tuning the authorized IP and satellite application lists is critical."
+    tags = "SATELLITE, ICS, OT, C2, EXPLOITATION"
+
+  events:
+    // Event 1: An inbound network connection to a satellite control application from an unauthorized external IP.
+    $network_in.metadata.event_type = "NETWORK_CONNECTION"
+    $network_in.target.hostname = $hostname
+    $network_in.target.process.pid = $pid
+    $network_in.target.process.file.full_path = $control_app_path
+    $network_in.principal.ip = $remote_ip
+
+    // Filter for designated satellite control systems.
+    // Placeholder: Replace with hostnames of your satellite control systems.
+    re.regex($hostname, `(?i)sat-control-.*\.corp\.net`)
+
+    // Filter for known satellite control applications.
+    // Placeholder: Replace with paths to your satellite control applications.
+    re.regex($control_app_path, `(?i)(\\program files\\satellite control\\|/opt/sat_control/)(tc_handler|sat_control_app|obsw_main)`)
+
+    // Filter for external, non-private IP addresses.
+    not net.is_private($remote_ip)
+
+    // Filter out known, authorized external IPs (e.g., ground stations).
+    // Placeholder: Replace with your authorized external IP ranges.
+    not net.ip_in_range_cidr($remote_ip, "203.0.113.0/24", "198.51.100.0/24")
+
+    // Event 2: The same satellite control application spawns a suspicious child process.
+    $process_spawn.metadata.event_type = "PROCESS_LAUNCH"
+    $process_spawn.principal.hostname = $hostname
+    $process_spawn.principal.process.pid = $pid
+    $process_spawn.principal.process.file.full_path = $control_app_path
+
+    // Filter for suspicious child processes.
+    // Placeholder: Add or remove suspicious processes as needed.
+    re.regex($process_spawn.target.process.file.full_path, `(?i)(\\cmd\.exe|\\powershell\.exe|\\bash|\\sh|\\whoami\.exe|\\ipconfig\.exe|\\net\.exe|\\net1\.exe|\\curl\.exe|\\wget\.exe)$`)
+
+  match:
+    // Correlate the events by hostname and process ID over a 5-minute window.
+    $hostname, $pid over 5m
+    // Ensure the network connection happens before the process spawn.
+    $network_in before $process_spawn
+
+  outcome:
+    // Set a risk score for the detection.
+    $risk_score = 70
+    // Collect key fields for the alert.
+    $principal_hostname = $hostname
+    $unauthorized_remote_ip = array_distinct($remote_ip)
+    $control_application_path = array_distinct($control_app_path)
+    $control_application_pid = $pid
+    $suspicious_child_process_path = array_distinct($process_spawn.target.process.file.full_path)
+    $suspicious_child_process_commandline = array_distinct($process_spawn.target.process.command_line)
+    $user = array_distinct($process_spawn.principal.user.userid)
+
+  condition:
+    // Trigger the rule if both the network connection and process spawn events are found.
+    $network_in and $process_spawn
+}

@@ -1,0 +1,83 @@
+[
+  {
+    "type": "expert",
+    "name": "Detect Warlock SharePoint Privilege Escalation (GPO/Guest Abuse)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"w3wp.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*New-GPO*\"\n         Include -command_line \"*net user guest *\"\n         Include -command_line \"*net localgroup administrators guest /add*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects IIS worker process (w3wp.exe) executing commands to create new Group Policy Objects (New-GPO) or enable/modify the Guest account and add it to Administrators — specific privilege escalation technique used by Warlock ransomware (Russian-linked, 2024-2025 variants) via compromised SharePoint servers. High-fidelity; tune for legitimate SharePoint admin scripts or automation."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Warlock Defense Evasion via Process Termination",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"vmtools.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*taskkill /f /im *\"\n         Include -command_line \"*net stop *\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects renamed VMware Tools process (vmtools.exe) executing taskkill or net stop commands — observed in Warlock campaigns for terminating security/antivirus/EDR processes during defense evasion. High value when chained with other indicators. Tune for legitimate process management tools."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Warlock Malicious Kernel Driver (googleApiUtil64.sys)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match FILE {\n         Include OBJECT_NAME { -v \"C:\\\\**\\\\googleApiUtil64.sys\" }\n         Include -access \"CREATE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "Critical",
+    "enabled": true,
+    "description": "Detects creation of googleApiUtil64.sys — a malicious kernel-mode driver used by Warlock (2025 variants) for BYOVD (Bring Your Own Vulnerable Driver) defense evasion, process hiding, and privilege escalation. Extremely high-fidelity IOC; very low false positives. Elevate to BLOCK if confident in environment."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Warlock Active Directory Discovery Commands",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"cmd.exe\" -v \"powershell.exe\" -v \"wmic.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*nltest /domain_trusts*\"\n         Include -command_line \"*wmic product get name,identifyingnumber*\"\n         Include -command_line \"*net group \\\"domain admins\\\"*\"\n         Include -command_line \"*net group \\\"domain computers\\\"*\"\n         Include -command_line \"*net group \\\"domain controllers\\\"*\"\n         Include -command_line \"*quser*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects execution of common AD reconnaissance commands (nltest domain trusts, wmic product enumeration, net group queries for admins/computers/controllers, quser) — standard discovery phase in Warlock ransomware operations. Tune exclusions for legitimate admin/pentest scripts."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Warlock Credential Dumping (Mimikatz/Registry Hive)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"mimikatz.exe\" -v \"reg.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*reg save HKLM\\\\SAM*\"\n         Include -command_line \"*reg save HKLM\\\\SECURITY*\"\n         Include -parent_process \"svchost.exe\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects Mimikatz execution or registry hive dumping (HKLM\\SAM and SECURITY) with suspicious parent (svchost.exe) — credential dumping TTP used by Warlock for domain dominance. High-fidelity; tune for legitimate backup/admin tools."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Warlock SMB Lateral Movement (File Copy to Admin Shares)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*copy * \\\\c$\\users\\public*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects file copy commands targeting administrative SMB shares (\\\\c$\\users\\public) — common lateral movement technique in Warlock ransomware (stage payloads on remote hosts). Tune for legitimate file transfers or admin scripts."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Warlock RDP Persistence (Registry Modifications)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match REGISTRY {\n         Include OBJECT_NAME { -v \"HKEY_LOCAL_MACHINE\\\\SYSTEM\\\\CurrentControlSet\\\\Control\\\\Terminal Server\\\\fDenyTSConnections\" -v \"HKEY_LOCAL_MACHINE\\\\SYSTEM\\\\CurrentControlSet\\\\Control\\\\Terminal Server\\\\WinStations\\\\RDP-Tcp\\\\UserAuthentication\" }\n         Include -access \"WRITE,CREATE\"\n         Include -value_data \"0\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects registry writes setting RDP to enabled (fDenyTSConnections=0) and disabling Network Level Authentication (UserAuthentication=0) — persistence technique used by Warlock to maintain backdoor access. Tune for legitimate RDP configuration changes."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Warlock Cloudflare Tunneling (Renamed Binaries)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"hpmews03.exe\" -v \"macfee_agent.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*tunnel run --token *\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects renamed binaries (hpmews03.exe, macfee_agent.exe) executing Cloudflare tunnel commands (tunnel run --token) — used by Warlock for persistent, encrypted C2 and exfiltration. High-fidelity renamed-tool detection. Tune for legitimate Cloudflare usage."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Warlock Rclone Exfiltration to Proton Drive",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"rclone.exe\" -v \"TrendSecurity.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*copy * --protondrive-username * --protondrive-password *\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects Rclone (or disguised TrendSecurity.exe) executing copy commands with Proton Drive credentials — exfiltration method used by Warlock ransomware (2025 variants). Can be noisy with legitimate cloud sync; add exclusions for authorized rclone configs/users."
+  }
+]

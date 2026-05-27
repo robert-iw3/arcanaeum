@@ -1,0 +1,51 @@
+title: AWS Default Role Suspicious S3 Activity
+id: 2a1b3c4d-5e6f-7890-1234-567890abcdef # Replace with a unique ID
+status: experimental
+description: Detects suspicious S3 actions (listing all buckets or writing/deleting objects in sensitive service-specific buckets) performed by default AWS service roles known to sometimes have overly broad S3 permissions, as described in the Aqua Security "Shadow Roles" research.
+author:
+date: 2025-05-08
+references:
+  - https://www.aquasec.com/blog/shadow-roles-aws-defaults-can-lead-to-service-takeover/
+tags:
+  - attack.privilege_escalation
+  - attack.lateral_movement
+  - cloud.aws
+  - attack.t1078.004 # Valid Accounts: Cloud Accounts
+  - attack.t1538.005 # Cloud Service Discovery: Cloud Storage
+  - attack.t1578.002 # Cloud Service Hijacking: Cloud Storage
+  - attack.t1087.004 # Account Discovery: Cloud Account
+logsource:
+  service: aws
+  product: cloudtrail
+detection:
+  # Match the specific default role names or patterns identified in the CTI
+  selection_roles:
+    userIdentity.sessionContext.sessionIssuer.userName|re: '^(AWSGlueServiceRole|AmazonSageMaker-ExecutionRole-.*|AmazonEMRStudio_RuntimeRole_.*|ray-autoscaler-v1)$'
+    # Note: Depending on the log source mapping, the role name might be in a different field, e.g., userIdentity.arn or userIdentity.principalId. Adjust if needed based on your environment's CloudTrail mapping.
+
+  # Match the s3:ListBuckets action performed by the identified roles
+  selection_list_buckets:
+    eventName: 'ListBuckets'
+    eventSource: 's3.amazonaws.com'
+
+  # Match write/delete actions on S3 objects performed by the identified roles
+  selection_write_delete:
+    eventName|startswith: 'PutObject' # Covers PutObject, PutObjectAcl, PutObjectTagging, etc.
+    eventName|startswith: 'DeleteObject' # Covers DeleteObject, DeleteObjects, etc.
+    eventSource: 's3.amazonaws.com'
+
+  # Match the sensitive S3 bucket patterns identified in the CTI
+  selection_sensitive_buckets:
+    # Assuming bucket name is available in 'requestParameters.bucketName' for Put/Delete actions.
+    # Adjust field name if your log source mapping uses a different field (e.g., 'resources[*].ARN').
+    requestParameters.bucketName|re: '^(cf-templates-.*|cdk-.*-assets-.*|sagemaker-.*|aws-emr-studio-.*|aws-glue-assets-.*)$'
+
+  # Condition: Trigger if a default role lists all buckets OR if a default role writes/deletes objects in a sensitive service bucket
+  condition: (selection_roles and selection_list_buckets) or (selection_roles and selection_write_delete and selection_sensitive_buckets)
+
+falsepositives:
+  - Legitimate S3 ListBuckets activity by the specified roles, although broad listing is generally suspicious.
+  - Legitimate write/delete activity by the specified roles on buckets *not* matching the sensitive patterns.
+  - This rule may require tuning based on specific environment usage patterns of these default roles.
+
+level: high

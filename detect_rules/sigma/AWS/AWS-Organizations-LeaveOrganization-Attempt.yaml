@@ -1,0 +1,31 @@
+title: AWS Account Attempted to Leave Organization
+id: 0e0cec0d-6a26-4d55-a137-41c4c35ede16
+status: experimental
+description: >-
+  Detects an attempt by an AWS account to leave its AWS Organization.
+  An attacker with sufficient permissions can detach an account to remove it from centralized control,
+  bypassing Service Control Policies (SCPs) and other governance. Even a failed attempt is a strong indicator of compromise.
+author: RW
+date: 2025-09-21
+tags:
+  - attack.impact
+  - attack.t1136.001
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    # This event is logged when an account attempts to leave an AWS Organization.
+    eventName: 'LeaveOrganization'
+    eventSource: 'organizations.amazonaws.com'
+  condition: selection
+fields:
+  - userIdentity.arn
+  - userIdentity.principalId
+  - sourceIPAddress
+  - errorCode
+  - errorMessage
+falsepositives:
+  # This action is extremely rare during normal operations.
+  # It may occur during a planned and authorized account restructuring or migration. Any unexpected alert should be treated as highly suspicious.
+level: high

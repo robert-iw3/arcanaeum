@@ -1,0 +1,38 @@
+// Name: PowerShell Reflective Assembly Loading
+// Author: RW
+// Date: 2025-08-07
+// Description: Detects a common pattern of reflective code loading where PowerShell is used to download a
+//              .NET assembly (a PE file) and load it directly into memory. This behavior is a strong
+//              indicator of the reflective loading technique and is often used for fileless malware execution.
+//              This detection requires AMSI and PowerShell Script Block Logging to be enabled.
+// Mitre TTPs: T1622
+// False Positive Sensitivity: Medium
+
+DeviceEvents
+// This detection requires AMSI and PowerShell Script Block Logging (Event ID 4104).
+| where ActionType == "AmsiScriptContent"
+// Pre-filter on the dynamic field for performance before parsing JSON.
+| where AdditionalFields has "System.Reflection.Assembly" and AdditionalFields has ".Load" and (AdditionalFields has "DownloadData" or AdditionalFields has "DownloadString")
+| extend ParsedFields = parse_json(AdditionalFields)
+| extend ScriptContent = tostring(ParsedFields.Content)
+// Perform a more precise match on the extracted script content to identify the full pattern.
+| where ScriptContent has "System.Reflection.Assembly"
+    and ScriptContent has ".Load"
+    and (ScriptContent has "DownloadData" or ScriptContent has "DownloadString")
+    and ScriptContent has "Net.WebClient"
+// Focus on PowerShell as the initiator.
+| where InitiatingProcessFileName in~ ("powershell.exe", "pwsh.exe")
+// False Positive Tuning: Legitimate automation or deployment scripts might use this functionality.
+// Consider excluding scripts signed by trusted publishers or originating from known-good management tools.
+// For example: | where InitiatingProcessSigner != "CN=Microsoft Corporation, ..."
+| project
+    Timestamp,
+    DeviceId,
+    DeviceName,
+    ActionType,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    ScriptContent,
+    Tactic = "Defense Evasion, Execution",
+    Technique = "Reflective Code Loading",
+    MitreTTP = "T1622"

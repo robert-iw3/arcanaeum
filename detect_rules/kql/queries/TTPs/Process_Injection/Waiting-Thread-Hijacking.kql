@@ -1,0 +1,110 @@
+// Name: Waiting Thread Hijacking Detection
+// Author: RW
+// Date: 2025-08-07
+// Description: Combines multiple detection strategies for Waiting Thread Hijacking (WTH) into a single query.
+//              It detects the basic WTH sequence, a more specific API sequence with context checks, and the
+//              split execution variant where multiple processes target a single victim.
+// MITRE ATT&CK: T1055 (Process Injection), T1070.004 (File Deletion)
+// False Positive Sensitivity: Medium. This behavior can be seen in debuggers, performance monitors, and some security tools.
+// Please tune the 'knownBenignActors' list accordingly.
+
+// FP Mitigation: Add legitimate tools that perform remote thread/memory operations.
+let knownBenignActors = dynamic(['procexp.exe', 'procmon.exe', 'windbg.exe', 'x64dbg.exe', 'ollydbg.exe', 'perfview.exe', 'ProcessHacker.exe', 'SystemInformer.exe', 'msiexec.exe']);
+
+// Logic 1: Detects the basic WTH sequence of OpenThread -> Allocate -> Write.
+let WTH_BasicSequence = view () {
+    let timeWindow = 10m;
+    DeviceEvents
+    | where Timestamp > ago(timeWindow)
+    | where ActionType in ("OpenThreadApiCall", "RemoteAllocate", "VirtualAllocExApiCall", "RemoteWrite", "WriteProcessMemoryApiCall")
+    | extend SourceProcessId = InitiatingProcessId, TargetProcessId = case(ActionType == "OpenThreadApiCall", RemoteProcessId, ProcessId)
+    | where isnotempty(SourceProcessId) and isnotempty(TargetProcessId) and SourceProcessId != TargetProcessId
+    | where not(InitiatingProcessFileName in~ (knownBenignActors))
+    | partition by strcat(SourceProcessId, "->", TargetProcessId) (
+        scan with_match_id=scan_match_id with (
+            step s1: ActionType == "OpenThreadApiCall";
+            step s2: ActionType in ("RemoteAllocate", "VirtualAllocExApiCall") and s1.Timestamp < Timestamp and Timestamp - s1.Timestamp < 1m;
+            step s3: ActionType in ("RemoteWrite", "WriteProcessMemoryApiCall") and s2.Timestamp < Timestamp and Timestamp - s2.Timestamp < 1m;
+        )
+    )
+    | where isnotempty(s3_Timestamp)
+    | project
+        StartTime = s1_Timestamp,
+        EndTime = s3_Timestamp,
+        SourceProcessName = s1_InitiatingProcessFileName,
+        SourceProcessId,
+        SourceProcessCommandLine = s1_InitiatingProcessCommandLine,
+        TargetProcessName = s3_FileName,
+        TargetProcessId,
+        TargetProcessCommandLine = s3_ProcessCommandLine,
+        DetectionTechnique = "WTH - Basic Sequence",
+        AdditionalInfo = pack("s1_OpenThread_Timestamp", s1_Timestamp, "s2_Allocate_Timestamp", s2_Timestamp, "s3_Write_Timestamp", s3_Timestamp, "scan_match_id", scan_match_id)
+};
+
+// Logic 2: Detects a more specific WTH sequence including a check for THREAD_GET_CONTEXT access and two separate writes.
+let WTH_FullApiSequence = view () {
+    let timeWindow = 15m;
+    let ThreadGetContextAccess = 0x8; // Access mask for THREAD_GET_CONTEXT
+    DeviceEvents
+    | where Timestamp > ago(timeWindow)
+    | where ActionType in ("OpenThreadApiCall", "RemoteAllocate", "VirtualAllocExApiCall", "RemoteWrite", "WriteProcessMemoryApiCall")
+    | extend SourceProcessId = InitiatingProcessId, TargetProcessId = case(ActionType == "OpenThreadApiCall", RemoteProcessId, ProcessId)
+    | where isnotempty(SourceProcessId) and isnotempty(TargetProcessId) and SourceProcessId != TargetProcessId
+    | where not(InitiatingProcessFileName in~ (knownBenignActors))
+    | partition by strcat(SourceProcessId, "->", TargetProcessId) (
+        scan with_match_id=scan_match_id with (
+            step s1: ActionType == "OpenThreadApiCall" and (tounint(parse_json(AdditionalFields).GrantedAccess) & ThreadGetContextAccess) == ThreadGetContextAccess;
+            step s2: ActionType in ("RemoteAllocate", "VirtualAllocExApiCall") and s1.Timestamp < Timestamp and Timestamp - s1.Timestamp < 5m;
+            step s3: ActionType in ("RemoteWrite", "WriteProcessMemoryApiCall") and s2.Timestamp < Timestamp and Timestamp - s2.Timestamp < 1m;
+            step s4: ActionType in ("RemoteWrite", "WriteProcessMemoryApiCall") and s3.Timestamp < Timestamp and Timestamp - s3.Timestamp < 1m;
+        )
+    )
+    | where isnotempty(s4_Timestamp)
+    | project
+        StartTime = s1_Timestamp,
+        EndTime = s4_Timestamp,
+        SourceProcessName = s1_InitiatingProcessFileName,
+        SourceProcessId,
+        SourceProcessCommandLine = s1_InitiatingProcessCommandLine,
+        TargetProcessName = s2_FileName,
+        TargetProcessId,
+        TargetProcessCommandLine = s2_ProcessCommandLine,
+        DetectionTechnique = "WTH - Full API Sequence",
+        AdditionalInfo = pack("s1_OpenThread_Timestamp", s1_Timestamp, "s2_Allocate_Timestamp", s2_Timestamp, "s3_Write1_Timestamp", s3_Timestamp, "s4_Write2_Timestamp", s4_Timestamp, "scan_match_id", scan_match_id)
+};
+
+// Logic 3: Detects WTH behavior split across multiple source processes targeting a single victim process.
+let WTH_SplitExecution = view () {
+    let timeWindow = 30m;
+    let minDistinctSources = 3;
+    DeviceEvents
+    | where Timestamp > ago(timeWindow)
+    | where ActionType in ("VirtualAllocExApiCall", "WriteProcessMemoryApiCall", "VirtualProtectExApiCall")
+    | where isnotempty(InitiatingProcessId) and isnotempty(ProcessId) and InitiatingProcessId != ProcessId
+    | where not(InitiatingProcessFileName in~ (knownBenignActors))
+    | summarize
+        StartTime = min(Timestamp),
+        EndTime = max(Timestamp),
+        SourceProcessIds = make_set(InitiatingProcessId),
+        SourceProcesses = make_set(InitiatingProcessFileName),
+        Actions = make_set(ActionType),
+        WriteCount = countif(ActionType == "WriteProcessMemoryApiCall")
+        by TargetProcessId = ProcessId, TargetProcessName = FileName, TargetProcessCommandLine = ProcessCommandLine
+    | where array_length(SourceProcessIds) >= minDistinctSources
+    | where Actions has "VirtualAllocExApiCall" and Actions has "WriteProcessMemoryApiCall" and Actions has "VirtualProtectExApiCall"
+    | where WriteCount >= 2
+    | project
+        StartTime,
+        EndTime,
+        SourceProcessName = "Multiple Processes",
+        SourceProcessId = "Multiple",
+        SourceProcessCommandLine = "Multiple",
+        TargetProcessName,
+        TargetProcessId,
+        TargetProcessCommandLine,
+        DetectionTechnique = "WTH - Split Execution",
+        AdditionalInfo = pack("DistinctSourceProcessCount", array_length(SourceProcessIds), "SourceProcesses", SourceProcesses, "ActionsPerformed", Actions)
+};
+
+// Combine the results of all three detection logics.
+union WTH_BasicSequence, WTH_FullApiSequence, WTH_SplitExecution

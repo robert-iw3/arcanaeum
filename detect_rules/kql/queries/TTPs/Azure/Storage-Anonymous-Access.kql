@@ -1,0 +1,42 @@
+// Name: Azure Storage Anonymous Access Enabled
+// Author: RW
+// Date: 2025-08-31
+// Description: Detects when public access is enabled on an Azure Storage Account or on a specific blob container.
+// This change can expose sensitive data to the public internet and is often a precursor to data exfiltration.
+// MITRE ATT&CK: T1530 (Data from Cloud Storage Object), T1567.002 (Exfiltration Over Web Service: Exfiltration to Cloud Storage)
+// False Positive Sensitivity: Medium
+
+AzureActivity
+| where ActivityStatusValue == "Success"
+| where OperationNameValue in (
+    "MICROSOFT.STORAGE/STORAGEACCOUNTS/WRITE", // Catches updates to the storage account itself
+    "MICROSOFT.STORAGE/STORAGEACCOUNTS/BLOBSERVICES/CONTAINERS/WRITE" // Catches updates to a blob container's properties
+)
+// Potential for false positives: Public access may be intentionally enabled for hosting public website assets or other public data.
+// Consider tuning by excluding known public storage accounts or resource groups from the 'ResourceId' field.
+// For example: `| where ResourceGroup !in ("public-assets-rg")`
+| extend properties = todynamic(Properties)
+| extend requestBody = todynamic(tostring(properties.requestbody))
+| extend
+    allowBlobPublicAccess = tobool(requestBody.properties.allowBlobPublicAccess),
+    publicAccessLevel = tostring(requestBody.properties.publicAccess)
+| where
+    // Condition 1: Public access is enabled at the storage account level
+    (OperationNameValue == "MICROSOFT.STORAGE/STORAGEACCOUNTS/WRITE" and allowBlobPublicAccess == true) or
+    // Condition 2: Public access is enabled at the container level
+    (OperationNameValue == "MICROSOFT.STORAGE/STORAGEACCOUNTS/BLOBSERVICES/CONTAINERS/WRITE" and publicAccessLevel in ("Blob", "Container"))
+| extend ChangeDetail = case(
+    OperationNameValue == "MICROSOFT.STORAGE/STORAGEACCOUNTS/WRITE", "Storage Account 'allowBlobPublicAccess' set to true",
+    OperationNameValue == "MICROSOFT.STORAGE/STORAGEACCOUNTS/BLOBSERVICES/CONTAINERS/WRITE", strcat("Container public access level set to '", publicAccessLevel, "'"),
+    "Unknown Change"
+)
+| project
+    TimeGenerated,
+    Caller,
+    CallerIpAddress,
+    OperationName,
+    ActivityStatusValue,
+    SubscriptionId,
+    ResourceGroup,
+    ResourceId,
+    ChangeDetail

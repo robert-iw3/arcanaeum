@@ -1,0 +1,117 @@
+// Name: Consolidated Malspam Campaign Activity
+// Author: RW
+// Date: 2025-08-12
+// MITRE ATT&CK: T1566.001, T1071.001
+// Description: This query consolidates multiple detections related to a widespread malspam campaign delivering the Nova infostealer.
+//              It hunts for activity across email, network, DNS, and firewall logs associated with known malicious domains, IPs, and
+//              specific TTPs like suspicious archive attachments from impersonated brands.
+// False Positive Sensitivity: Medium. This is a broad query combining high-fidelity IOCs with more behavioral patterns.
+// Legitimate activity could overlap, especially with the attachment detection.
+// Tuning may be required by excluding trusted senders or specific internal processes.
+// Indicators:
+// Domains: windhym.site, bioccon.com, hanhanggroup.com, sprinterstravels.co.uk
+// IPs: 79.141.165.17, 185.81.114.43, 185.117.90.49, 185.80.53.203
+// TTPs: .rar/.7z/.gz attachments in emails impersonating DHL/DocuSign
+
+let maliciousDomains = dynamic(["windhym.site", "bioccon.com", "hanhanggroup.com", "sprinterstravels.co.uk"]);
+let maliciousIps = dynamic(["79.141.165.17", "185.81.114.43", "185.117.90.49", "185.80.53.203"]);
+let suspiciousExtensions = dynamic([".rar", ".7z", ".gz"]);
+let impersonatedKeywords = dynamic(["dhl", "docusign"]);
+
+union isfuzzy=true
+    (
+        // Method 1: Suspicious Archive Attachments
+        EmailEvents
+        | where AttachmentCount > 0
+        | join kind=inner (
+            EmailAttachmentInfo
+            | where FileName has_any (suspiciousExtensions)
+        ) on NetworkMessageId
+        | where Subject has_any (impersonatedKeywords) or SenderDisplayName has_any (impersonatedKeywords)
+        | project
+            TimeGenerated,
+            DetectionMethod = "Suspicious Archive Attachment",
+            DeviceName = "", // Not applicable
+            AccountName = RecipientEmailAddress,
+            Process = Subject,
+            CommandLine = "", // Not applicable
+            Indicator = FileName,
+            IndicatorType = "Attachment",
+            Details = strcat("Sender: ", SenderFromAddress, ", Subject: ", Subject)
+    ),
+    (
+        // Method 2: Network Connections to Malicious Domains/IPs
+        DeviceNetworkEvents
+        | where RemoteDomain has_any (maliciousDomains) or RemoteIP in (maliciousIps)
+        | project
+            TimeGenerated,
+            DetectionMethod = "Malicious Network Connection",
+            DeviceName,
+            AccountName = InitiatingProcessAccountName,
+            Process = InitiatingProcessFileName,
+            CommandLine = InitiatingProcessCommandLine,
+            Indicator = iif(RemoteDomain has_any (maliciousDomains), RemoteDomain, RemoteIP),
+            IndicatorType = iif(RemoteDomain has_any (maliciousDomains), "Domain", "IP Address"),
+            Details = strcat("RemoteIP: ", RemoteIP, ", RemoteUrl: ", RemoteUrl)
+    ),
+    (
+        // Method 3: DNS Activity for Malicious Domains/IPs
+        DnsEvents
+        | where Name has_any (maliciousDomains) or (array_length(IPAddresses) > 0 and IPAddresses has_any (maliciousIps))
+        | project
+            TimeGenerated,
+            DetectionMethod = "Malicious DNS Activity",
+            DeviceName,
+            AccountName = "", // Not available
+            Process = ClientProcessName,
+            CommandLine = "", // Not available
+            Indicator = Name,
+            IndicatorType = "Domain",
+            Details = strcat("Query: ", Name, ", Response: ", IPAddresses)
+    ),
+    (
+        // Method 4: Emails from Malicious Senders/IPs
+        EmailEvents
+        | where SenderFromDomain has_any (maliciousDomains) or SenderMailFromDomain has_any (maliciousDomains) or ConnectingIP in (maliciousIps)
+        | project
+            TimeGenerated,
+            DetectionMethod = "Email from Malicious Infrastructure",
+            DeviceName = "", // Not applicable
+            AccountName = RecipientEmailAddress,
+            Process = Subject,
+            CommandLine = "", // Not applicable
+            Indicator = SenderFromAddress,
+            IndicatorType = "Sender",
+            Details = strcat("Sender: ", SenderFromAddress, ", ConnectingIP: ", ConnectingIP, ", AuthDetails: ", AuthenticationDetails)
+    ),
+    (
+        // Method 5: Malicious URLs in Emails
+        EmailUrlInfo
+        | where Url has_any (maliciousDomains)
+        | join kind=inner EmailEvents on NetworkMessageId
+        | project
+            TimeGenerated,
+            DetectionMethod = "Malicious URL in Email",
+            DeviceName = "", // Not applicable
+            AccountName = RecipientEmailAddress,
+            Process = Subject,
+            CommandLine = "", // Not applicable
+            Indicator = Url,
+            IndicatorType = "URL",
+            Details = strcat("Sender: ", SenderFromAddress, ", Subject: ", Subject)
+    ),
+    (
+        // Method 6: Firewall Logs for Malicious IPs
+        CommonSecurityLog
+        | where SourceIP in (maliciousIps) or DestinationIP in (maliciousIps)
+        | project
+            TimeGenerated,
+            DetectionMethod = "Malicious IP in Firewall Log",
+            DeviceName,
+            AccountName = "", // Not available
+            Process = DeviceProduct,
+            CommandLine = "", // Not applicable
+            Indicator = iif(SourceIP in (maliciousIps), SourceIP, DestinationIP),
+            IndicatorType = "IP Address",
+            Details = strcat("Source: ", SourceIP, ", Destination: ", DestinationIP, ", Port: ", DestinationPort)
+    )

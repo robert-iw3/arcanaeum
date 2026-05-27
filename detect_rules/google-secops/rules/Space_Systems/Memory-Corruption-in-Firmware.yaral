@@ -1,0 +1,48 @@
+rule satellite_firmware_memory_corruption_crash {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects a crash in a known satellite control application shortly after receiving an inbound network connection. This pattern is indicative of a potential memory corruption exploit attempt, where a malformed Telecommand (TC) causes the application to terminate. This aligns with vulnerabilities like buffer overflows and trusted size field manipulations discussed in the 'Space Odyssey' report."
+    tactic = "TA0001"
+    technique = "T1203"
+    false_positives = "Legitimate but unstable applications may crash after network activity. Tuning the list of monitored satellite applications is crucial. If a specific application is known to be unstable, it could be excluded."
+    tags = "SATELLITE, ICS, OT, EXPLOITATION, CRASH, MEMORY_CORRUPTION"
+
+  events:
+    // Event 1: A satellite control application receives an inbound network connection.
+    $network_in.metadata.event_type = "NETWORK_CONNECTION"
+    $network_in.target.hostname = $hostname
+    $network_in.target.process.pid = $pid
+    // Filter for known satellite control applications.
+    // Placeholder: Replace with paths to your satellite control applications.
+    re.regex($network_in.target.process.file.full_path, `(?i)(\\program files\\satellite control\\|/opt/sat_control/)(tc_handler|sat_control_app|obsw_main|FlyingLaptop)`)
+    $network_in.principal.ip = $remote_ip
+
+    // Event 2: The same application crashes. This is often logged as an Application Log event.
+    $crash.metadata.event_type = "APPLICATION_LOG"
+    $crash.principal.hostname = $hostname
+    $crash.target.process.pid = $pid
+    // Filter for common crash indicators in Windows (Event ID 1000) or Linux (kernel oops/segfault messages).
+    // The regex looks for Windows crash log format. Adjust for other log sources.
+    re.regex($crash.metadata.product_log_id, `1000`) or re.regex($crash.about.summary, `(?i)segfault|segmentation fault|kernel oops`)
+
+  match:
+    // Correlate the events by hostname and process ID over a 2-minute window.
+    $hostname, $pid over 2m
+    // The network connection must occur before the crash.
+    $network_in before $crash
+
+  outcome:
+    // High risk score, as this is a strong indicator of an exploit attempt.
+    $risk_score = 80
+    // Collect key fields for the alert.
+    $principal_hostname = $hostname
+    $source_ip = array_distinct($remote_ip)
+    $crashed_application_path = array_distinct($network_in.target.process.file.full_path)
+    $crashed_application_pid = $pid
+    $crash_log_summary = array_distinct($crash.about.summary)
+    $user = array_distinct($network_in.target.user.userid)
+
+  condition:
+    $network_in and $crash
+}

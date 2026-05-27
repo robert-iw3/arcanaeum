@@ -1,0 +1,38 @@
+// Name: Potential IP Spoofing - Private Source to Public Destination
+// Description: Detects network traffic originating from a private (RFC1918) source IP address to a public destination IP address.
+//              This pattern is a strong indicator of an IP spoofing attempt or a significant network misconfiguration, as private
+//              IP addresses should not be routable on the public internet. This rule is most effective when applied to logs from
+//              perimeter network devices (e.g., firewalls, edge routers) that monitor traffic leaving the network.
+// Tactic: Initial Access, Defense Evasion
+// Technique: T1595.002, T1090.002
+// Author: RW
+// Date: 2025-08-13
+// False Positives: This rule can be noisy if not scoped to the correct log sources.
+// Legitimate outbound traffic from internal hosts will match this pattern before Network Address Translation (NAT) is applied. It is critical to filter for log sources that are positioned at the network edge to monitor post-NAT or un-NATted egress traffic. Network misconfigurations can also be a source of false positives.
+// Data Source: Network Session, Firewall Logs
+
+_Im_NetworkSession
+| where isnotempty(SrcIpAddr) and isnotempty(DstIpAddr)
+// This condition identifies traffic originating from a private IP address space (RFC1918).
+| where is_private_ipv4(SrcIpAddr)
+// This condition ensures the destination is a public IP address, excluding other non-routable ranges.
+| where not(is_private_ipv4(DstIpAddr))
+    and not(ipv4_is_in_range(DstIpAddr, "127.0.0.0/8")) // Exclude loopback addresses
+    and not(ipv4_is_in_range(DstIpAddr, "169.254.0.0/16")) // Exclude link-local addresses
+    and not(ipv4_is_in_range(DstIpAddr, "224.0.0.0/4")) // Exclude multicast addresses
+// To improve fidelity, consider filtering for specific log sources, such as perimeter firewalls.
+// | where EventProduct in ("Palo Alto Networks", "Fortinet FortiGate", "Cisco ASA")
+| project-reorder
+    TimeGenerated,
+    SrcIpAddr,
+    DstIpAddr,
+    SrcHostname,
+    DstHostname,
+    NetworkProtocol,
+    EventVendor,
+    EventProduct,
+    DstPortNumber
+| extend
+    timestamp = TimeGenerated,
+    SrcDeviceName = SrcHostname,
+    DstDeviceName = DstHostname

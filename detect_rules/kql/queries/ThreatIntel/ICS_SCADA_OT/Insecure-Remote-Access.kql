@@ -1,0 +1,71 @@
+// Name: Insecure Remote Access Pattern in ICS/OT Environment
+// Author: RW
+// Date: 2025-08-17
+// Description: Detects multiple patterns of insecure or highly anomalous remote access to or from critical
+// Industrial Control Systems (ICS) or Operational Technology (OT) assets. This includes inbound RDP/VNC
+// from the internet, outbound SSH to the internet, and the use of common remote administration software.
+// Such activity is often forbidden by policy in OT environments and can be an indicator of misconfiguration or malicious activity.
+// False Positive Sensitivity: Medium
+// Tactic: Initial Access, Command and Control
+// Technique: T1133, T1219
+
+let timeframe = 1d;
+// FP Tuning: Define identifiers for your critical OT/ICS assets. This is the most important step to reduce noise.
+// Use hostnames, naming conventions, or device groups. Example: dynamic(["HMI-01", "EWS-PROD", "HistorianDB"])
+let ot_asset_identifiers = dynamic([]);
+// FP Tuning: Add your corporate, VPN, and trusted partner IP ranges to prevent false positives from legitimate remote access.
+let corporate_ip_ranges = dynamic(["192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"]);
+// Define common remote administration tools that are often disallowed in OT environments.
+let remote_admin_tools = dynamic([
+    "TeamViewer.exe",
+    "AnyDesk.exe",
+    "tv_w32.exe",
+    "tv_x64.exe",
+    "LogMeIn.exe",
+    "ScreenConnect.exe",
+    "splashtop.exe",
+    "vncviewer.exe"
+]);
+
+// Pattern 1: Detects inbound connections from the public internet on common remote access ports.
+let inbound_remote_access =
+DeviceNetworkEvents
+| where TimeGenerated > ago(timeframe)
+| where ActionType == "InboundConnectionAccepted"
+| where RemotePort in (3389, 5800, 5900, 5901) // RDP, VNC
+| where not(ipv4_is_in_any_range(RemoteIP, corporate_ip_ranges))
+| extend Pattern = "Inbound RDP/VNC from Internet";
+
+// Pattern 2: Detects outbound SSH connections from OT assets to the public internet, which could indicate C2 or data exfiltration.
+let outbound_ssh =
+DeviceNetworkEvents
+| where TimeGenerated > ago(timeframe)
+| where ActionType == "ConnectionSuccess" and isempty(InitiatingProcessFileName) // Focus on network-level events if process context is missing
+    or InitiatingProcessFileName !in ("smbd.exe", "sshd.exe") // Exclude common local services if needed
+| where RemotePort == 22
+| where not(ipv4_is_in_any_range(RemoteIP, corporate_ip_ranges))
+| extend Pattern = "Outbound SSH to Internet";
+
+// Pattern 3: Detects the execution of common remote administration software on OT assets.
+let remote_admin_software =
+DeviceProcessEvents
+| where TimeGenerated > ago(timeframe)
+| where FileName in~ (remote_admin_tools)
+| extend Pattern = "Remote Administration Software Execution";
+
+// Union all patterns and filter for activity on designated OT assets.
+union inbound_remote_access, outbound_ssh, remote_admin_software
+// The check for OT assets is performed after the union to allow flexibility.
+// If ot_asset_identifiers is empty, the rule will run against all devices, which is not recommended for production.
+| where array_length(ot_asset_identifiers) == 0 or DeviceName has_any (ot_asset_identifiers) or InitiatingProcessAccountName has_any (ot_asset_identifiers)
+| project
+    TimeGenerated,
+    Pattern,
+    DeviceName,
+    ActionType,
+    RemoteIP,
+    RemotePort,
+    FileName,
+    ProcessCommandLine,
+    InitiatingProcessFileName,
+    AccountName

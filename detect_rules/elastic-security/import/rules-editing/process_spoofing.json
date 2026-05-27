@@ -1,0 +1,18 @@
+{
+  "type": "detection-engine.rule",
+  "id": "potential-process-spoofing",
+  "attributes": {
+    "risk_score": 70,
+    "enabled": true,
+    "name": "Potential Process Spoofing or Command-line Injection (ES|QL)",
+    "description": "Detects potential process spoofing or command-line injection by comparing the executed process with the command-line executable. Filters out common system processes and common executable paths to reduce false positives.",
+    "rule_id": "potential_process_spoofing_esql",
+    "index": ["logs-endpoint.events.*"],
+    "language": "esql",
+    "query": "FROM logs-endpoint.events.*\nWHERE event.category: \"process\" AND event.action: \"start\"\n| EVAL command_line_executable = SUBSTRING(process.command_line, INDEX_OF(process.command_line, ' ')-1)\n| WHERE process.name != command_line_executable.lower\nAND NOT process.parent.name IN (\"services.exe\", \"svchost.exe\", \"WmiPrvSE.exe\", \"msiexec.exe\", \"TiWorker.exe\")\nAND NOT (process.executable LIKE \"*C:\\\\Windows\\\\System32*\" OR process.executable LIKE \"*C:\\\\Windows\\\\SysWOW64*\" OR process.executable LIKE \"*C:\\\\Program Files*\" OR process.executable LIKE \"*AppData\\\\Local\\\\Temp*\" OR process.executable LIKE \"*\\\\Windows\\\\Temp*\")",
+    "interval": "10m",
+    "severity": "medium",
+    "type": "esql",
+    "version": "1"
+  }
+}

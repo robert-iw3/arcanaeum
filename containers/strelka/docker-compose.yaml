@@ -1,0 +1,190 @@
+version: '3.8'
+
+secrets:
+  siem_token:
+    file: ./siem_token.secret
+  minio_user:
+    file: ./minio_user.secret
+  minio_password:
+    file: ./minio_password.secret
+
+services:
+  redis:
+    image: redis:alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  filestore:
+    image: minio/minio
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    secrets:
+      - minio_user
+      - minio_password
+    environment:
+      MINIO_ROOT_USER_FILE: /run/secrets/minio_user
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/minio_password
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9001/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    volumes:
+      - minio-data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  frontend:
+    image: ghcr.io/target/strelka-frontend:latest
+    ports:
+      - "127.0.0.1:8732:8732"
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+      filestore:
+        condition: service_healthy
+    environment:
+      STRELKA_BACKEND_ADDR: backend:57314
+    healthcheck:
+      test: ["CMD", "grpc-health-probe", "-addr=:8732"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    depends_on:
+      redis:
+        condition: service_healthy
+      filestore:
+        condition: service_healthy
+    volumes:
+      - ./yara-rules:/app/configs/python/backend/yara/rules
+    environment:
+      STRELKA_FILENAMES_ADDR: filestore:9000
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import strelka; print('OK')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+
+  suricata:
+    build:
+      context: .
+      dockerfile: Dockerfile.suricata
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - SYS_NICE
+    volumes:
+      - ./suricata-logs:/var/log/suricata
+      - ./suricata-files:/var/lib/suricata/files
+      - ./suricata-rules:/etc/suricata/rules:ro
+    environment:
+      - SURICATA_INTERFACE=wlan0  # Change to your NIC (e.g., eth0, enp0s3, etc.)
+    healthcheck:
+      test: ["CMD", "suricata", "--build-info"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'  # Tune for traffic volume
+          memory: 512M
+
+  integrator:
+    build:
+      context: .
+      dockerfile: Dockerfile.integrator
+    volumes:
+      - ./suricata-logs:/suricata-logs
+      - ./suricata-files:/suricata-files
+      - ./file-drop:/file-drop
+    depends_on:
+      suricata:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    environment:
+      - STRELKA_HOST=frontend:8732
+    healthcheck:
+      test: ["CMD", "pgrep", "python"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  watcher:
+    build:
+      context: .
+      dockerfile: Dockerfile.watcher
+    volumes:
+      - ./file-drop:/file-drop
+      - ./quarantine:/quarantine
+      - ./scan-logs:/scan-logs
+    depends_on:
+      frontend:
+        condition: service_healthy
+    secrets:
+      - siem_token
+    environment:
+      - STRELKA_HOST=frontend:8732
+      - SIEM_TYPE=${SIEM_TYPE:-elastic}
+      - SIEM_URL=${SIEM_URL}
+      - INDEX_NAME=${INDEX_NAME:-strelka-scans}
+      - SIEM_TOKEN_FILE=/run/secrets/siem_token
+    healthcheck:
+      test: ["CMD", "pgrep", "python"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+volumes:
+  minio-data:
+  quarantine:

@@ -1,0 +1,44 @@
+title: OT Network Baseline Deviation
+status: experimental
+description: >-
+  This rule serves as a template for detecting baseline deviations in an OT network.
+  It is designed to be implemented in a SIEM that can maintain a stateful baseline of
+  known devices and their communication patterns (e.g., IP-port pairs).
+  An alert should be generated when: 1) A new device (IP address) appears within the
+  defined OT network segments that has not been seen in a historical baseline period
+  (e.g., last 14 days). 2) A known OT device communicates on a new port that it has
+  not used in the baseline period.
+  This can indicate unauthorized device additions, lateral movement, or reconnaissance.
+references:
+  - https://www.cisa.gov/uscert/ics/recommended-practices
+author: RW
+date: 2025-08-18
+tags:
+  - attack.reconnaissance
+  - attack.t1592
+  - attack.t1595
+  - attack.t1083
+  - detection.anomaly
+logsource:
+  category: network_traffic
+  product: zeek
+detection:
+  # This section defines the scope of traffic to be baselined by a stateful SIEM rule.
+  # It should be customized with your specific OT network IP ranges.
+  source_in_ot:
+    source.ip|cidr:
+      - '10.100.0.0/16'   # Placeholder for OT network segment 1
+      - '192.168.50.0/24' # Placeholder for OT network segment 2
+  destination_in_ot:
+    destination.ip|cidr:
+      - '10.100.0.0/16'   # Placeholder for OT network segment 1
+      - '192.168.50.0/24' # Placeholder for OT network segment 2
+  # The condition captures any traffic that involves the OT network.
+  # The SIEM implementation should use this scope to baseline activity and alert on deviations.
+  condition: 1 of them
+falsepositives:
+  - Legitimate addition of new devices to the OT network.
+  - Planned configuration changes or software updates that alter communication patterns (e.g., using new ports).
+  - Dynamic port usage by some legitimate applications.
+  - These events require an operational process to investigate, validate, and update the baseline to prevent recurring alerts for known-good activity.
+level: medium

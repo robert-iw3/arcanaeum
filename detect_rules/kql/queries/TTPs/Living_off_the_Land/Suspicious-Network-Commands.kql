@@ -1,0 +1,29 @@
+// Name: Suspicious Network Commands
+// Author: RW
+// Date: 2025-08-08
+// Description: Detects the execution of common network reconnaissance commands such as 'ipconfig /all', 'netstat -ano', and 'arp -a'.
+//              This activity is frequently observed in the early stages of intrusions by threat actors to gather information about the network environment.
+// False Positive Sensitivity: Medium
+// Tactics: Discovery
+// Techniques: T1016, T1082
+
+DeviceProcessEvents
+// Identifies common network reconnaissance commands
+| where
+    (FileName =~ "ipconfig.exe" and ProcessCommandLine has "/all") or
+    (FileName =~ "netstat.exe" and ProcessCommandLine has "-a" and ProcessCommandLine has "-n" and ProcessCommandLine has "-o") or
+    (FileName =~ "arp.exe" and ProcessCommandLine has "-a") or
+    (FileName in~ ("curl.exe", "wget.exe") and ProcessCommandLine has "ip-api.com")
+// FP Tuning: These commands are frequently used by administrators, users, and automated systems for legitimate purposes.
+// To increase fidelity, correlate these events. Look for multiple different reconnaissance commands from the same host or user in a short time window.
+// Also, consider filtering for execution from unusual parent processes (e.g., office applications, web servers).
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    ProcessCommandLine,
+    InitiatingProcessCommandLine,
+    InitiatingProcessFileName,
+    ReportId,
+    ProcessId,
+    InitiatingProcessId

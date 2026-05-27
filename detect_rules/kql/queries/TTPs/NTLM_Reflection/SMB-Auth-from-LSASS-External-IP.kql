@@ -1,0 +1,24 @@
+// Name: SMB Authentication from LSASS to External IP
+// Author: RW
+// Date: 2025-07-31
+// Description: This detection identifies suspicious SMB authentication attempts originating from lsass.exe to external IP addresses. This is a key indicator of NTLM relay or reflection attacks like CVE-2025-33073, where a coerced authentication is sent to an attacker-controlled machine.
+// Mitre TTPs: T1557.001
+// References:
+DeviceNetworkEvents
+// Look for SMB traffic, which typically uses port 445
+| where RemotePort == 445
+// The connection must originate from the LSASS process, which handles authentication
+| where InitiatingProcessFileName has "lsass.exe"
+// Filter for connections to non-private (external) IP addresses, which is highly anomalous for LSASS
+| where not(ipv4_is_private(RemoteIP))
+// FP Tuning: LSASS should not make SMB connections to external IPs. If this rule generates noise from internal traffic, you can add an allowlist for known management servers or domain controllers.
+// For example: | where RemoteIP !in ("10.0.0.5", "192.168.1.10")
+| project
+    Timestamp,
+    DeviceName,
+    InitiatingProcessFileName,
+    RemoteIP,
+    RemoteUrl,
+    RemotePort,
+    InitiatingProcessCommandLine,
+    InitiatingProcessParentFileName

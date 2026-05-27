@@ -1,0 +1,67 @@
+{
+  "rule_id": "suspicious_amsi_dll_load",
+  "name": "Suspicious AMSI.dll Load",
+  "description": "Detects attempts to bypass the Antimalware Scan Interface (AMSI) via DLL hijacking by monitoring for suspicious processes loading 'amsi.dll' from an unusual location or an 'amsi.dll' with an invalid or missing digital signature.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "FROM * | WHERE @timestamp IS NOT NULL AND file.name LIKE '%\\\\amsi.dll' AND process.name IN ('powershell.exe', 'pwsh.exe', 'cscript.exe', 'wscript.exe', 'rundll32.exe', 'regsvr32.exe') AND (NOT (file.path LIKE '%C:\\\\Windows\\\\System32\\\\%' OR file.path LIKE '%C:\\\\Windows\\\\SysWOW64\\\\%') OR (file.signature.status IS NULL OR file.signature.status != 'Valid' OR file.signature.issuer NOT LIKE '%Microsoft Windows%')) | KEEP host.name, process.name, process.command_line, file.name, file.path, file.hash.sha1, file.signature.issuer, file.signature.status | eval is_signed = CASE(file.signature.status == 'Valid', true, false)",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0005",
+        "name": "Defense Evasion",
+        "reference": "https://attack.mitre.org/tactics/TA0005/"
+      },
+      "technique": [
+        {
+          "id": "T1574",
+          "name": "Hijack Execution Flow",
+          "reference": "https://attack.mitre.org/techniques/T1574/"
+        },
+        {
+          "id": "T1574.001",
+          "name": "DLL Side-Loading",
+          "reference": "https://attack.mitre.org/techniques/T1574/001/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0003",
+        "name": "Persistence",
+        "reference": "https://attack.mitre.org/tactics/TA0003/"
+      },
+      "technique": [
+        {
+          "id": "T1543.003",
+          "name": "Windows Service",
+          "reference": "https://attack.mitre.org/techniques/T1543/003/"
+        }
+      ]
+    }
+  ],
+  "interval": "5m",
+  "from": "now-5m",
+  "max_signals": 100,
+  "risk_score": 90,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://detection.fyi/elastic/detection-rules/windows/defense_evasion_amsi_bypass_dllhijack/",
+    "https://www.elastic.co/docs/reference/security/prebuilt-rules/rules/windows/defense_evasion_amsi_bypass_dllhijack"
+  ],
+  "tags": [
+    "AMSI Bypass",
+    "DLL Hijacking",
+    "Defense Evasion"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "host.name, process.name, file.path, file.name"
+}

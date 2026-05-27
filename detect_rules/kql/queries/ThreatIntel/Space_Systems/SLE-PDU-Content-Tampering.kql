@@ -1,0 +1,42 @@
+// Name: SLE PDU Content Tampering Detected
+// Author: RW
+// Date: 2025-08-19
+// Description: This rule detects potential tampering or corruption of Space Link Extension (SLE) Protocol Data Units (PDUs) by
+// validating the integrity of the ISP1 framing. It checks if the actual payload length matches the length specified in the ISP1 header.
+// A mismatch can indicate a Man-in-the-Middle (MitM) attack where an adversary has tampered with the PDU content without correctly
+// updating the frame's length field, as described in the provided intelligence.
+// Tactic: Impact, Defense Evasion
+// Technique: T1499.003 (Application or System Exploitation), T1565.001 (Data Manipulation)
+// False Positive Sensitivity: Medium. Legitimate causes for mismatches could include network packet fragmentation, data corruption
+// from faulty hardware, or non-compliant SLE implementations. It is crucial to validate against known good traffic and filter for
+// specific critical assets (e.g., Mission Control Systems, Ground Stations) to improve fidelity.
+
+// IMPORTANT: This query requires a data source with Deep Packet Inspection (DPI) capabilities (e.g., Zeek, Corelight).
+// You must replace 'NetworkTrafficPayloads' with your table name. The table must contain the network payload as a hex string in a field named 'Payload'.
+let DpiLogs = view () {
+    NetworkTrafficPayloads // Replace with your table
+};
+
+DpiLogs
+// Filter for payloads that are at least long enough to contain an ISP1 header (8 bytes = 16 hex chars).
+| where strlen(Payload) >= 16
+// Filter for SLE PDU messages based on the ISP1 Type ID (0x01000000), as identified in the intelligence.
+| where startswith(tolower(Payload), '01000000')
+// Calculate the actual length of the entire PDU payload in bytes.
+| extend ActualPayloadLength = strlen(Payload) / 2
+// Extract the length specified in the ISP1 header (bytes 5-8 of the header).
+| extend DeclaredMessageLength = tolong(strcat('0x', substring(Payload, 8, 8)))
+// The expected total length is the declared message length plus the 8-byte ISP1 header.
+| extend ExpectedPayloadLength = DeclaredMessageLength + 8
+// Anomaly: The actual payload length does not match the length declared in the header. This indicates potential tampering or corruption.
+| where ActualPayloadLength != ExpectedPayloadLength
+// To increase fidelity, filter for traffic involving critical assets like Mission Control Systems (MCS) or Ground Stations (GS).
+// Example: | where SourceIP in (critical_assets_watchlist) or DestinationIP in (critical_assets_watchlist)
+| project
+    TimeGenerated,
+    SourceIP,
+    DestinationIP,
+    DestinationPort,
+    ActualPayloadLength,
+    ExpectedPayloadLength,
+    PayloadSnippet = substring(Payload, 0, 64)

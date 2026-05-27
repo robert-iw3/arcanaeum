@@ -1,0 +1,55 @@
+{
+  "rule_id": "suspicious_process_memory_allocation",
+  "name": "Suspicious Process Memory Allocation",
+  "description": "Detects anomalous process memory allocation with execute-write permissions (`0x40`). This technique is frequently used by adversaries for process injection and defense evasion by executing malicious code from within a legitimate process.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "FROM logs-endpoint.events.* | WHERE process.memory.allocation.flags LIKE '%0x40%' AND process.actor.name != process.target.name AND process.actor.name not in ('csrss.exe', 'lsass.exe', 'svchost.exe', 'YourEDRAgent.exe') AND process.target.name not in ('msedge.exe', 'chrome.exe', 'firefox.exe') | STATS count = COUNT(*) BY host.name, user.name, process.actor.name, process.actor.executable, process.actor.command_line, process.target.name, process.target.executable | KEEP host.name, user.name, process.actor.name, process.actor.executable, process.actor.command_line, process.target.name, process.target.executable, count",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0005",
+        "name": "Defense Evasion",
+        "reference": "https://attack.mitre.org/tactics/TA0005/"
+      },
+      "technique": [
+        {
+          "id": "T1055",
+          "name": "Process Injection",
+          "reference": "https://attack.mitre.org/techniques/T1055/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0002",
+        "name": "Execution",
+        "reference": "https://attack.mitre.org/tactics/TA0002/"
+      }
+    }
+  ],
+  "interval": "5m",
+  "from": "now-5m",
+  "max_signals": 100,
+  "risk_score": 90,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://www.elastic.co/security-labs/upping-the-ante-detecting-in-memory-threats-with-kernel-call-stacks",
+    "https://www.elastic.co/guide/en/security/current/detect-suspicious-memory-allocation.html"
+  ],
+  "tags": [
+    "Process Injection",
+    "Memory",
+    "Defense Evasion"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "host.name, process.actor.name, process.target.name"
+}

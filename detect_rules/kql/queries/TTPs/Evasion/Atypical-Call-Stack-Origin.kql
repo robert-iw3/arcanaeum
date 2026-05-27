@@ -1,0 +1,39 @@
+// Name: Atypical Call Stack Origin for Syscall
+// Author: RW
+// Date: 2025-08-02
+// Description: Detects when a sensitive API call, which typically results in a syscall, originates from the process's main executable module rather than a standard system library like ntdll.dll. This pattern is indicative of direct syscalls, an EDR evasion technique.
+// Tactic: Defense Evasion
+// Technique: T1055 Process Injection
+// False Positive Sensitivity: Medium
+
+// Define sensitive API calls that are high-level representations of syscalls used by malware.
+let sensitiveApiCalls = dynamic([
+    "AllocateVirtualMemoryApiCall",
+    "ProtectVirtualMemoryApiCall",
+    "WriteMemoryApiCall",
+    "CreateRemoteThreadApiCall",
+    "MapViewOfSectionApiCall",
+    "QueueUserApcApiCall",
+    "SetThreadContextApiCall"
+]);
+DeviceEvents
+// Filter for the sensitive API calls.
+| where ActionType in (sensitiveApiCalls)
+// The InitiatingProcessFolderPath field represents the module that initiated the API call.
+// Normally, this would be a system DLL like ntdll.dll or kernelbase.dll.
+// If it's the executable itself, it implies the call stack originates directly from the .exe, which is a strong indicator of a direct syscall.
+| where InitiatingProcessFolderPath endswith ".exe"
+// FP Mitigation: Some legitimate software, especially those using packers, DRM, or anti-cheat technologies,
+// might exhibit this behavior. Exclude known legitimate processes to reduce noise.
+| where not(InitiatingProcessFileName in~ ('known_good_app1.exe', 'known_good_app2.exe')) // Placeholder for FP tuning
+| project
+    TimeGenerated,
+    DeviceName,
+    ActionType,
+    InitiatingProcessFileName,
+    InitiatingProcessFolderPath,
+    InitiatingProcessCommandLine,
+    FileName,
+    FolderPath,
+    SHA1,
+    ReportId

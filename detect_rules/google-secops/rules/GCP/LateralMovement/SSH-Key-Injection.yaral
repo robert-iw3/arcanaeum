@@ -1,0 +1,38 @@
+rule gcp_ssh_key_injection_via_gcloud {
+  meta:
+    description = "Detects the execution of 'gcloud compute ssh', which can be abused by attackers to inject SSH keys, escalate privileges, and move laterally within a GCP environment. This is especially potent when used by a service account, as it can bypass 2FA requirements."
+    author = "RW"
+    date = "2025-08-20"
+    tags = "GCP, LATERAL_MOVEMENT, PRIVILEGE_ESCALATION, GCLOUD, SSH"
+    tactic = "TA0008, TA0004"
+    technique = "T1021.004"
+    false_positives = "Legitimate use by system administrators or automated scripts for managing GCP instances. Tuning may be required to exclude known administrative users, source hosts, or CI/CD service accounts."
+
+  events:
+    $gcloud_ssh.metadata.event_type = "PROCESS_LAUNCH"
+    $gcloud_ssh.principal.hostname = $hostname
+    $gcloud_ssh.principal.user.userid = $user
+    $gcloud_ssh.target.process.command_line = $command_line
+    $gcloud_ssh.target.process.file.full_path = $process_path
+
+    // Detects the gcloud executable. The path can vary, especially with local/custom installations.
+    re.regex($process_path, `gcloud(\.py|\.sh|\.cmd)?$`)
+
+    // Detects the "compute ssh" subcommand within the command line.
+    re.regex($command_line, `\scompute\s+ssh\s`)
+
+    // Placeholder for tuning: Exclude known administrative users or service accounts to reduce noise.
+    // not $user in %gcp_admin_users
+
+  outcome:
+    $risk_score = 60
+    $principal_hostname = $hostname
+    $principal_user = $user
+    $principal_process_command_line = $command_line
+    $principal_process_path = $process_path
+    // Capture the target instance name from the command line for better context.
+    $target_instance_name = re.capture($command_line, `\scompute\s+ssh\s+(?:[^\s]+@)?([^\s]+)`)
+
+  condition:
+    $gcloud_ssh
+}

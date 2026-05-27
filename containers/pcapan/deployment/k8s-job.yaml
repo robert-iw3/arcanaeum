@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pcapan-pvc
+  namespace: pcapan-ns
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pcapan-analyzer
+  namespace: pcapan-ns
+spec:
+  template:
+    spec:
+      containers:
+      - name: pcapan
+        image: pcapan:latest
+        command: ["pcapan", "--dir", "/pcaps", "--whitelist", "/whitelist.yaml", "--output", "/results.json"]
+        volumeMounts:
+        - name: pcaps
+          mountPath: /pcaps
+        - name: whitelist
+          mountPath: /whitelist.yaml
+          subPath: whitelist.yaml
+      volumes:
+      - name: pcaps
+        persistentVolumeClaim:
+          claimName: pcapan-pvc
+      - name: whitelist
+        configMap:
+          name: pcapan-config
+      restartPolicy: Never
+  backoffLimit: 3
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pcapan-config
+  namespace: pcapan-ns
+data:
+  whitelist.yaml: |
+    dns: {}
+    allow: {}
+    su: {}
+    oksuffixes: []
+    okhosts: []

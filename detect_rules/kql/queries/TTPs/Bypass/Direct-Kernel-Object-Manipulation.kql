@@ -1,0 +1,47 @@
+// Name: Anomalous Parent-Child Process Relationship
+// Author: RW
+// Date: 2025-08-14
+// Description: Detects processes with unexpected parent processes, which can be an indicator of Direct Kernel Object Manipulation (DKOM)
+// techniques like process re-parenting. Adversaries may alter a process's parent in the kernel's EPROCESS structure to evade detection,
+// masquerade as a legitimate system process, or break process tree analysis by security tools.
+// False Positive Sensitivity: Medium. Some legitimate software installers or complex application startup sequences might create processes
+// with unusual parents. It's important to baseline normal behavior and exclude known good applications.
+
+let known_relationships = datatable(ProcessName:string, ParentProcessName:string)[
+    // Legitimate parent for svchost.exe is services.exe.
+    "svchost.exe", "services.exe",
+    // Legitimate parent for lsass.exe is wininit.exe.
+    "lsass.exe", "wininit.exe",
+    // Legitimate parent for services.exe is wininit.exe.
+    "services.exe", "wininit.exe",
+    // Legitimate parent for smss.exe is the System process (PID 4).
+    "smss.exe", "System",
+    // Legitimate parent for spoolsv.exe is services.exe.
+    "spoolsv.exe", "services.exe"
+];
+DeviceProcessEvents
+| where ActionType == "ProcessCreated"
+// Focus on key system processes with well-defined parents.
+| where FileName in (toscalar(known_relationships | summarize make_set(ProcessName)))
+// Join against the known good relationships. The leftanti join returns rows from the left that have no match on the right.
+| join kind=leftanti (
+    known_relationships
+) on $left.FileName == $right.ProcessName, $left.InitiatingProcessFileName == $right.ParentProcessName
+// Handle the special case for the System process, which may not have a name but has PID 4.
+| where not (FileName == "smss.exe" and InitiatingProcessId == 4)
+// Exclude processes created by themselves (e.g., some updaters).
+| where FileName != InitiatingProcessFileName
+// Exclude known FPs. For example, WerFault.exe can spawn processes during crashes.
+// FP Mitigation: Add other legitimate processes that may spawn these system processes in your environment.
+| where InitiatingProcessFileName !in ("WerFault.exe", "wermgr.exe", "msiexec.exe")
+| project
+    Timestamp,
+    DeviceName,
+    FileName,
+    ProcessId,
+    ProcessCommandLine,
+    InitiatingProcessFileName,
+    InitiatingProcessId,
+    InitiatingProcessCommandLine,
+    AccountName,
+    ReportId

@@ -1,0 +1,33 @@
+title: High Volume of S3 Read Operations by a Single Identity
+id: 3bff7b07-07de-4492-b2cb-3108d40dd723
+status: experimental
+description: Detects a high volume of S3 read operations (ListObjects, HeadObject, GetObject) initiated by a single AWS identity within a short timeframe. This pattern can indicate data enumeration and exfiltration attempts by an attacker who has gained access to credentials.
+references:
+  - https://securitylabs.datadoghq.com/articles/tales-from-the-cloud-trenches-ecs-crypto-mining/#hands-on-keyboard-activity-begins
+author: RW
+date: 2025-08-19
+tags:
+  - attack.collection
+  - attack.t1530
+  - attack.t1213.002
+logsource:
+  service: cloudtrail
+detection:
+  selection:
+    # Key S3 events for enumeration and data access
+    aws.cloudtrail.event_source: 's3.amazonaws.com'
+    aws.cloudtrail.event_name:
+      - 'ListObjects'
+      - 'ListObjectsV2'
+      - 'HeadObject'
+      - 'GetObject'
+    aws.cloudtrail.error_code:
+  # The condition aggregates the count of S3 read events by the user's principal ID.
+  # A high count is suspicious and may indicate automated data discovery or theft.
+  condition: selection | count() by aws.cloudtrail.user_identity.principal_id > 100
+  timeframe: 1h
+falsepositives:
+  - Legitimate data-intensive applications, backup services, or data analytics platforms may generate a high volume of S3 read events.
+  - It is recommended to tune the threshold (e.g., > 100) based on your environment's baseline activity.
+  - Consider excluding known service accounts, roles, or user agents associated with legitimate automated processes.
+level: medium

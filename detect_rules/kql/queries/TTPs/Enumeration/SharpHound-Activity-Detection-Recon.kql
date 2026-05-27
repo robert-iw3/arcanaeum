@@ -1,0 +1,118 @@
+// Name: SharpHound Activity Detection
+// Author: RW
+// Date: 2025-08-07
+// Description: This query unifies multiple detection methods for BloodHound/SharpHound activity.
+//              It detects the execution of the tool, the creation of its output files, and its
+//              primary reconnaissance methods: SAMR and GPO-based local group enumeration.
+// MITRE ATT&CK: T1087.002 (Domain Account), T1558.003 (Kerberoasting)
+// False Positive Sensitivity: Medium
+
+// FP Mitigation: Add hostnames of management servers or security tools that perform legitimate activities.
+let legitimate_sources = dynamic([]);
+// FP Mitigation: Add accounts of administrators or tools that perform legitimate activities.
+let legitimate_accounts = dynamic([]);
+// FP Mitigation: Add processes of management/security tools that perform legitimate activities.
+let legitimate_processes = dynamic([]);
+
+// Part 1: Detect SharpHound Execution
+let sharphound_execution =
+DeviceProcessEvents
+| where Timestamp > ago(1h)
+| where AccountName !in (legitimate_accounts) and DeviceName !in (legitimate_sources)
+| where
+    (ProcessFileName =~ "SharpHound.exe" or ProcessVersionInfoOriginalFileName =~ "SharpHound.exe")
+    or
+    (
+        ProcessFileName in ("powershell.exe", "pwsh.exe")
+        and ProcessCommandLine has_any ("SharpHound.exe", "SharpHound.ps1", "Invoke-BloodHound")
+    )
+| where ProcessCommandLine has "--CollectionMethod" or ProcessCommandLine has_any ("LocalAdmin", "RDP", "DCOM", "PSRemote", "GPOLocalGroup", "All", "Default", "Session")
+| project
+    Timestamp,
+    DetectionType = "SharpHound Execution",
+    DeviceName,
+    AccountName,
+    AccountSid,
+    InitiatingProcessFileName = ProcessFileName,
+    InitiatingProcessCommandLine = ProcessCommandLine,
+    Details = strcat("SharpHound process executed. Initiating process: ", InitiatingProcessFileName);
+
+// Part 2: Detect SharpHound Output File Creation
+let sharphound_output =
+DeviceFileEvents
+| where Timestamp > ago(1h)
+| where ActionType == "FileCreated"
+| where FileName endswith ".zip" or FileName endswith ".json"
+| where InitiatingProcessFileName !in (legitimate_processes) and DeviceName !in (legitimate_sources)
+| where FileName has "bloodhound" or InitiatingProcessFileName =~ "SharpHound.exe"
+| project
+    Timestamp,
+    DetectionType = "SharpHound Output File",
+    DeviceName,
+    AccountName = InitiatingProcessAccountName,
+    AccountSid = InitiatingProcessAccountSid,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    Details = strcat("SharpHound output file created: ", FolderPath, "\\", FileName);
+
+// Part 3: Detect SAMR Reconnaissance
+let samr_recon =
+DeviceEvents
+| where Timestamp > ago(1h)
+| where ActionType == "RpcClientCall"
+// Filter for the specific SAMR interface UUID.
+| where RpcInterfaceUuid == "12345778-1234-abcd-ef00-0123456789ac"
+| where RpcPipeName has "samr"
+| where DeviceName !in (legitimate_sources) and InitiatingProcessFileName !in (legitimate_processes) and InitiatingProcessAccountName !in (legitimate_accounts)
+| summarize
+    StartTime = min(Timestamp),
+    TargetComputers = make_set(RemoteDeviceName, 10)
+    by
+    DeviceName, // Source computer
+    AccountName = InitiatingProcessAccountName,
+    AccountSid = InitiatingProcessAccountSid,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine
+// Filter for scanning behavior against multiple hosts.
+| where array_length(TargetComputers) > 2
+| project
+    Timestamp = StartTime,
+    DetectionType = "SAMR Reconnaissance",
+    DeviceName,
+    AccountName,
+    AccountSid,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    Details = strcat("Enumerated ", array_length(TargetComputers), " targets via SAMR: ", TargetComputers);
+
+// Part 4: Detect GPO Local Group Reconnaissance
+let gpo_recon =
+DeviceFileEvents
+| where Timestamp > ago(1h)
+// Filter for GPO policy files used by SharpHound.
+| where FolderPath has_all ("SYSVOL", "Policies") and FileName in ("Groups.xml", "GptTmpl.inf")
+| where isnotempty(RemoteDeviceName)
+| where InitiatingProcessAccountName !~ "SYSTEM" and not(InitiatingProcessAccountName endswith "$")
+| where InitiatingProcessAccountName !in (legitimate_accounts) and RemoteDeviceName !in (legitimate_sources)
+| extend GpoGuid = extract(@"\{([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\}", 1, FolderPath)
+| where isnotempty(GpoGuid)
+| summarize
+    StartTime = min(Timestamp),
+    UniqueGpoCount = dcount(GpoGuid),
+    TargetDCs = make_set(DeviceName, 5)
+    by SourceMachine = RemoteDeviceName, AccountName = InitiatingProcessAccountName, AccountSid = InitiatingProcessAccountSid, InitiatingProcessFileName
+// Alert when a single source accesses an anomalous number of GPOs.
+| where UniqueGpoCount > 10
+| project
+    Timestamp = StartTime,
+    DetectionType = "GPO Reconnaissance",
+    DeviceName = SourceMachine,
+    AccountName,
+    AccountSid,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine = "N/A", // Not available in DeviceFileEvents
+    Details = strcat("Accessed ", UniqueGpoCount, " unique GPO policy files from DCs: ", TargetDCs);
+
+// Union all detection parts into a single result set.
+union sharphound_execution, sharphound_output, samr_recon, gpo_recon
+| order by Timestamp desc

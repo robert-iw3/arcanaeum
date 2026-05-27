@@ -1,0 +1,36 @@
+name: CI/CD Pipeline
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.89
+          override: true
+      - name: Build Rust
+        run: cd rust-app && cargo build --release
+      - name: Test Rust
+        run: cd rust-app && cargo test
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Build Web
+        run: cd web-app && npm install && npm run build
+      - name: Test Web
+        run: cd web-app && npm test
+      - name: Build Docker
+        run: |
+          cd rust-app && docker build -t pcapan:latest .
+          cd ../web-app && docker build -t pcapan-web:latest .
+      - name: Scan Images
+        run: |
+          docker run --rm aquasec/trivy image pcapan:latest
+          docker run --rm aquasec/trivy image pcapan-web:latest

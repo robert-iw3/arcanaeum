@@ -1,0 +1,48 @@
+rule gcp_instance_metadata_manipulation {
+  meta:
+    description = "Detects modification of GCP instance metadata to add SSH keys or enable the serial console. This can be used by attackers for persistence, privilege escalation, or unauthorized access."
+    author = "RW"
+    date = "2025-08-20"
+    tags = "GCP, PERSISTENCE, LATERAL_MOVEMENT, GCLOUD, METADATA"
+    tactic = "TA0003, TA0008"
+    technique = "T1098.004"
+    false_positives = "Legitimate administrative actions by engineers or automated CI/CD pipelines to configure instances. Tuning may be required to exclude known service accounts or administrative users."
+
+  events:
+    $metadata_mod.metadata.event_type = "PROCESS_LAUNCH"
+    $metadata_mod.principal.hostname = $hostname
+    $metadata_mod.principal.user.userid = $user
+    $metadata_mod.target.process.command_line = $command_line
+    $metadata_mod.target.process.file.full_path = $process_path
+
+    // Detects the gcloud executable.
+    re.regex($process_path, `gcloud(\.py|\.sh|\.cmd)?$`)
+
+    // Detects the command to add instance metadata.
+    re.regex($command_line, `\scompute\s+instances\s+add-metadata\s`)
+
+    // Detects either SSH key modification or enabling the serial port.
+    (
+      re.regex($command_line, `ssh-keys=`) or
+      re.regex($command_line, `serial-port-enable=TRUE`)
+    )
+
+    // Placeholder for tuning: Exclude known administrative users or service accounts.
+    // not $user in %gcp_admin_users
+
+  outcome:
+    $risk_score = 70
+    $principal_hostname = $hostname
+    $principal_user = $user
+    $principal_process_command_line = $command_line
+    $principal_process_path = $process_path
+    // Capture the target instance name for context.
+    $target_instance_name = re.capture($command_line, `\sadd-metadata\s+([^\s]+)`)
+    // Capture the specific metadata being set.
+    $metadata_key_value = re.capture($command_line, `(?:--metadata-from-file|--metadata)\s+([^\s]+)`)
+    // Classify the type of manipulation for easier analysis.
+    $manipulation_type = if(re.regex($command_line, `ssh-keys=`), "SSH Key Injection", "Serial Port Enabled")
+
+  condition:
+    $metadata_mod
+}

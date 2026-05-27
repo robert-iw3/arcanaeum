@@ -1,0 +1,28 @@
+---
+selinux:
+  enabled: true
+  target_mode: "enforcing"
+  policy_type: "targeted"
+  learning_hours: 48
+
+applications:
+  - name: nginx
+    binary: "/usr/sbin/nginx"
+    type: "http"
+    ports: [80, 443]
+    booleans:
+      - httpd_can_network_connect: true
+
+  - name: my_custom_app
+    binary: "/opt/myapp/bin/server"
+    type: "application"
+
+optimization:
+  enable_dontaudit: true                    # auto-suppress noisy denials
+  use_reference_policy: true                # audit2allow -R (best practice)
+  minimize_booleans: true
+  refinement_passes: 3                      # multi-pass least-privilege
+  auto_private_types: true                  # create myapp_t etc.
+  performance_tuning:
+    disable_unneeded_booleans: true
+    aggressive_pruning: true

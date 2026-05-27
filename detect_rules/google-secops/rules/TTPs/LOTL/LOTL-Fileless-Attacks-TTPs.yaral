@@ -1,0 +1,105 @@
+rule living_memory_and_fileless_techniques {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects a variety of living-off-the-land and fileless attack techniques occurring on a single host. This includes process hollowing, in-memory PowerShell execution via reflective loading, and persistence established through WMI Event Subscriptions or Registry Run Keys."
+    false_positives = "Legitimate administrative scripts, software installers/updaters (e.g., SCCM), and debugging tools may trigger parts of this rule. Tuning may be required to exclude known-good processes or scripts."
+    tactic = "TA0002, TA0003, TA0004, TA0005"
+    technique = "T1055.012, T1622, T1059.001, T1547.001, T1546.003"
+
+  events:
+    // Event 1: Process Hollowing - A process is created in a suspended state.
+    // This is often the first step in hollowing, preparing the process for injection.
+    $hollow_create.metadata.event_type = "PROCESS_LAUNCH"
+    $hollow_create.principal.hostname = $hostname
+    $hollow_create.principal.process.pid = $parent_pid
+    $hollow_create.target.process.pid = $child_pid
+    // The CREATE_SUSPENDED flag (value 4) is a key indicator. This may appear in different fields depending on the log source.
+    // We check command line for tools that support it, or a specific additional field if available.
+    (
+      re.regex($hollow_create.target.process.command_line, `CREATE_SUSPENDED`) or
+      $hollow_create.target.process.creation_flags = "4"
+    )
+
+    // Event 2: Process Hollowing - The parent process accesses the suspended child with high privileges.
+    // This is necessary to unmap original memory and write the malicious payload.
+    $hollow_access.metadata.event_type = "PROCESS_OPEN"
+    $hollow_access.principal.hostname = $hostname
+    $hollow_access.principal.process.pid = $parent_pid
+    $hollow_access.target.process.pid = $child_pid
+    // PROCESS_ALL_ACCESS (0x1F0FFF) is a strong indicator of memory manipulation.
+    $hollow_access.target.process.access_rights = "PROCESS_ALL_ACCESS"
+
+    // Event 3: Persistence via WMI Event Subscription
+    // Detects creation of a WMI subscription that executes commands via CommandLineEventConsumer.
+    $wmi_persist.metadata.event_type = "WMI_ACTIVITY"
+    $wmi_persist.principal.hostname = $hostname
+    $wmi_persist.target.wmi.operation = "WMI_BIND_FILTER_TO_CONSUMER"
+    re.regex($wmi_persist.target.wmi.consumer, `CommandLineEventConsumer`) nocase
+
+    // Event 4: Persistence via Registry Run Keys with Encoded PowerShell
+    // Detects modification of autostart registry keys to launch an encoded PowerShell command.
+    $reg_persist.metadata.event_type = "REGISTRY_MODIFICATION"
+    $reg_persist.principal.hostname = $hostname
+    re.regex($reg_persist.target.registry.key, `\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\(Run|RunOnce)$`) nocase
+    // Looks for powershell executing with an encoded command switch.
+    re.regex(strings.concat($reg_persist.target.registry.data.strings), `(?i)(powershell\.exe|pwsh\.exe).*(?:\s|-)(?:e|en|enc|enco|encod|encode|encodedcommand)`)
+
+    // Event 5: In-Memory PowerShell Assembly Execution
+    // Detects PowerShell downloading and loading a .NET assembly directly into memory.
+    // Requires PowerShell Script Block Logging (Event ID 4104).
+    $reflective_ps.metadata.event_type = "GENERIC_EVENT"
+    $reflective_ps.metadata.product_event_type = "4104"
+    $reflective_ps.principal.hostname = $hostname
+    // The script block content is often in security_result.description for UDM parsers.
+    re.regex($reflective_ps.security_result.description, `(?i)System\.Net\.WebClient.*(DownloadData|DownloadString).*\[System\.Reflection\.Assembly\]::Load`)
+
+  match:
+    $hostname over 1h
+
+    // Correlate the two stages of process hollowing within a short timeframe.
+    $hollow_access.metadata.event_timestamp.seconds > $hollow_create.metadata.event_timestamp.seconds and
+    $hollow_access.metadata.event_timestamp.seconds - $hollow_create.metadata.event_timestamp.seconds <= 60
+
+  condition:
+    ( #hollow_create > 0 and #hollow_access > 0 ) or
+    #wmi_persist > 0 or
+    #reg_persist > 0 or
+    #reflective_ps > 0
+
+  outcome:
+    // Set a risk score based on the detected technique. Process hollowing is typically higher fidelity.
+    $risk_score = if((#hollow_create > 0 and #hollow_access > 0), 75, 60)
+
+    // Identify the primary technique for the alert title.
+    $technique_name = if((#hollow_create > 0 and #hollow_access > 0), "Process Hollowing",
+                      if(#wmi_persist > 0, "WMI Persistence",
+                        if(#reg_persist > 0, "Registry Run Key Persistence",
+                          if(#reflective_ps > 0, "Reflective PowerShell Loading", "Unknown"))))
+
+    // Consolidate MITRE ATT&CK details.
+    $tactic = array_distinct("TA0002", "TA0003", "TA0004", "TA0005")
+    $technique = if($technique_name = "Process Hollowing", "T1055.012",
+                   if($technique_name = "WMI Persistence", "T1546.003",
+                     if($technique_name = "Registry Run Key Persistence", "T1547.001",
+                       if($technique_name = "Reflective PowerShell Loading", "T1059.001, T1622", "Unknown"))))
+
+    // Capture relevant details for investigation based on the technique detected.
+    $principal_process_path = if(#hollow_create > 0, array_distinct($hollow_create.principal.process.file.full_path),
+                                if(#wmi_persist > 0, array_distinct($wmi_persist.principal.process.file.full_path),
+                                  if(#reg_persist > 0, array_distinct($reg_persist.principal.process.file.full_path),
+                                    if(#reflective_ps > 0, array_distinct($reflective_ps.principal.process.file.full_path), null))))
+
+    $principal_process_cmdline = if(#hollow_create > 0, array_distinct($hollow_create.principal.process.command_line),
+                                   if(#wmi_persist > 0, array_distinct($wmi_persist.principal.process.command_line),
+                                     if(#reg_persist > 0, array_distinct($reg_persist.principal.process.command_line),
+                                       if(#reflective_ps > 0, array_distinct($reflective_ps.principal.process.command_line), null))))
+
+    $target_process_path = if(#hollow_create > 0, array_distinct($hollow_create.target.process.file.full_path), null)
+    $target_process_cmdline = if(#hollow_create > 0, array_distinct($hollow_create.target.process.command_line), null)
+    $registry_key = if(#reg_persist > 0, array_distinct($reg_persist.target.registry.key), null)
+    $registry_value_data = if(#reg_persist > 0, array_distinct($reg_persist.target.registry.data.strings), null)
+    $wmi_consumer = if(#wmi_persist > 0, array_distinct($wmi_persist.target.wmi.consumer), null)
+    $wmi_filter = if(#wmi_persist > 0, array_distinct($wmi_persist.target.wmi.filter), null)
+    $powershell_script_block = if(#reflective_ps > 0, array_distinct($reflective_ps.security_result.description), null)
+}

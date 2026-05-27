@@ -1,0 +1,50 @@
+//
+// Title: Suspicious Process Crash Indicating Potential Kernel Context Abuse
+// Description: This rule detects crashes (specifically, access violations) from processes running from unusual locations or that are not common applications. Such crashes can be a symptom of an exploit attempt. During the subsequent exception handling and context restoration process, legitimate but sensitive kernel functions like `nt!VslKernelShadowStackAssist` are called. An attacker may intentionally trigger such a crash to abuse this mechanism. This rule serves as a proxy to detect the conditions under which this abuse might occur.
+// Author: RW
+// Date: 2025-08-03
+// MITRE ATT&CK:
+//   - T1055: Process Injection
+//   - T1068: Exploitation for Privilege Escalation
+
+// This rule hunts for processes that crash in a way that might indicate an exploit attempt,
+// which could involve the abuse of kernel context restoration functions like VslKernelShadowStackAssist.
+let CETViolationCode = "c00004a2";
+// Common processes that might crash due to bugs or compatibility issues.
+// This list should be tuned for the specific environment to reduce noise.
+let common_applications = dynamic(["chrome.exe", "msedge.exe", "firefox.exe", "teams.exe", "outlook.exe", "winword.exe", "excel.exe", "powerpnt.exe", "explorer.exe"]);
+// Look for application crash events via Windows Error Reporting
+Event
+| where Source == "Windows Error Reporting" and EventID == 1001
+| parse kind=relaxed RenderedDescription with * "Problem signature:" signingLine "P1: " P1 "," * "P7: " P7 "," *
+// Exclude crashes that are explicitly CET violations, as those are covered by other rules.
+| where P7 != CETViolationCode
+// Focus on memory corruption-related exception codes like Access Violation (c0000005), a common sign of an exploit.
+| where P7 == "c0000005"
+| extend ProcessName = trim_end(@",", tostring(P1))
+// FP-MITIGATION: Filter out common applications that are known to crash.
+// An advanced version of this rule could baseline normal crash frequency per application.
+| where not(ProcessName has_any (common_applications))
+// Correlate with process execution events to get more context, like the file path.
+| join kind=inner (
+    DeviceProcessEvents
+    // FP-MITIGATION: Focus on processes running from user-writable or temporary locations, which is more suspicious.
+    | where FolderPath has_any (@"C:\Users\", @"C:\ProgramData\", @"C:\Windows\Temp\", @"\AppData\") or isempty(FolderPath)
+    | summarize by FileName, FolderPath, InitiatingProcessFileName, InitiatingProcessCommandLine, DeviceName
+) on $left.ProcessName == $right.FileName
+| extend
+    timestamp = TimeGenerated,
+    HostName = tostring(split(Computer, ".")[0]),
+    ExceptionCode = P7
+| project-reorder
+    timestamp,
+    HostName,
+    ProcessName,
+    ExceptionCode,
+    FolderPath,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RenderedDescription
+| extend
+    HostCustomEntity = HostName,
+    ProcessCustomEntity = ProcessName

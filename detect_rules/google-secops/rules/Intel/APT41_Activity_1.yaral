@@ -1,0 +1,107 @@
+rule apt41_lolbas_ttp_collection {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects a collection of Tactics, Techniques, and Procedures (TTPs) commonly associated with APT41 groups. This rule identifies the use of various Living-Off-the-Land Binaries and Scripts (LOLBAS) for discovery, credential access, and persistence."
+    false_positives = "Legitimate administrative activity may use these tools and commands. The rule is broad by design and may require tuning based on environmental baselines. The condition to alert on more than one of these events on a single host within an hour helps to reduce noise from isolated administrative actions."
+    tags = "APT41, CHINA, LOLBAS, DISCOVERY, CREDENTIAL_ACCESS, PERSISTENCE, DEFENSE_EVASION"
+    tactic = "TA0002, TA0003, TA0005, TA0006, TA0007"
+    technique = "T1105, T1049, T1018, T1016, T1087, T1003, T1053.005, T1047, T1059.001, T1059.003"
+
+  events:
+    // Catches process launch events for analysis.
+    $p.metadata.event_type = "PROCESS_LAUNCH"
+    $p.principal.hostname = $hostname
+    $p.target.process.command_line = $command_line
+    $p.target.process.file.full_path = $file_path
+    $p.principal.user.userid = $user
+
+    (
+      // T1105: Ingress Tool Transfer - CertUtil used for downloading files.
+      (
+        re.regex($file_path, `\\certutil\.exe$`) nocase
+        and re.regex($command_line, `(?i)-urlcache\s+(-split\s+)?-f\s+http`)
+      )
+      or
+      // T1003.003: OS Credential Dumping: NTDS - VSSAdmin used to create shadow copies.
+      (
+        re.regex($file_path, `\\vssadmin\.exe$`) nocase
+        and re.regex($command_line, `(?i)create\s+shadow`)
+      )
+      or
+      // T1003.003 & T1047: OS Credential Dumping & WMI - NTDSUtil executed via WMIC to dump credentials.
+      (
+        re.regex($file_path, `\\wmic\.exe$`) nocase
+        and re.regex($command_line, `(?i)process\s+call\s+create.*ntdsutil.*ac\s+i\s+ntds.*ifm.*create\s+full`)
+      )
+      or
+      // T1003.002: OS Credential Dumping: Security Account Manager - Reg.exe used to save SAM/SYSTEM hives.
+      (
+        re.regex($file_path, `\\reg\.exe$`) nocase
+        and re.regex($command_line, `(?i)\s+save\s+hklm\\(sam|system)\s+`)
+      )
+      or
+      // T1053.005: Scheduled Task/Job: Scheduled Task - Schtasks used for persistence.
+      (
+        re.regex($file_path, `\\schtasks\.exe$`) nocase
+        and re.regex($command_line, `(?i)\s+/create\s+`)
+        // FP Reduction: Exclude common system accounts. Consider adding other legitimate service accounts.
+        and not re.regex($user, `(?i)(SYSTEM|NETWORK SERVICE|LOCAL SERVICE)$`)
+      )
+      or
+      // T1003.001: OS Credential Dumping: LSASS Memory - Rundll32 and comsvcs.dll used to dump LSASS memory.
+      (
+        re.regex($file_path, `\\rundll32\.exe$`) nocase
+        and re.regex($command_line, `(?i)comsvcs\.dll,\s*MiniDump`)
+      )
+      or
+      // Discovery Commands (various techniques)
+      (
+        (
+          re.regex($file_path, `\\net\.exe$`) nocase
+          and re.regex($command_line, `(?i)\s+group\s+("Domain Admins"|/dom)`)
+        )
+        or
+        (
+          re.regex($file_path, `\\nltest\.exe$`) nocase
+          and re.regex($command_line, `(?i)/dclist:|/domain_trusts|/all_trusts|/parentdomain`)
+        )
+        or
+        (
+          re.regex($file_path, `\\dnscmd\.exe$`) nocase
+          and re.regex($command_line, `(?i)/enumrecords|/enumzones`)
+        )
+        or
+        (
+          re.regex($file_path, `\\netsh\.exe$`) nocase
+          and re.regex($command_line, `(?i)interface\s+(portproxy|firewall)\s+show`)
+        )
+        or
+        (
+          re.regex($file_path, `\\ldifde\.exe$`) nocase
+          and re.regex($command_line, `(?i)-f\s+.*-p\s+subtree`)
+        )
+      )
+    )
+
+  match:
+    // Correlate events on the same host over a 1-hour window.
+    $hostname over 1h
+
+  outcome:
+    // Risk score is moderate due to potential for FPs from admin activity.
+    $risk_score = 45
+    $principal_hostname = $hostname
+    // Grouping by user helps identify if a single account is performing multiple suspicious actions.
+    $principal_user = array_distinct($user)
+    // Count of distinct suspicious commands provides context on the scope of activity.
+    $event_count = count_distinct($p.metadata.id)
+    $commands = array_distinct($command_line)
+    $executable_paths = array_distinct($file_path)
+
+  condition:
+    // Alert if more than one of these suspicious commands runs on a host within the time window.
+    // This helps reduce noise from single, isolated admin commands.
+    // Adjust this threshold based on your environment's baseline.
+    #p > 1
+}

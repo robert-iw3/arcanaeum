@@ -1,0 +1,52 @@
+rule anomalous_grid_fluctuations_indicating_potential_manipulation {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects a cluster of anomalous voltage or frequency measurements in an ICS/OT environment. As highlighted in analyses of real-world grid events, abnormal voltage levels and oscillations often precede major outages and can be an early indicator of a cyber-physical attack or system instability caused by control system manipulation."
+    tactic = "TA0040"
+    technique = "T0831, T0836"
+    tags = "ICS, OT, ELECTRIC, GRID, IMPAIR_PROCESS_CONTROL"
+    false_positives = "Legitimate grid instability caused by non-malicious events (e.g., physical equipment failure, weather), normal, short-lived fluctuations during system startup or switching operations, or incorrectly configured thresholds."
+
+  events:
+    // This rule requires logs from process historians or other OT monitoring systems.
+    // The UDM event type and field names are examples and MUST be adapted to your specific log source.
+    $event.metadata.event_type = "GENERIC_EVENT"
+
+    // Define placeholder for the sensor/asset being monitored.
+    $sensor_tag = $event.target.resource.name
+
+    // Detects if the value is outside the defined safe operating envelope.
+    // The thresholds are examples and must be tuned for your specific environment.
+    (
+      // Pattern 1: Voltage anomalies (example uses Per-Unit values, common in power systems)
+      (
+        re.regex($event.target.resource.name, "voltage", nocase) and
+        ($event.target.process.value > "1.05" or $event.target.process.value < "0.95")
+      )
+      or
+      // Pattern 2: Frequency anomalies (example for a 60Hz system)
+      (
+        re.regex($event.target.resource.name, "frequency", nocase) and
+        ($event.target.process.value > "60.5" or $event.target.process.value < "59.5")
+      )
+    )
+
+  match:
+    // Groups multiple anomalous readings from the same sensor over a short time window.
+    $sensor_tag over 5m
+
+  outcome:
+    // A higher risk score is assigned as this indicates sustained deviation, not just a transient spike.
+    $risk_score = 65
+    $event_count = count_distinct($event.metadata.id)
+    $sensor_tag_name = array_distinct($event.target.resource.name)
+    $anomalous_values = array_distinct($event.target.process.value)
+    $start_time = min($event.metadata.event_timestamp)
+    $end_time = max($event.metadata.event_timestamp)
+
+  condition:
+    // Alert if more than 2 anomalous readings occur for the same sensor in the match window.
+    // This helps filter out single transient spikes which may be benign.
+    #event > 2
+}

@@ -1,0 +1,111 @@
+rule OT_DMZ_Breach_Techniques {
+
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "This rule combines multiple detection patterns based on intelligence regarding OT DMZ breaches. It detects credential harvesting, various forms of RDP abuse (hijacking, shadowing, hVNC), and sensitive group modifications."
+    mitre_attack_tactic = "Credential Access, Lateral Movement, Persistence, Privilege Escalation"
+    mitre_attack_technique = "OS Credential Dumping, Remote Services, Account Manipulation"
+    mitre_attack_sub_technique = "T1003, T1563, T1563.002, T1098"
+    references = "https://attack.mitre.org/techniques/T1563/002/, https://github.com/WKL-Sec/HiddenDesktop?tab=readme-ov-file, https://attack.mitre.org/techniques/T1003/, https://attack.mitre.org/techniques/T1563/, https://attack.mitre.org/techniques/T1098/"
+    version = "1.0"
+
+  events:
+    // Part 1: Process-based Detections (UDM event type: PROCESS_LAUNCH)
+
+    // Detection for credential harvesting tools
+    // FP Note: Legitimate security testing or system administration may use these tools.
+    // Consider filtering by principal.user.userid for authorized accounts.
+    $cred.metadata.event_type = "PROCESS_LAUNCH"
+    and (
+      re.regex($cred.target.process.file.full_path, `.*\\(LaZagne|mimikatz|Seatbelt|SharpDPAPI)\\.exe$`) or
+      $cred.target.process.file.product_specific_file_name in ("LaZagne.exe", "mimikatz.exe", "Seatbelt.exe", "SharpDPAPI.exe")
+    )
+
+    // Detection for RDP session hijacking via tscon.exe
+    // FP Note: Legitimate remote administration tools might use tscon.exe as SYSTEM.
+    $hijack.metadata.event_type = "PROCESS_LAUNCH"
+    and re.regex($hijack.target.process.file.full_path, `.*\\tscon\\.exe$`)
+    and $hijack.principal.user.userid = "S-1-5-18" // Corresponds to 'NT AUTHORITY\SYSTEM'
+    and re.regex($hijack.target.process.command_line, `(?i)\s(\d+|/dest:\w+)`)
+
+    // Detection for RDP shadowing activity
+    // FP Note: This may be legitimate activity for helpdesk or remote support personnel.
+    $shadow.metadata.event_type = "PROCESS_LAUNCH"
+    and (
+      re.regex($shadow.target.process.command_line, `(?i)/noConsentPrompt`) or
+      re.regex($shadow.target.process.command_line, `(?i)/control`)
+    )
+    and (
+      re.regex($shadow.target.process.file.full_path, `.*\\shadow\\.exe$`) or
+      (re.regex($shadow.target.process.file.full_path, `.*\\mstsc\\.exe$`) and re.regex($shadow.target.process.command_line, `(?i)/shadow`))
+    )
+
+    // Detection for Hidden Desktop (hVNC) style abuse
+    // FP Note: Some remote admin tools might spawn GUI processes under SYSTEM or from a service.
+    $hvnc.metadata.event_type = "PROCESS_LAUNCH"
+    and re.regex($hvnc.target.process.file.full_path, `.*\\(explorer|iexplore|chrome|firefox|msedge|winword|excel|powerpnt|outlook|mstsc|cmd|powershell)\\.exe$`)
+    and (
+      $hvnc.principal.user.userid = "S-1-5-18" or // Launched as SYSTEM
+      re.regex($hvnc.principal.process.file.full_path, `.*\\(services|svchost|lsass|wininit|wmiprvse|wmiadap)\\.exe$`)
+    )
+
+    // Part 2: Group Management Detection (UDM event type: GROUP_ADD)
+
+    // Detection for adding a user to a sensitive OT group
+    // FP Note: Legitimate administrators perform this action. Filter by principal user if needed.
+    $group.metadata.event_type = "GROUP_ADD"
+    and $group.metadata.product_event_type in ("4728", "4756")
+    and $group.target.group.name = "OT Remote Access Users"
+
+  match:
+    // A match is found if any of the above event conditions are met within a 1-minute window.
+    $event over 1m
+
+  outcome:
+    // Set risk score and dynamic alert details based on which event triggered the detection.
+    $risk_score = 65
+
+    // Use a single variable to hold the event that triggered the match for cleaner outcome logic.
+    $trigger_event = if($cred, $cred, if($hijack, $hijack, if($shadow, $shadow, if($hvnc, $hvnc, $group))))
+
+    // Populate common outcome fields
+    $principal_user = $trigger_event.principal.user.userid
+    $target_hostname = $trigger_event.target.hostname
+
+    // Populate detection-specific outcome fields
+    $detection_name = ""
+    $technique = ""
+    $subtechnique = ""
+    $command_line = if($cred or $hijack or $shadow or $hvnc, $trigger_event.target.process.command_line, "")
+    $group_name = if($group, $trigger_event.target.group.name, "")
+    $member_added = if($group, $trigger_event.target.user.userid, "")
+
+    if ($cred) {
+      $detection_name = "Credential Harvesting Tool Execution"
+      $technique = "T1003"
+    }
+    if ($hijack) {
+      $detection_name = "RDP Session Hijacking via tscon.exe"
+      $technique = "T1563"
+      $subtechnique = "T1563.002"
+    }
+    if ($shadow) {
+      $detection_name = "RDP Shadowing Activity"
+      $technique = "T1563"
+      $subtechnique = "T1563.002"
+    }
+    if ($hvnc) {
+      $detection_name = "Hidden Desktop (hVNC) Abuse"
+      $technique = "T1563"
+    }
+    if ($group) {
+      $detection_name = "Addition to Sensitive OT Group"
+      $technique = "T1098"
+    }
+
+  condition:
+    // The condition is met if any of the defined event variables exist.
+    $event = $cred or $event = $hijack or $event = $shadow or $event = $hvnc or $event = $group
+
+}

@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: parquet-elastic
+  namespace: {{namespace}}
+spec:
+  replicas: {{replicas}}
+  selector:
+    matchLabels:
+      app: parquet-elastic
+  template:
+    metadata:
+      labels:
+        app: parquet-elastic
+    spec:
+      containers:
+      - name: parquet-elastic
+        image: parquet-connector:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: SCHEMAS_FILE
+          value: "/app/schemas.yaml"
+        - name: STATE_PATH
+          value: "/app/state.db"
+        - name: ES_HOST
+          value: "{{es_host}}"
+        - name: ES_INDEX
+          value: "{{es_index}}"
+        - name: ES_AUTH
+          value: "{{es_auth}}"
+        - name: BATCH_SIZE
+          value: "{{batch_size}}"
+        - name: BUFFER_TIMEOUT
+          value: "{{buffer_timeout}}"
+        - name: WORKER_COUNT
+          value: "{{worker_count}}"
+        - name: POLL_INTERVAL
+          value: "{{poll_interval}}"
+        - name: DATA_DIR
+          value: "{{data_dir}}"
+        - name: INCREMENTAL_ENABLED
+          value: "{{incremental_enabled}}"
+        - name: MAX_FILES_CONCURRENT
+          value: "{{max_files_concurrent}}"
+        - name: MAX_MEMORY_MB
+          value: "{{max_memory_mb}}"
+        - name: METRICS_PORT
+          value: "{{metrics_port}}"
+        - name: SQLCIPHER_KEY
+          value: "{{sqlcipher_key}}"
+        - name: RUST_LOG
+          value: "{{rust_log}}"
+        - name: PYTHON_LOGGING_LEVEL
+          value: "{{python_logging_level}}"
+        ports:
+        - containerPort: {{metrics_port}}
+          name: metrics
+        resources:
+          limits:
+            cpu: "1"
+            memory: "{{max_memory_mb}}Mi"
+          requests:
+            cpu: "0.5"
+            memory: "512Mi"
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: metrics
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: metrics
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        volumeMounts:
+        - name: data
+          mountPath: /app/data
+      volumes:
+      - name: data
+        hostPath:
+          path: {{data_dir}}

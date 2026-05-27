@@ -1,0 +1,42 @@
+// Name: Shade BIOS Interrupt Blocking via CR8 Modification
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects attempts to gain exclusive execution control by setting the CR8 CPU register to 0xF (15).
+//              This technique, used by Shade BIOS, is equivalent to raising the IRQL to HIGH_LEVEL, which blocks
+//              all maskable external interrupts. This allows the malware to perform actions without being interrupted by the operating system.
+// RequiredDataConnectors: This detection requires a specialized data source capable of monitoring CPU control register writes.
+// This is not a standard log source and may require hypervisor-level introspection (example: vmWare NSX/sVM/vShield)
+// or advanced EDR agents with firmware visibility (example: crowdstrike/sentinel one).
+// otherwise detect via mem forensic analysis: https://github.com/tandasat/kraft_dinner
+// Tactic: Defense Evasion
+// TacticID: TA0005
+// Technique: Impair Defenses
+// TechniqueID: T1562
+
+let shadeBiosInterruptBlocking = (v_table_name:string) {
+    table(v_table_name)
+    // This query assumes a custom log table with fields for CPU register monitoring.
+    // The ActionType 'CpuRegisterWrite' and field names are placeholders.
+    | where ActionType == "CpuRegisterWrite"
+    // Filter for writes to the CR8 (Task Priority) register.
+    | where AdditionalFields.RegisterName == "CR8"
+    // Filter for the value 0xF (15), which blocks all maskable interrupts.
+    | where AdditionalFields.RegisterValue in ("0xf", "15")
+    // FP Tuning: The Windows kernel (ntoskrnl.exe) and drivers legitimately set CR8 to manage IRQL.
+    // An alert is significant if this write occurs from an unexpected process or an unknown context (null process).
+    | where isempty(InitiatingProcessFolderPath) or (InitiatingProcessFolderPath !has @"C:\Windows\System32\" and InitiatingProcessFileName !~ "ntoskrnl.exe")
+    | project
+        TimeGenerated,
+        DeviceName,
+        ActionType,
+        RegisterName = tostring(AdditionalFields.RegisterName),
+        RegisterValue = tostring(AdditionalFields.RegisterValue),
+        InitiatingProcessFileName,
+        InitiatingProcessFolderPath
+    | extend
+        timestamp = TimeGenerated,
+        HostCustomEntity = DeviceName,
+        ProcessCustomEntity = InitiatingProcessFileName
+};
+// Replace 'CpuRegisterEvents' with the actual table name containing CPU register monitoring logs.
+shadeBiosInterruptBlocking('CpuRegisterEvents')

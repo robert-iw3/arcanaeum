@@ -1,0 +1,52 @@
+// Name: Cisco ASA - LINE VIPER and RayInitiator Activity
+// Description: Detects multiple TTPs associated with the LINE VIPER and RayInitiator malware on Cisco ASA devices, as detailed in the NCSC report. This rule combines detections for covert packet captures, anti-forensic commands, unexpected reboots, potential AAA bypass, malware delivery vectors, and C2 indicators.
+// Reference: https://www.ncsc.gov.uk/static-assets/documents/malware-analysis-reports/RayInitiator-LINE-VIPER/ncsc-mar-rayinitiator-line-viper.pdf
+// Tactic: Credential Access, Command and Control, Defense Evasion, Impact
+// Technique: T1040, T1071.001, T1202, T1562, T1529
+// Data Source: Cisco ASA Logs (e.g., CommonSecurityLog, or a custom table)
+
+let timeframe = 1h;
+// Note: This query assumes Cisco ASA logs are parsed into a table like CommonSecurityLog.
+// You may need to adjust table and field names (e.g., DeviceEventClassID, AdditionalExtensions) for your environment.
+CommonSecurityLog
+| where TimeGenerated > ago(timeframe)
+| where DeviceVendor == "Cisco" and DeviceProduct == "ASA"
+| where
+    // selection_reboot: Corresponds to the anti-forensic reboot capability.
+    // FP Risk: Reboots are common for maintenance. Correlate with change management data.
+    DeviceEventClassID in ("199001", "199002", "104001")
+    or
+    // selection_cli_commands: Corresponds to command harvesting, covert packet captures, and anti-forensic techniques.
+    // FP Risk: 'capture' is a common troubleshooting command. Consider tuning with user allowlists if noisy.
+    (DeviceEventClassID in ("111008", "111009") and (AdditionalExtensions has "capture " or AdditionalExtensions has "copy system:/text" or AdditionalExtensions has "verify"))
+    or
+    // selection_aaa_bypass: Detects a WebVPN XML pattern used for AAA bypass.
+    // FP Risk: Could be triggered by non-standard or misconfigured clients.
+    (AdditionalExtensions has "<device-id computer-name=\"\" device-type=\"\"")
+    or
+    // selection_webvpn_delivery: Detects WebVPN XML patterns used for malware delivery.
+    (AdditionalExtensions has "<client-cert cert-format=\"pkcs7\">" or AdditionalExtensions has "<client-cert-auth-signature")
+    or
+    // selection_c2_indicators: Syslog messages related to C2 activity that LINE VIPER may attempt to suppress.
+    // FP Risk: These are general logs. Their absence is more indicative, but presence can still be a weak signal.
+    DeviceEventClassID in ("302013", "302014", "609002", "710005")
+| extend
+    // Categorize the detection to aid investigation.
+    DetectionMethod = case(
+        DeviceEventClassID in ("199001", "199002", "104001"), "Anti-Forensics: Unexpected Reboot",
+        DeviceEventClassID in ("111008", "111009"), "Defense Evasion: Suspicious CLI Command",
+        AdditionalExtensions has "<device-id computer-name=\"\" device-type=\"\"", "Credential Access: AAA Bypass Attempt",
+        AdditionalExtensions has "<client-cert cert-format=\"pkcs7\">" or AdditionalExtensions has "<client-cert-auth-signature", "C2: WebVPN Malware Delivery",
+        DeviceEventClassID in ("302013", "302014", "609002", "710005"), "C2: Suppressed Log Indicator",
+        "Unknown"
+    ),
+    // Extract user from the message if available for CLI commands.
+    ExtractedUser = extract(@"User '([^']*)'", 1, AdditionalExtensions)
+| project
+    TimeGenerated,
+    DetectionMethod,
+    DeviceName,
+    SourceIP,
+    SourceUserName = iif(isnotempty(SourceUserName), SourceUserName, ExtractedUser),
+    DeviceEventClassID,
+    OriginalLogMessage = AdditionalExtensions

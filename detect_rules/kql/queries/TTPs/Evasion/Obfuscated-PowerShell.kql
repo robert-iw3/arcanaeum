@@ -1,0 +1,58 @@
+// Name: Obfuscated PowerShell Execution
+// Author: RW
+// Date: 2025-08-11
+// Description: Detects PowerShell execution with obfuscated command-line arguments or script content.
+// This detection looks for common obfuscation techniques such as string manipulation, concatenation, variable insertion, or encoding.
+// MITRE ATT&CK: T1027.004 (Obfuscated Files or Information: Compile After Delivery), T1059.001 (Command and Scripting Interpreter: PowerShell)
+
+// Define a list of common obfuscation patterns and keywords
+let ObfuscationIndicators = dynamic([
+    "FromBase64String", "Invoke-Expression", "IEX", "DownloadString", "AmsiUtils", "amsiInitFailed",
+    "AmsiScanBuffer", "VirtualProtect", "GetProcAddress", "GetModuleHandle", ".Replace", "[char]", "-join",
+    "I'+'E'+'X", "I`E`X", "Invoke-`E`xpression", "Down`l`oadString", "From`Base`64String", "Amsi`U`tils"
+]);
+
+(union isfuzzy=true
+
+// Part 1: Detect obfuscation in command-line arguments
+(DeviceProcessEvents
+| where InitiatingProcessFileName =~ "powershell.exe" or FileName =~ "powershell.exe"
+| where
+    // High-confidence: PowerShell encoded command flag is a strong indicator of obfuscation or fileless execution.
+    ProcessCommandLine has_any ("-encodedcommand", "-enc", " -e ") or
+    // Medium-confidence: Presence of obfuscation keywords combined with common obfuscation operators.
+    (ProcessCommandLine has_any (ObfuscationIndicators) and ProcessCommandLine matches regex @'(\+|-f|`)') or
+    // Medium-confidence: Specific and well-known AMSI bypass technique.
+    (ProcessCommandLine contains "AmsiUtils" and ProcessCommandLine contains "amsiInitFailed")
+// FP Tuning: Legitimate admin scripts may use encoding or other techniques.
+// Consider excluding known safe parent processes or command lines.
+// Example: | where InitiatingProcessCommandLine !has "C:\\AdminScripts\\SafeScript.cmd"
+| extend Technique = "Command-Line Obfuscation", Details = ProcessCommandLine
+),
+
+// Part 2: Detect obfuscation in PowerShell script blocks
+(DeviceEvents
+| where ActionType == "PowerShellCommand"
+| extend ScriptBlockText = tostring(AdditionalFields.ScriptBlockText)
+| where isnotempty(ScriptBlockText) and
+    (
+        // Medium-confidence: Presence of obfuscation keywords combined with common obfuscation operators.
+        (ScriptBlockText has_any (ObfuscationIndicators) and ScriptBlockText matches regex @'(\+|-f|`)') or
+        // Medium-confidence: Specific and well-known AMSI bypass technique.
+        (ScriptBlockText contains "AmsiUtils" and ScriptBlockText contains "amsiInitFailed")
+    )
+// FP Tuning: Some management frameworks generate PowerShell that may look obfuscated.
+// Consider excluding scripts originating from trusted applications.
+// Example: | where InitiatingProcessFileName !in ("SCCM.exe", "AdminConsole.exe")
+| extend Technique = "Script-Block Obfuscation", Details = ScriptBlockText
+)
+
+)
+| project-reorder
+    TimeGenerated,
+    DeviceName,
+    Technique,
+    AccountName,
+    InitiatingProcessFileName,
+    ProcessCommandLine,
+    Details

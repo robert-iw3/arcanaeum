@@ -1,0 +1,50 @@
+// Name: Remote Execution via WMI Followed by Sensitive Registry Access
+// Author: RW
+// Date: 2025-08-24
+// Description: Detects a process created by the WMI Provider Host (WmiPrvSE.exe) that subsequently accesses the SAM or SECURITY registry hives.
+// This pattern is indicative of remote execution tools like wmiexec being used to run credential harvesting tools.
+// MITRE ATT&CK: T1047, T1003.002, T1003.004
+// False Positive Sensitivity: Medium
+
+let timeWindow = 5m;
+
+// Define sensitive registry hives targeted for credential access.
+let sensitiveHives = dynamic([
+    "HKEY_LOCAL_MACHINE\\SAM\\",
+    "HKEY_LOCAL_MACHINE\\SECURITY\\"
+]);
+
+// Step 1: Identify processes created by the WMI Provider Host, a common indicator of remote WMI execution (e.g., wmiexec).
+let remoteExecEvents = DeviceProcessEvents
+| where InitiatingProcessFileName =~ "WmiPrvSE.exe"
+// Exclude common command lines for WmiPrvSE.exe that are typically benign. This may need tuning.
+| where not(ProcessCommandLine has_any ("-Embedding", "unsecapp.exe"))
+| project RemoteExecTime = TimeGenerated, DeviceId, DeviceName, ChildProcessId = ProcessId, ChildProcessName = FileName, ChildProcessCommandLine = ProcessCommandLine;
+
+// Step 2: Identify access to sensitive registry hives.
+let registryAccessEvents = DeviceRegistryEvents
+| where RegistryKey has_any (sensitiveHives)
+// Exclude SYSTEM account as the technique focuses on Administrator-level access.
+| where InitiatingProcessAccountSid != "S-1-5-18"
+| project RegistryAccessTime = TimeGenerated, DeviceId, AccessingProcessId = InitiatingProcessId, AccessingProcessName = InitiatingProcessFileName, RegistryKey;
+
+// Step 3: Join remote execution events with subsequent sensitive registry access by the spawned process.
+remoteExecEvents
+| join kind=inner (
+    registryAccessEvents
+) on DeviceId, $left.ChildProcessId == $right.AccessingProcessId
+// Correlate events where registry access happens shortly after the remote process was created.
+| where registryAccessEvents.RegistryAccessTime between (remoteExecEvents.RemoteExecTime .. (remoteExecEvents.RemoteExecTime + timeWindow))
+// Group results to create a single alert for the correlated activity.
+| summarize
+    StartTime = min(RemoteExecTime),
+    EndTime = max(RegistryAccessTime),
+    AccessedKeys = make_set(RegistryKey, 10)
+    by DeviceId,
+       DeviceName,
+       ChildProcessId,
+       ChildProcessName,
+       ChildProcessCommandLine
+// FP Mitigation: Some administrative scripts or monitoring tools might use WMI to query system state which could touch these keys.
+// Review the ChildProcessName and ChildProcessCommandLine and add legitimate tools to an exclusion list if necessary.
+| extend HostName = DeviceName, ProcessName = ChildProcessName, ProcessCommandLine = ChildProcessCommandLine

@@ -1,0 +1,55 @@
+// Name: Uncommon API Call Sequence for Process Injection
+// Author: RW
+// Date: 2025-08-02
+// Description: Detects a process querying another process or its threads for information, immediately followed by a memory write to that same target process. This sequence is a strong indicator of process injection techniques that first need to find a suitable memory location (like the process entry point) before writing shellcode to it.
+// False Positives: Medium. This behavior can be legitimate for debuggers, performance monitors, and some security or system management tools. Exclusions for known tools may be necessary.
+// Tactic: Defense Evasion
+// Technique: T1055, Process Injection
+
+let timeWindow = 1m;
+
+// Find API calls querying process or thread information.
+// Note: ActionType and field names (ApiCall, TargetProcessId) are placeholders and may need adjustment for your specific EDR schema.
+let query_events = DeviceEvents
+| where ActionType == "ApiCall" and EventSubType in ("NtQueryInformationProcess", "NtQueryInformationThread")
+// This is a remote injection technique, so the initiator and target should be different.
+| where InitiatingProcessId != TargetProcessId
+| project QueryTime = Timestamp, DeviceId, InitiatingProcessId, InitiatingProcessFileName, TargetProcessId, TargetProcessFileName, ApiCallName = EventSubType;
+
+// Find cross-process memory write events.
+let write_events = DeviceEvents
+| where ActionType == "ProcessAccessed" // Placeholder for remote memory write events like WriteProcessMemory.
+| where InitiatingProcessId != TargetProcessId
+| project WriteTime = Timestamp, DeviceId, InitiatingProcessId, TargetProcessId;
+
+// Correlate a query event followed by a write event between the same two processes.
+query_events
+| join kind=inner (
+    write_events
+) on DeviceId, InitiatingProcessId, TargetProcessId
+// Ensure the write happens after the query within the specified time window.
+| where WriteTime between (QueryTime .. (QueryTime + timeWindow))
+// FP Tuning: Exclude known legitimate tools that perform this behavior (debuggers, monitors, etc.).
+| where not(InitiatingProcessFileName has_any (
+    "procexp.exe",
+    "procmon.exe",
+    "windbg.exe",
+    "x64dbg.exe",
+    "msmpeng.exe"
+    // Add other legitimate applications here.
+))
+| summarize
+    FirstSeen = min(QueryTime),
+    LastSeen = max(WriteTime),
+    APIsCalled = make_set(ApiCallName),
+    TargetProcessName = take_any(TargetProcessFileName)
+    by DeviceId, InitiatingProcessId, InitiatingProcessFileName, TargetProcessId
+| project
+    Timestamp = FirstSeen,
+    LastSeen,
+    DeviceId,
+    ActorProcessId = InitiatingProcessId,
+    ActorProcessName = InitiatingProcessFileName,
+    TargetProcessId,
+    TargetProcessName,
+    APIsCalled

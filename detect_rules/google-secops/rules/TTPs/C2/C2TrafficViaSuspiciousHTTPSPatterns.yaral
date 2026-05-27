@@ -1,0 +1,99 @@
+rule C2TrafficViaSuspiciousHTTPSPatterns {
+  meta:
+    name = "C2 Traffic via Suspicious HTTP/S Patterns"
+    author = "RW"
+    description = "Detects potential C2 traffic over HTTP/S by looking for a combination of suspicious indicators like non-standard user agents, unusual HTTP methods, content types indicating binary data transfer, or long connection times."
+    tags = "T1071.001, T1102"
+    severity = "MEDIUM"
+    false_positives = "Legitimate applications with non-browser UAs, software updates, network monitoring. Tuning UserAgentAllowList and DestinationAllowList is crucial."
+
+  // --- Rule Tuning ---
+  strings:
+    // Define a threshold for long polling in milliseconds (e.g., 30 seconds).
+    // This may need tuning based on your environment's baseline.
+    $long_polling_threshold = 30000
+
+  events:
+    // This rule is designed for web proxy or firewall logs with SSL/TLS inspection.
+    // Adjust `metadata.log_type` based on how your logs are ingested (e.g., "FIREWALL_HTTP", "NETWORK_PROXY").
+    $e.metadata.log_type = "NETWORK_HTTP" // Assuming a UDM event type that includes HTTP details
+    $e.network.http.request_url != ""
+    $e.network.http.user_agent != ""
+    $e.network.session_bytes_sent != null // Check if network bytes are present for aggregation
+
+    // Exclude known good destinations and user agents using Chronicle Reference Lists.
+    not strings.extract_domain($e.network.http.hostname) in %destination_domain_allowlist
+    not $e.target.ip in %destination_ip_allowlist
+    not $e.network.http.user_agent in %user_agent_allowlist
+
+    // Flag 1: Non-standard or suspicious User-Agent.
+    // Use `strings.icontains` for case-insensitive comparison for UA substrings
+    // Use `strings.starts_with` for the Mozilla check
+    // Combine with reference list for suspicious UAs
+    (
+        $e.network.http.user_agent in %suspicious_user_agents or
+        not strings.starts_with($e.network.http.user_agent, "Mozilla/5.0")
+    )
+
+    // Flag 2: Suspicious HTTP Method (not common for user browsing).
+    // Use a Chronicle reference list for suspicious methods
+    $e.network.http.method in %suspicious_http_methods
+
+    // Flag 3: Suspicious Content-Type indicating binary transfer.
+    // Use a Chronicle reference list for suspicious content types
+    $e.network.http.content_type in %suspicious_content_types
+
+    // Flag 4: Long connection time, indicative of long polling.
+    // The TimeTaken field mapping can vary. Assuming `network.session_duration`.
+    $e.network.session_duration.total_ms > $long_polling_threshold
+
+  // AND at least one of the other flags (Method, ContentType, LongPolling) is true.
+  // This is handled by ensuring all relevant UDM fields are present in `events`
+  // and then aggregating the flags in the `outcome` section.
+
+  match:
+    // Group by key indicators to summarize findings.
+    $e.principal.user.userid, $e.principal.ip, $e.target.ip, strings.extract_domain($e.network.http.hostname), $e.network.http.user_agent
+    group by $e.principal.user.userid, $e.principal.ip, $e.target.ip, strings.extract_domain($e.network.http.hostname), $e.network.http.user_agent
+
+  outcome:
+    $start_time = min($e.metadata.event_timestamp)
+    $end_time = max($e.metadata.event_timestamp)
+    $event_count = count($e.metadata.event_id)
+    $source_user_id = $e.principal.user.userid
+    $source_ip = $e.principal.ip
+    $destination_ip = $e.target.ip
+    $destination_hostname = strings.extract_domain($e.network.http.hostname)
+    $user_agent = $e.network.http.user_agent
+    $total_bytes_sent = sum($e.network.session_bytes_sent)
+    $total_bytes_received = sum($e.network.session_bytes_received)
+    $max_time_taken = max($e.network.session_duration.total_ms)
+
+    // Re-evaluate flags for clarity in the outcome based on aggregated data
+    $is_suspicious_ua_flag = ($user_agent in %suspicious_user_agents or not strings.starts_with($user_agent, "Mozilla/5.0"))
+    $is_suspicious_method_flag = (array_distinct($e.network.http.method) intersects %suspicious_http_methods)
+    $is_suspicious_content_type_flag = (array_distinct($e.network.http.content_type) intersects %suspicious_content_types)
+    $is_long_polling_flag = ($max_time_taken > $long_polling_threshold)
+
+    $distinct_urls = array_distinct($e.network.http.request_url) limit 5
+    $distinct_methods = array_distinct($e.network.http.method)
+    $distinct_content_types = array_distinct($e.network.http.content_type)
+
+  condition:
+    // Core detection logic: A suspicious UA combined with at least one other suspicious indicator.
+    $is_suspicious_ua_flag and ($is_suspicious_method_flag or $is_suspicious_content_type_flag or $is_long_polling_flag)
+}
+
+// Reference Lists (to be created in Chronicle):
+// 1.  **user_agent_allowlist:** Create a Chronicle Reference List named `user_agent_allowlist` and populate it with:
+//     Microsoft-CryptoAPI/, Microsoft-WinRM, Windows-Update-Agent, Microsoft-Delivery-Optimization, SCCM
+// 2.  **suspicious_user_agents:** Create a Chronicle Reference List named `suspicious_user_agents` and populate it with:
+//     curl, wget, python-requests, Go-http-client, powershell, bitsadmin, winhttp, Binalyze, masscan
+// 3.  **suspicious_http_methods:** Create a Chronicle Reference List named `suspicious_http_methods` and populate it with:
+//     PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH
+// 4.  **suspicious_content_types:** Create a Chronicle Reference List named `suspicious_content_types` and populate it with:
+//     application/octet-stream, application/x-msdownload
+// 5.  **destination_domain_allowlist:** Create a Chronicle Reference List named `destination_domain_allowlist` and populate it with allowed destination domains (e.g., known good API endpoints or update servers).
+//     (add your domains here)
+// 6.  **destination_ip_allowlist:** Create a Chronicle Reference List named `destination_ip_allowlist` and populate it with allowed destination IPs (e.g., known good API endpoints or update servers).
+//     (add your IPs here)

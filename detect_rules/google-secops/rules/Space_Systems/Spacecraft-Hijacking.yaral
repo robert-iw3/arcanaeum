@@ -1,0 +1,53 @@
+rule anomalous_c2_command_to_spacecraft {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects command and control (C2) patterns from a Mission Control Centre (MCC) to a spacecraft that deviate from a historical baseline. This could indicate a spacecraft hijacking attempt, potentially exploiting vulnerabilities like CVE-2025-46675 in NASA's CryptoLib. The rule identifies new command patterns by comparing the destination port and bytes sent against a reference list of known-good commands."
+    false_positive_sensitivity = "Medium"
+    references = "https://securitybynature.fr/post/hacking-cryptolib/, https://github.com/nasa/CryptoLib/security, https://www.blackhat.com/us-25/briefings/schedule/#burning-trashing-spacecraft-crashing-a-collection-of-vulnerabilities-that-will-end-your-space-mission-41536"
+    tactic = "TA0011, TA0002"
+    technique = "T1071, T1059"
+
+  events:
+    // Filter for network connection events, which represent the C2 channel.
+    $e.metadata.event_type = "NETWORK_CONNECTION"
+
+    // FP Tuning: Define the IP addresses for your MCC (source) and spacecraft endpoints (destination).
+    // These should be specific to your environment for accuracy.
+    net.ip_in_range_cidr($e.principal.ip, "10.2.2.0/24")  // Mission Control Centre Network
+    net.ip_in_range_cidr($e.target.ip, "10.99.1.0/24") // Spacecraft Network
+
+    // Create a unique signature for the command pattern using destination port and bytes sent.
+    $command_pattern = strings.concat(string($e.target.port), ":", string($e.network.sent_bytes))
+
+    // FP Tuning: This rule requires a pre-populated reference list named 'historical_mcc_commands'.
+    // This list must contain known-good command patterns (e.g., "443:128") and be
+    // updated periodically by a separate process or scheduled query based on at least 30 days of data.
+    not $command_pattern in %historical_mcc_commands
+
+    // Define placeholder variables for matching.
+    $mcc_ip = $e.principal.ip
+    $spacecraft_ip = $e.target.ip
+
+  match:
+    // Group anomalous commands between the same MCC and spacecraft over 24 hours.
+    $mcc_ip, $spacecraft_ip over 24h
+
+  outcome:
+    $risk_score = 85
+    $detection_name = "Anomalous C2 Command to Spacecraft (Baseline Deviation)"
+    $description_out = "A new command pattern, not seen in the historical baseline, was sent from the Mission Control Centre [" + $mcc_ip + "] to a spacecraft endpoint [" + $spacecraft_ip + "]. This may indicate a spacecraft hijacking attempt."
+
+    // Collect all unique anomalous commands observed during the match window for analysis.
+    $anomalous_commands = array_distinct($command_pattern)
+    $event_count = count($e.metadata.id)
+
+    $principal_ip = $mcc_ip
+    $target_ip = $spacecraft_ip
+    $principal_hostname = array_distinct($e.principal.hostname)
+    $target_hostname = array_distinct($e.target.hostname)
+
+  condition:
+    // Alert if any anomalous command is detected.
+    $e
+}

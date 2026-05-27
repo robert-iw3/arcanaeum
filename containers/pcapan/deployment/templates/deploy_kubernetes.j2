@@ -1,0 +1,9 @@
+---
+- hosts: localhost
+  tasks:
+    - name: Create Namespace
+      command: kubectl create namespace {{ k8s_namespace }} --dry-run=client -o yaml | kubectl apply -f -
+    - name: Apply ConfigMap
+      command: kubectl apply -f k8s-job.yaml -n {{ k8s_namespace }}
+    - name: Apply Deployment
+      command: kubectl apply -f k8s-deployment.yaml -n {{ k8s_namespace }}

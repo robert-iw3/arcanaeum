@@ -1,0 +1,21 @@
+{
+  "type": "detection-engine.rule",
+  "id": "pipemagic-detection",
+  "attributes": {
+    "risk_score": 90,
+    "enabled": true,
+    "name": "PipeMagic Detection",
+    "description": "Detects indicators of compromise for the PipeMagic malware, including file hashes, named pipe usage, C2 communication, and LSASS access.",
+    "rule_id": "pipemagic_ioc_detection",
+    "index": [
+      "logs-endpoint.events.*",
+      "logs-system.*"
+    ],
+    "language": "kuery",
+    "query": "(file.hash.sha256:(\"dc54117b965674bad3d7cd203ecf5e7fc822423a3f692895cf5e96e83fb88f6a\" OR \"4843429e2e8871847bc1e97a0f12fa1f4166baa4735dff585cb3b4736e3fe49e\" OR \"297ea881aa2b39461997baf75d83b390f2c36a9a0a4815c81b5cf8be42840fd1\") OR (winlog.event_id:17 AND winlog.event_data.PipeName:/\\\\.\\\\pipe\\\\1\\\\.[0-9a-fA-F]{32}/) OR (winlog.event_id:3 AND (destination.domain:\"aaaaabbbbbbb.eastus.cloudapp.azure.com\" OR destination.ip:\"127.0.0.1\") AND destination.port:(443 OR 8082)) OR (url.full:/\\*.*\\/[a-fA-F0-9]{16}/ AND http.request.headers:/\\*Upgrade: websocket*/ AND http.request.headers:/\\*Connection: Upgrade*/) OR (winlog.event_id:1 AND process.name:/certutil.exe/ AND process.command_line:/\\*-urlcache*/ AND process.command_line:/\\*-f*/ AND (process.command_line:/\\*.tmp*/ OR process.command_line:/\\*.dat*/ OR process.command_line:/\\*.msbuild*/)) OR (winlog.event_id:1 AND process.parent.name:/msbuild.exe/ AND process.command_line:/\\*.mshi*/) OR (winlog.event_id:10 AND winlog.event_data.TargetImage:/\\*\\\\lsass.exe/ AND winlog.event_data.SourceImage:/\\*\\\\dllhost.exe/))",
+    "interval": "10m",
+    "severity": "critical",
+    "type": "query",
+    "version": "1"
+  }
+}

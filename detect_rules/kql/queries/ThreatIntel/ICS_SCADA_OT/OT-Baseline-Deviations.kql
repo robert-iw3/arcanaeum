@@ -1,0 +1,79 @@
+// Name: OT Network Baseline Deviations
+// Description: Detects new devices or new communication patterns within the Operational Technology (OT) network by comparing recent activity against a historical baseline. This can indicate newly connected (and potentially unauthorized) devices, or existing devices being used in an anomalous way, which could be a precursor to or part of a malicious attack.
+// Author: RW
+// Date: 2025-08-17
+// MITRE ATT&CK:
+// - T1592: Gather Victim Host Information
+// - T1595: Active Scanning
+// - T1083: File and Directory Discovery
+// False Positive Sensitivity: Medium
+// - This rule will trigger when new devices are legitimately added to the OT network or when device configurations are intentionally changed. These events should be reviewed and acknowledged.
+// - The effectiveness of this rule depends heavily on the accuracy of the 'ot_subnets' definition and the stability of the network. The 'baseline_period' and 'recent_period' may need tuning for your environment to balance detection time with baseline accuracy.
+
+// --- CONFIGURATION START ---
+// Define the time windows for baselining and recent activity analysis.
+let baseline_period = 14d;
+let recent_period = 1d;
+
+// Define the IP address ranges for your OT/ICS network. This is critical for focusing the detection.
+let ot_subnets = dynamic([
+    "10.100.0.0/16",
+    "192.168.50.0/24" // Placeholder - replace with your actual OT network ranges.
+]);
+// --- CONFIGURATION END ---
+
+// Calculate the start and end times for the baseline period.
+let baseline_start_time = ago(baseline_period);
+let baseline_end_time = ago(recent_period);
+let recent_start_time = ago(recent_period);
+
+// Establish the baseline: Collect all unique devices (IPs) and communication patterns (IP and Port) seen during the baseline period.
+let baseline_data =
+    DeviceNetworkEvents
+    | where TimeGenerated between (baseline_start_time .. baseline_end_time)
+    | where ActionType in ("ConnectionSuccess", "InboundConnectionAccepted")
+    | where ipv4_is_in_any_range(LocalIP, ot_subnets)
+    | summarize by OT_DeviceIP = LocalIP, Port = LocalPort;
+
+// Get a distinct list of all devices seen in the baseline period.
+let baseline_devices = baseline_data | summarize make_set(OT_DeviceIP);
+
+// Get all communication events from the recent period to be checked against the baseline.
+let recent_events =
+    DeviceNetworkEvents
+    | where TimeGenerated > recent_start_time
+    | where ActionType in ("ConnectionSuccess", "InboundConnectionAccepted")
+    | where ipv4_is_in_any_range(LocalIP, ot_subnets)
+    | summarize
+        StartTime = min(TimeGenerated),
+        EndTime = max(TimeGenerated),
+        RemoteIPs = make_set(RemoteIP),
+        ConnectionCount = count()
+        by DeviceName, OT_DeviceIP = LocalIP, Port = LocalPort;
+
+// --- DETECTION LOGIC ---
+union
+(
+    // Tactic 1: Find entirely new devices that have appeared in the OT network.
+    recent_events
+    | where OT_DeviceIP !in (baseline_devices)
+    | summarize
+        StartTime = min(StartTime),
+        EndTime = max(EndTime),
+        PortsUsed = make_set(Port),
+        ConnectedRemoteIPs = make_set_if(RemoteIPs, isnotempty(RemoteIPs))
+        by DeviceName, OT_DeviceIP
+    | extend
+        DeviationType = "New OT Device Detected",
+        Details = strcat("New device appeared on the OT network. Ports used: ", PortsUsed)
+    | project StartTime, EndTime, DeviationType, DeviceName, OT_DeviceIP, Details
+),
+(
+    // Tactic 2: Find existing devices that are communicating on new, previously unseen ports.
+    recent_events
+    | join kind=leftanti (baseline_data) on $left.OT_DeviceIP == $right.OT_DeviceIP and $left.Port == $right.Port
+    | extend
+        DeviationType = "New OT Communication Pattern Detected",
+        Details = strcat("Existing device communicated on a new port: ", Port, ". Connected from/to remote IPs: ", RemoteIPs)
+    | project StartTime, EndTime, DeviationType, DeviceName, OT_DeviceIP, Details
+)

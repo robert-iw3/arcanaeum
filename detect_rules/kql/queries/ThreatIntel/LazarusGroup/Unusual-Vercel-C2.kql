@@ -1,0 +1,27 @@
+// Name: Lazarus Group Vercel C2 Communication
+// Author: RW
+// Date: 2025-07-31
+// Severity: High
+// Description: Detects network connections to a specific Vercel URL used by the Lazarus Group for command and control (C2) as part of the OtterCookie campaign. This leverages a legitimate service (T1102) to evade detection.
+// Tactic: Command and Control
+// Technique: T1102 - Web Service, T1071.001 - Application Layer Protocol: Web Protocols
+
+let c2_url = "cdn-static-server.vercel.app/icons/212"; // Specific C2 URL observed in Lazarus Group activity.
+
+DeviceNetworkEvents
+| where TimeGenerated > ago(1d)
+// Look for network connections to the known malicious URL.
+| where RemoteUrl has c2_url
+// Potential for False Positives: This IOC is highly specific, so false positives are unlikely.
+// However, threat actors frequently change infrastructure. Consider creating broader, but potentially noisier, detections for connections to '*.vercel.app' from non-browser processes or processes running from unusual locations.
+// | where InitiatingProcessFileName !in ("chrome.exe", "firefox.exe", "msedge.exe") // Example tuning to reduce noise if the rule is broadened.
+| project
+    TimeGenerated,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RemoteUrl,
+    RemoteIP,
+    RemotePort,
+    ProcessId,
+    AccountName

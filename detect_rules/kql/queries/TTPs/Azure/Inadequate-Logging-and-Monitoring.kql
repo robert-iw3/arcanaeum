@@ -1,0 +1,53 @@
+// Name: Azure Logging and Monitoring Tampering
+// Author: RW
+// Date: 2025-08-31
+// Description: Detects the deletion of key Azure logging and monitoring components, such as Diagnostic Settings, Log Analytics Workspaces,
+// or Microsoft Sentinel resources (data connectors, analytics rules). Such actions can severely impair security visibility and may indicate
+// an attempt by an attacker to cover their tracks or evade detection.
+// Tactic: Defense Evasion
+// Technique: M1047
+
+// Set the lookback time for the detection.
+let lookback = 1d;
+
+// Define operations that could indicate tampering with logging and monitoring components.
+let tamperingOperations = dynamic([
+    "MICROSOFT.INSIGHTS/DIAGNOSTICSETTINGS/DELETE",       // Deletion of a diagnostic setting
+    "MICROSOFT.OPERATIONALINSIGHTS/WORKSPACES/DELETE",    // Deletion of a Log Analytics Workspace
+    "MICROSOFT.SECURITYINSIGHTS/DATACONNECTORS/DELETE",   // Deletion of a Sentinel data connector
+    "MICROSOFT.SECURITYINSIGHTS/ANALYTICSRULES/DELETE",   // Deletion of a Sentinel analytics rule
+    "MICROSOFT.OPERATIONSMANAGEMENT/SOLUTIONS/DELETE"     // Deletion of a workspace solution (filtered for Sentinel below)
+]);
+
+// Define a list of trusted users or service principals that are allowed to perform these actions.
+// This list should be populated with known administrative and automation accounts to reduce false positives.
+let trustedCallers = dynamic([]); // e.g. dynamic(["admin@example.com", "service-principal-guid"])
+
+AzureActivity
+| where TimeGenerated > ago(lookback)
+// Filter for successful deletion operations on logging/monitoring components.
+| where OperationNameValue in (tamperingOperations)
+| where ActivityStatusValue == "Succeeded"
+// Exclude trusted callers. However, activity from these accounts should still be audited periodically.
+| where Caller !in (trustedCallers)
+// To reduce noise, specifically check if the deleted solution is Microsoft Sentinel.
+| where OperationNameValue != "MICROSOFT.OPERATIONSMANAGEMENT/SOLUTIONS/DELETE" or (_ResourceId has "/solutions/SecurityInsights")
+// False Positive Consideration: These actions can be part of legitimate administrative or decommissioning activities.
+// Investigate the user performing the action and the context of the change. A single, isolated event from an unusual user is more suspicious.
+| extend
+    Activity = OperationNameValue,
+    User = Caller,
+    UserIpAddress = CallerIpAddress,
+    TamperedResource = _ResourceId,
+    Details = strcat("A key logging/monitoring component was deleted by '", User, "'. Operation: '", Activity, "', Resource: '", TamperedResource, "'. This action can reduce security visibility.")
+| project
+    TimeGenerated,
+    Activity,
+    Tactic = "Defense Evasion",
+    Technique = "M1047",
+    User,
+    UserIpAddress,
+    TamperedResource,
+    Details,
+    SubscriptionId,
+    CorrelationId

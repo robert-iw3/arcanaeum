@@ -1,0 +1,46 @@
+// Name: AMSI or ETW Tampering Detected
+// Author: RW
+// Date: 2025-08-11
+// Description: Detects attempts to disable or tamper with the Anti-Malware Scan Interface (AMSI) or Event Tracing for Windows (ETW)
+//              using common PowerShell techniques.
+// MITRE ATT&CK: T1562.001 (Impair Defenses: Disable or Modify Tools), T1562.006 (Impair Defenses: Indicator Blocking)
+
+// Look for PowerShell script block logs which contain the deobfuscated script content.
+DeviceEvents
+| where ActionType == "PowerShellCommand"
+| extend ScriptBlockText = tostring(AdditionalFields.ScriptBlockText)
+| where isnotempty(ScriptBlockText)
+// Main detection logic starts here.
+| where
+    // Tactic 1: Detects the common AMSI bypass that sets 'amsiInitFailed' to true.
+    // This is a well-known technique to disable AMSI for the current process.
+    (ScriptBlockText has "AmsiUtils" and ScriptBlockText has "amsiInitFailed")
+    or
+    // Tactic 2: Detects attempts to patch the AmsiScanBuffer function in memory.
+    // This involves finding the function address and overwriting it to neutralize AMSI.
+    (ScriptBlockText has "amsi.dll" and ScriptBlockText has "GetProcAddress" and ScriptBlockText has "VirtualProtect" and ScriptBlockText has "AmsiScanBuffer")
+    or
+    // Tactic 3: Detects a known ETW bypass that disables the PowerShell log provider.
+    // This prevents PowerShell events from being written to the log.
+    (ScriptBlockText has "PSEtwLogProvider" and ScriptBlockText has "etwProvider" and ScriptBlockText has "m_enabled")
+
+// FP Tuning: Security research tools or advanced administration scripts might use these techniques.
+// Consider excluding known safe scripts, users, or parent processes if false positives occur.
+// Example: | where InitiatingProcessFileName !~ "RedTeamTool.exe"
+
+// Group and format results for analysis.
+| extend Technique = case(
+    (ScriptBlockText has "AmsiUtils" and ScriptBlockText has "amsiInitFailed"), "AMSI Bypass via amsiInitFailed Flag",
+    (ScriptBlockText has "amsi.dll" and ScriptBlockText has "GetProcAddress"), "AMSI Bypass via Memory Patching",
+    (ScriptBlockText has "PSEtwLogProvider"), "ETW Logging Bypass",
+    "Unknown Tampering Technique"
+  )
+| project
+    TimeGenerated,
+    DeviceName,
+    Technique,
+    AccountName,
+    InitiatingProcessFileName,
+    FileName,
+    ProcessCommandLine,
+    ScriptBlockText

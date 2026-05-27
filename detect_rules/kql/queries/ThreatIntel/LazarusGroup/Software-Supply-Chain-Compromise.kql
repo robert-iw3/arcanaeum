@@ -1,0 +1,37 @@
+// Name: Suspicious Package Manager Execution from Unusual Location
+// Author: RW
+// Date: 2025-07-31
+// Severity: Medium
+// Description: Detects the execution of package managers (npm, pip) from non-standard locations like user download or temporary directories. This could indicate a user being tricked into installing a malicious package as part of a software supply chain attack, a TTP used by actors like the Lazarus Group.
+// Tactic: Execution
+// Technique: T1195.002 - Compromise Software Supply Chain: Compromise Software Distribution
+
+let suspicious_folders = dynamic([
+    @'\Downloads\',
+    @'\AppData\Local\Temp\',
+    @'\Windows\Temp\'
+]); // List of folders not typically used for software development projects.
+
+DeviceProcessEvents
+| where TimeGenerated > ago(1d)
+// Look for package installation commands for npm or pip.
+| where (
+    (FileName =~ 'npm.cmd' and (ProcessCommandLine has ' install ' or ProcessCommandLine has ' i ')) or
+    (FileName in~ ('pip.exe', 'pip3.exe', 'python.exe', 'python3.exe') and ProcessCommandLine has 'pip install')
+  )
+// Filter for executions where the working directory is a suspicious folder.
+| where FolderPath has_any (suspicious_folders)
+// Exclude executions by known system accounts which might perform installations in temp folders.
+| where AccountName !~ "SYSTEM" and AccountName !~ "NETWORK SERVICE" and AccountName !~ "LOCAL SERVICE"
+// Potential for False Positives: A user might legitimately, though unwisely, test a package by installing it from their Downloads folder.
+// Tuning may be required to exclude specific developer machines or user accounts if this is common practice in your environment.
+// | where DeviceName !in ("<dev_machine_name>") // Placeholder for tuning
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    FileName,
+    ProcessCommandLine,
+    FolderPath,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine

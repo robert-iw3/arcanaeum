@@ -1,0 +1,24 @@
+input_dir: '.'
+output_dir: './import'
+log_level: 'INFO'
+falcon_api:
+  rulegroup_id: null
+  enabled: true
+  disposition_id: 2  # 2 = Detect, 1 = Monitor
+  ruletype_id: '1'   # Check CrowdStrike docs for valid IDs
+  pattern_severity: 'medium'
+platforms:
+  - windows
+  - linux
+  - mac
+  - container
+supported_fields:
+  - event_simpleName
+  - FileName
+  - CommandLine
+  # Add more from SUPPORTED_FIELDS
+regex_delimiters:
+  - '/'
+  - '#'
+max_retries: 3
+retry_delay: 5

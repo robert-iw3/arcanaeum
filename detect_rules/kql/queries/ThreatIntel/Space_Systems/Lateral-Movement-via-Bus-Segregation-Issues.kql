@@ -1,0 +1,42 @@
+// Name: Lateral Movement via Anomalous CAN Bus Communication
+// Author: RW
+// Date: 2025-08-18
+// Description: Detects anomalous communication on a Controller Area Network (CAN) bus, where a component (e.g., a payload system)
+// sends messages to another component it should not be communicating with (e.g., a core flight system).
+// This technique was highlighted in the CYSAT demo, where attackers exploited a lack of bus segregation for lateral movement within a satellite's systems.
+// Data Source: This rule assumes a custom log table (e.g., 'CAN_Bus_Logs_CL') is used to ingest CAN bus or similar operational technology (OT) telemetry data.
+// The schema and values must be adapted to the specific data source.
+// False Positives: This detection is highly dependent on the accuracy of the 'known_comm_pairs' allowlist.
+// Legitimate but unlisted communication paths, such as those used for diagnostics or after a system update, will trigger alerts.
+// This allowlist requires careful and continuous tuning for the specific vehicle or system architecture.
+// Tags: Lateral Movement, Space, Satellite, CAN bus, OT
+
+// This rule requires a custom table for CAN bus data. Replace 'CAN_Bus_Logs_CL' with your actual table name.
+// Assumed fields: TimeGenerated, SourceComponent, DestinationComponent, ArbitrationID, MessageData, DeviceName.
+let can_bus_data = view () { CAN_Bus_Logs_CL };
+// Define the known, legitimate communication paths between components on the bus.
+// This list is critical and MUST be populated based on the specific system's design documentation.
+// The format is "Source:Destination".
+let known_comm_pairs = dynamic([
+    "FlightComputer:AttitudeControl",
+    "PowerController:FlightComputer",
+    "TelemetryUnit:GroundLink",
+    "PayloadController:TelemetryUnit"
+    // Add all other legitimate communication pairs here.
+]);
+can_bus_data
+// The following 'where' clause is a placeholder for pre-filtering.
+// For performance, filter for specific devices or message types if possible before the main logic.
+| where isnotempty(SourceComponent) and isnotempty(DestinationComponent)
+// Create a standardized representation of the communication path.
+| extend CommunicationPath = strcat(SourceComponent, ":", DestinationComponent)
+// The core logic: alert on any communication path that is NOT in the allowlist.
+| where CommunicationPath !in (known_comm_pairs)
+| project
+    TimeGenerated,
+    DeviceName, // The satellite or system generating the log
+    AnomalousSource = SourceComponent,
+    AnomalousDestination = DestinationComponent,
+    CommunicationPath,
+    ArbitrationID, // The specific CAN bus message ID
+    MessageData // The data payload of the message

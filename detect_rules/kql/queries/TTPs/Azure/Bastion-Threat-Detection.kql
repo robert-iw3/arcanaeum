@@ -1,0 +1,108 @@
+// Name: Consolidated Azure Bastion Threat Detection
+// Author: RW
+// Date: 2025-08-31
+// Description: This rule consolidates multiple detections for suspicious Azure Bastion activities, including reconnaissance scanning,
+// brute-force attempts, session hijacking, and suspicious use of shareable links. Each detection is identified by the 'DetectionName' field.
+// False Positives: Since this rule combines multiple logics, false positives vary. Legitimate administrative activity, password mistakes, or users
+// reconnecting from different networks can trigger parts of this rule.
+// Tuning: Each detection has its own thresholds (timeframe, recon_vm_threshold, bruteforce_threshold, hijack_window) that can be tuned.
+// Specific IPs or users can be excluded in the 'BastionLogs' definition if they are known to cause noise.
+// Prerequisite: This detection requires 'BastionAuditLogs' to be enabled in the Azure Bastion host's Diagnostic Settings and sent to a Log Analytics Workspace.
+
+let timeframe = 1h;
+let recon_vm_threshold = 3; // For Reconnaissance: number of distinct VMs targeted by failed logons from one IP.
+let bruteforce_threshold = 5; // For Brute Force: number of failed logons from one IP to one VM in 15m.
+let hijack_window = 1m; // For Session Hijack: time between anomalous connection and original user disconnection.
+
+// Common data source for all detections, parsing properties for use in sub-queries.
+let BastionLogs = AzureDiagnostics
+| where TimeGenerated > ago(timeframe)
+| where Category == "BastionAuditLogs"
+| extend Properties = todynamic(properties_s)
+| extend
+    ClientIp = tostring(Properties.clientIp),
+    UserName = tostring(Properties.userName),
+    TargetVMResourceId = tostring(Properties.targetResourceId),
+    BastionHostName = tostring(Properties.bastionHostName),
+    TargetVMName = tostring(Properties.targetVMName),
+    SessionDuration = todouble(Properties.sessionDuration);
+
+union
+(
+    // Detection 1: Reconnaissance via failed logons to multiple VMs
+    BastionLogs
+    | where OperationName in ("BastionConnect", "BastionShareableLinkConnection") and ResultType == "Failed"
+    | where isnotempty(ClientIp) and isnotempty(TargetVMResourceId)
+    | summarize StartTime = min(TimeGenerated), EndTime = max(TimeGenerated), TargetVMs = make_set(TargetVMResourceId), DistinctVMCount = dcount(TargetVMResourceId) by ClientIp
+    | where DistinctVMCount >= recon_vm_threshold
+    | project
+        TimeGenerated = EndTime,
+        DetectionName = "Azure Bastion Reconnaissance",
+        ClientIp,
+        UserName = "N/A",
+        TargetVMResourceId = "Multiple",
+        BastionHostName = "N/A",
+        Details = pack("Description", strcat("Single IP failed to connect to ", DistinctVMCount, " distinct VMs."), "TargetVMs", TargetVMs, "DistinctVMCount", DistinctVMCount)
+),
+(
+    // Detection 2: Brute-force or password spraying attack
+    BastionLogs
+    | where OperationName in ("BastionConnect", "BastionShareableLinkConnection") and ResultType == "Failed"
+    | summarize StartTime = min(TimeGenerated), EndTime = max(TimeGenerated), FailedCount = count(), TargetUsers = make_set(UserName) by ClientIp, TargetVMResourceId, BastionHostName, bin(TimeGenerated, 15m)
+    | where FailedCount > bruteforce_threshold
+    | project
+        TimeGenerated = EndTime,
+        DetectionName = "Azure Bastion Brute Force",
+        ClientIp,
+        UserName = tostring(TargetUsers),
+        TargetVMResourceId,
+        BastionHostName,
+        Details = pack("Description", strcat(FailedCount, " failed logon attempts from a single IP to a single VM."), "FailedCount", FailedCount)
+),
+(
+    // Detection 3: Successful connection using a Shareable Link (for awareness)
+    BastionLogs
+    | where OperationName == "BastionShareableLinkConnection" and ResultType == "Succeeded"
+    | project
+        TimeGenerated,
+        DetectionName = "Azure Bastion Shareable Link Connection",
+        ClientIp,
+        UserName,
+        TargetVMResourceId,
+        BastionHostName,
+        Details = pack("Description", "A successful connection was made using a Bastion Shareable Link.")
+),
+(
+    // Detection 4: Session hijack indicated by disconnect message
+    BastionLogs
+    | where OperationName == "BastionDisconnect" and message_s has "Another connection was made to this resource"
+    | project
+        TimeGenerated,
+        DetectionName = "Azure Bastion Session Hijack Detected",
+        ClientIp, // This is the IP of the user who was disconnected
+        UserName,
+        TargetVMResourceId,
+        BastionHostName,
+        Details = pack("Description", "A user session was disconnected because another connection was made to the same resource, indicating a potential session hijack.", "DisconnectedClientIp", ClientIp, "SessionDurationInSeconds", SessionDuration)
+),
+(
+    // Detection 5: High-fidelity session hijack correlation by anomalous IP
+    let DisconnectedSessions = BastionLogs
+        | where OperationName == "BastionDisconnect" and message_s has "Another connection was made to this resource"
+        | project DisconnectTime = TimeGenerated, OriginalClientIp = ClientIp, UserName, TargetVMResourceId, BastionHostName;
+    let SuccessfulConnections = BastionLogs
+        | where OperationName in ("BastionConnect", "BastionShareableLinkConnection") and ResultType == "Succeeded"
+        | project ConnectTime = TimeGenerated, NewClientIp = ClientIp, UserName, TargetVMResourceId;
+    DisconnectedSessions
+    | join kind=inner (SuccessfulConnections) on UserName, TargetVMResourceId
+    | where isnotempty(OriginalClientIp) and isnotempty(NewClientIp) and OriginalClientIp != NewClientIp
+    | where DisconnectTime > ConnectTime and (DisconnectTime - ConnectTime) < hijack_window
+    | project
+        TimeGenerated = DisconnectTime,
+        DetectionName = "Azure Bastion Session Hijack by Anomalous IP",
+        ClientIp = NewClientIp, // Attacker's IP
+        UserName,
+        TargetVMResourceId,
+        BastionHostName,
+        Details = pack("Description", "A new connection from an anomalous IP was followed by the disconnection of the original user session.", "OriginalClientIp", OriginalClientIp, "HijackerIp", NewClientIp)
+)

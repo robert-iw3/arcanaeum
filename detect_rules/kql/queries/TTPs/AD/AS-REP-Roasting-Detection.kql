@@ -1,0 +1,46 @@
+// Name: AS-REP Roasting Attempt
+// Author: RW
+// Date: 2025-08-04
+// Description: Detects Kerberos authentication ticket (TGT) requests for user accounts that have Kerberos
+//              pre-authentication disabled. This rule specifically looks for Event ID 4768 where the
+//              pre-authentication type is '0' and a weak RC4 encryption ticket is requested. This combination
+//              is a strong indicator of an AS-REP Roasting attack, where an adversary attempts to
+//              harvest credentials for offline cracking.
+// MITRE ATT&CK: T1558.004
+// False Positive Sensitivity: Medium
+// Tags: Credential Access, T1558.004
+
+// Define the time window for the search.
+let timeWindow = 1h;
+// Placeholder for accounts that may legitimately have pre-authentication disabled for legacy application compatibility.
+// Reviewing and remediating these accounts is highly recommended.
+let AccountExclusionList = dynamic([]);
+
+SecurityEvent
+| where TimeGenerated > ago(timeWindow)
+// Filter for Kerberos authentication ticket (TGT) request events.
+| where EventID == 4768
+// Filter for events where pre-authentication was not required ('0x0' indicates 'No pre-authentication').
+| where PreAuthType == "0x0"
+// Filter for tickets requested with weak RC4 encryption (0x17), which is easier to crack offline.
+| where TicketEncryptionType == "0x17"
+// Exclude known accounts to reduce false positives.
+| where TargetUserName !in (AccountExclusionList)
+// Exclude machine accounts, as this attack typically targets user accounts.
+| where not(TargetUserName endswith "$")
+// Summarize by the source IP to identify a single attacker targeting multiple accounts.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    TargetedUserCount = dcount(TargetUserName),
+    TargetedUsers = make_set(TargetUserName, 100),
+    DomainControllers = make_set(Computer, 10)
+    by IpAddress
+// Project the relevant fields for the alert.
+| project
+    StartTime,
+    EndTime,
+    IpAddress,
+    TargetedUserCount,
+    TargetedUsers,
+    DomainControllers

@@ -1,0 +1,97 @@
+{
+  "data": {
+    "type": "signal_correlation",
+    "attributes": {
+      "name": "Iranian State-Sponsored CNI Intrusion Detection",
+      "enabled": true,
+      "cases": [
+        {
+          "name": "Suspicious ASPX File Creation in IIS Web Directory",
+          "status": "high",
+          "query": "source:sysmon @EventCode:11 @file.path:*\\inetpub\\wwwroot\\* (@file.path:/(UpdateChecker|RecShell|DropShell|EmbedShell)\\.aspx$/ OR (@process.path:*w3wp.exe AND @file.path:*.aspx)) | aggregate count by @host, @process.path, @file.path"
+        },
+        {
+          "name": "Suspicious Scheduled Task Creation",
+          "status": "high",
+          "query": "source:windows_event_log @EventCode:4698 (@task.command:/(\\\\temp\\\\|\\tmp\\\\|\\users\\public\\\\|\\appdata\\\\|\\programdata\\\\|\\recycler\\\\)/ OR @task.command:/(powershell.*(enc|invoke|iex|iwr|download)|cmd \\/c|mshta\\.exe|certutil\\.exe|bitsadmin\\.exe|wscript\\.exe|cscript\\.exe|rundll32\\.exe)/ OR @task.command:/\\\\[a-zA-Z0-9]{12,}\\.exe/) | aggregate count by @host, @task.name, @task.command, @user.name"
+        },
+        {
+          "name": "Proxy and Tunneling Tool Execution",
+          "status": "high",
+          "query": "source:sysmon @EventCode:1 (@process.path:/(plink\\.exe|ngrok\\.exe|glider\\.exe)$/ OR @process.command_line:ReverseSocks5) | aggregate count by @host, @user, @parent_process.path, @process.path, @process.command_line, @process.guid"
+        },
+        {
+          "name": "RDP or PsExec Lateral Movement Activity",
+          "status": "high",
+          "query": "(source:windows_event_log @EventCode:7045 (@service.name:PSEXESVC OR @service.path:/PSEXESVC\\.exe$/) OR source:sysmon @EventCode:1 (@process.path:*PSEXESVC.exe OR @process.path:/C:\\\\Windows\\\\[a-zA-Z0-9]{8,}\\.exe$/) OR source:windows_event_log @EventCode:1149) | aggregate count, collect(case(@EventCode=7045 => 'PsExec Service Installation', @EventCode=1 => 'PsExec-like Process Execution', @EventCode=1149 => 'Successful RDP Logon')) AS activities, collect(coalesce(@user.name, @user)) AS users, collect(coalesce(@service.path, @process.path, @process.command_line, 'Source IP: ' + @ip.src, 'Source Network Address: ' + @param1)) AS activity_details by @host"
+        },
+        {
+          "name": "Virtualization Infrastructure Reconnaissance",
+          "status": "high",
+          "query": "source:sysmon @EventCode:1 ((@process.path:*powershell.exe @process.command_line:/(Get-VM|Get-VMSwitch|Get-VMNetworkAdapter|Get-VHD)/) OR @process.path:/vmware-toolbox-cmd\\.exe/ OR (@process.path:*wmic.exe @process.command_line:root\\\\virtualization) OR (@process.path:*sc.exe @process.command_line:/query\\s+(vmms|vmmemctl|vmtools|vboxservice)/)) | aggregate count by @host, @user, @parent_process.path, @process.path, @process.command_line"
+        },
+        {
+          "name": "Suspicious IIS Module Load for Custom Backdoor",
+          "status": "high",
+          "query": "source:sysmon @EventCode:7 @process.path:*\\w3wp.exe NOT @image_load.signature:Microsoft* (@image_load.path:*\\inetpub\\wwwroot\\* OR @image_load.path:*\\Temp\\* OR @image_load.path:*\\tmp\\* OR @image_load.path:*\\ProgramData\\*) | aggregate count by @host, @process.path, @image_load.path, @image_load.signature, @image_load.signed, @image_load.description"
+        },
+        {
+          "name": "Suspicious In-Memory Execution via Process Injection (Havoc/SystemBC)",
+          "status": "high",
+          "query": "source:sysmon @EventCode:8 (@start_module:NULL OR @start_module:*UNKNOWN*) @source_process.path:(*\\rundll32.exe OR *\\svchost.exe OR *\\regsvr32.exe OR *\\powershell.exe) @target_process.path:(*\\explorer.exe OR *\\svchost.exe OR *\\notepad.exe OR *\\msiexec.exe OR *\\aspnet_compiler.exe) | aggregate count by @host, @source_process.path, @target_process.path, @source_process.guid, @target_process.guid, @start_address, @start_module, @user"
+        },
+        {
+          "name": "ZKTeco ZKBioTime Post-Exploitation Activity",
+          "status": "high",
+          "query": "source:sysmon @EventCode:1 @parent_process.path:/(BioTime|ZKBioTime|ZKTimeNet)/ @process.path:/(\\\\cmd\\.exe|\\\\powershell\\.exe|\\\\wscript\\.exe|\\\\cscript\\.exe|\\\\rundll32\\.exe|\\\\certutil\\.exe|\\\\bitsadmin\\.exe|\\\\whoami\\.exe|\\\\net\\.exe|\\\\net1\\.exe|\\\\systeminfo\\.exe|\\\\mshta\\.exe)$/ | aggregate count by @host, @user, @parent_process.path, @process.path, @process.command_line, @process.guid"
+        },
+        {
+          "name": "Targeted Phishing for Administrator Credentials",
+          "status": "high",
+          "query": "source:email @status:delivered @recipient.is_admin:true NOT @sender_domain:internal_domains (@subject:/(password|verify|urgent|action required|suspension|invoice|credentials|security alert|account validation)/ OR @file.name:/\\.(html|htm|zip|iso|lnk|vbs|js)$/) | aggregate count by @email.sender, @email.recipient, @email.subject, @file.name, @ip.src"
+        },
+        {
+          "name": "Email Data Exfiltration via High Volume or Suspicious Destination",
+          "status": "high",
+          "query": "source:email @action:sent @src_user:internal_users NOT @dest_domain:internal_domains | eval is_personal_domain=case(@dest_domain:/(gmail\\.com|yahoo\\.com|outlook\\.com|hotmail\\.com|aol\\.com|protonmail\\.com|icloud\\.com)/ => 1, true => 0), has_sensitive_subject=case(@subject:/(confidential|secret|internal use only|proprietary|private)/ => 1, true => 0) | aggregate count AS email_count, sum(@bytes_out) AS total_bytes_sent, distinct_count(@dest_domain) AS distinct_recipient_domains, collect(@dest_domain) AS recipient_domains, sum(is_personal_domain) AS personal_email_count, sum(has_sensitive_subject) AS sensitive_subject_count by @src_user window 1d | where (email_count > 100 AND total_bytes_sent > 52428800) OR personal_email_count > 20 OR sensitive_subject_count > 5"
+        }
+      ],
+      "group_by_fields": ["@host", "@ip.src", "@src_user"],
+      "distinct_fields": ["case_id"],
+      "correlation": {
+        "expression": "distinct_count >= 2",
+        "timeframe": "1h"
+      },
+      "message": "Iranian State-Sponsored CNI Intrusion Detected: {distinct_count} distinct TTPs on host {@host}, source IP {@ip.src}, or user {@src_user}. Techniques: {case_names}. Details: {@file.path OR @task.command OR @process.command_line OR @image_load.path OR @email.subject OR @dest_domain}. Timeframe: {first_activity} to {last_activity}",
+      "severity": "high",
+      "tags": [
+        "security:attack",
+        "tactic:TA0001",
+        "tactic:TA0002",
+        "tactic:TA0005",
+        "tactic:TA0006",
+        "tactic:TA0007",
+        "tactic:TA0010",
+        "technique:T1078",
+        "technique:T1059.001",
+        "technique:T1059.003",
+        "technique:T1027",
+        "technique:T1071.001",
+        "technique:T1090.002",
+        "technique:T1021.001",
+        "technique:T1021.002",
+        "technique:T1087",
+        "technique:T1496",
+        "group:lemon_sandstorm",
+        "tool:hanifnet",
+        "tool:hxlibrary",
+        "tool:neoexpressrat",
+        "tool:havoc",
+        "tool:systembc"
+      ],
+      "options": {
+        "evaluation_window": "1h"
+      }
+    }
+  }
+}

@@ -1,0 +1,50 @@
+// Name: WinReg API Call with Downgraded Authentication
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects processes making RPC calls to the Windows Remote Registry (WinReg) service using a downgraded
+//              authentication level (RPC_C_AUTHN_LEVEL_CONNECT). This behavior can be triggered by the
+//              RegConnectRegistryW/ExW APIs and is a key precursor to NTLM relay attacks, as it allows
+//              an attacker to capture and relay credentials.
+// Tactic: Credential Access
+// Technique: T1557.001 (NTLM Relaying)
+// False Positive Sensitivity: Medium. The secure default for WinReg RPC is a higher authentication level (PKT_PRIVACY).
+// A fallback to the CONNECT level is anomalous but could occur due to network issues or specific legacy configurations.
+// Investigate the initiating process (e.g., regedit.exe, mmc.exe) and the target device.
+// References: https://learn.microsoft.com/en-us/windows/win32/rpc/authentication-level-constants
+// Data Source: Microsoft 365 Defender (DeviceEvents)
+
+let timeframe = 1h;
+let winreg_uuid = "338cd001-2244-31f1-aaaa-900038001003";
+// RPC_C_AUTHN_LEVEL_CONNECT corresponds to an authentication level of 2. This level authenticates credentials only when the client establishes a relationship with the server, making it vulnerable to relay attacks.
+let downgraded_auth_level = "2";
+
+DeviceEvents
+| where TimeGenerated > ago(timeframe)
+| where ActionType == "RpcClientCall"
+// Parse RPC metadata from the AdditionalFields blob. Field names may vary.
+| extend RpcFields = todynamic(AdditionalFields)
+| where isnotempty(RpcFields.InterfaceUuid)
+| extend InterfaceUuid = tostring(RpcFields.InterfaceUuid)
+| extend AuthnLevel = tostring(RpcFields.AuthenticationLevel)
+// Filter for RPC calls specifically to the WinReg interface, which is the target of the vulnerable API calls.
+| where InterfaceUuid =~ winreg_uuid
+// Filter for the specific downgraded authentication level.
+| where AuthnLevel == downgraded_auth_level
+// Known callers of RegConnectRegistry include regedit.exe, mmc.exe (for Event Viewer), certutil.exe.
+// This activity is suspicious regardless of the caller, but context is key for investigation.
+| project
+    TimeGenerated,
+    DeviceName,
+    DeviceId,
+    InitiatingProcessAccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessId,
+    RemoteIP,
+    RemoteUrl,
+    AuthenticationLevel = AuthnLevel,
+    InterfaceUuid
+| extend
+    AccountCustomEntity = InitiatingProcessAccountName,
+    HostCustomEntity = DeviceName,
+    IPCustomEntity = RemoteIP

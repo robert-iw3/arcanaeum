@@ -1,0 +1,37 @@
+rule executable_with_mismatched_extension_downloaded_by_browser {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects a file downloaded by a browser with a mismatched or double extension, a technique used to disguise malicious executables. This pattern is associated with FileJacking and other malware delivery methods where attackers use social engineering to trick users into running malicious files."
+    false_positives = "Some legitimate software installers or updaters downloaded via a browser might use naming conventions that could trigger this rule. Review the file name and source to determine legitimacy."
+    tactic = "TA0005, TA0002"
+    technique = "T1036.003, T1204.001"
+    tags = "BROWSER, FILEJACKING, MASQUERADING, MALWARE_DELIVERY, WINDOWS"
+
+  events:
+    // Event for a file being created on disk.
+    $file.metadata.event_type = "FILE_CREATION"
+
+    // Filter for files created by a common browser process.
+    $file.principal.process.file.name in ("msedge.exe", "chrome.exe", "firefox.exe", "brave.exe", "opera.exe")
+
+    // Core logic: Match filenames with a deceptive double extension.
+    // This regex looks for a common document/archive extension followed by a common executable extension.
+    re.regex($file.target.file.name, `\.(pdf|docx?|xlsx?|pptx?|txt|rtf|jpg|jpeg|png|gif|zip|rar)\.(exe|scr|com|pif|bat|cmd|vbs|js|ps1|msi)$` nocase)
+
+  outcome:
+    // Set a risk score for the detection.
+    $risk_score = 60
+
+    // Extract key fields for investigation.
+    $principal_hostname = $file.principal.hostname
+    $principal_user_userid = $file.principal.user.userid
+    $principal_process_name = $file.principal.process.file.name
+    $principal_process_command_line = $file.principal.process.command_line
+    $target_file_name = $file.target.file.name
+    $target_file_path = $file.target.file.full_path
+    $target_file_sha256 = $file.target.file.sha256
+
+  condition:
+    $file
+}

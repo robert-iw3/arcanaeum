@@ -1,0 +1,37 @@
+title: AWS IAM User Granted Admin Privileges or Console Access Post-Creation
+id: 6f86d41f-bd61-48ae-9a91-4b27f7ac7750
+status: experimental
+description: Detects the creation of a new AWS IAM user that is then either granted administrative privileges or given a login profile for console access within a short time frame. This pattern is indicative of an attacker creating a persistent foothold in a compromised AWS account.
+references:
+  - https://securitylabs.datadoghq.com/articles/tales-from-the-cloud-trenches-ecs-crypto-mining/#hands-on-keyboard-activity-begins
+author: RW
+date: 2025-08-19
+tags:
+  - attack.persistence
+  - attack.t1098.001
+  - attack.t1078.004
+logsource:
+  service: cloudtrail
+detection:
+  # Detects the creation of a new IAM user
+  create_user:
+    aws.cloudtrail.event_source: 'iam.amazonaws.com'
+    aws.cloudtrail.event_name: 'CreateUser'
+    aws.cloudtrail.error_code:
+  # Detects the attachment of the AdministratorAccess policy
+  attach_admin_policy:
+    aws.cloudtrail.event_source: 'iam.amazonaws.com'
+    aws.cloudtrail.event_name: 'AttachUserPolicy'
+    aws.cloudtrail.request_parameters.policy_arn: 'arn:aws:iam::aws:policy/AdministratorAccess'
+    aws.cloudtrail.error_code:
+  # Detects the creation of a console login profile
+  create_login_profile:
+    aws.cloudtrail.event_source: 'iam.amazonaws.com'
+    aws.cloudtrail.event_name: 'CreateLoginProfile'
+    aws.cloudtrail.error_code:
+  # Correlates user creation with subsequent privilege escalation or console access enablement
+  condition: |-
+    create_user followed by (attach_admin_policy or create_login_profile) by aws.cloudtrail.request_parameters.user_name | timeframe: 10m
+falsepositives:
+  - Legitimate administrative activity, such as onboarding a new administrator, may trigger this rule. Consider excluding trusted IAM users or roles that perform these actions.
+level: medium

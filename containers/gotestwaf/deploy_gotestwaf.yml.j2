@@ -1,0 +1,51 @@
+---
+- name: Deploy GoTestWAF for WAF testing
+  hosts: localhost
+  become: yes
+  vars:
+    output_dir: "{{ output_dir }}"
+    deploy_type: "{{ deploy_type }}"
+    urls: {{ urls | tojson }}
+    parallel: {{ parallel }}
+    batch_size: {{ batch_size }}
+    retries: {{ retries }}
+    timeout: {{ timeout }}
+  tasks:
+    - name: Ensure output directory exists
+      file:
+        path: "{{ output_dir }}"
+        state: directory
+        mode: '0777'
+
+    - name: Build GoTestWAF image
+      command: "{{ container_cmd }} build -t gotestwaf ."
+      args:
+        chdir: "{{ playbook_dir }}"
+      when: deploy_type in ['docker', 'podman']
+      timeout: "{{ timeout }}"
+
+    - name: Run GoTestWAF for each URL batch with Docker/Podman
+      command: "{{ container_cmd }} run --rm -v {{ output_dir }}:/app/reports gotestwaf --url={{ item }} --noEmailReport"
+      loop: "{{ urls }}"
+      when: deploy_type in ['docker', 'podman']
+      async: "{{ timeout }}"
+      poll: 0
+      register: gotestwaf_output
+      throttle: "{{ parallel }}"
+      retries: "{{ retries }}"
+      delay: 10
+
+    - name: Wait for GoTestWAF tasks to complete
+      async_status:
+        jid: "{{ item.ansible_job_id }}"
+      loop: "{{ gotestwaf_output.results }}"
+      when: deploy_type in ['docker', 'podman']
+      register: async_results
+      until: async_results.finished
+      retries: "{{ retries }}"
+      delay: 10
+
+    - name: Apply Kubernetes deployment
+      command: "{{ container_cmd }} apply -f gotestwaf_k8s.yml"
+      when: deploy_type == 'kubernetes'
+      timeout: "{{ timeout }}"

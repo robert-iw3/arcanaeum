@@ -1,0 +1,52 @@
+// Name: SQL CLR Enabled or Assembly Loaded
+// Author: RW
+// Date: 2025-08-23
+// Description: Detects when SQL CLR is enabled, when CLR strict security is disabled, or when a new DLL is written to a SQL Server directory.
+// These actions can be used by an attacker to execute arbitrary .NET code within the SQL Server process for execution and persistence.
+// MITRE ATT&CK: T1059.006, T1543.003
+
+let clrConfigEvents =
+Event
+// Look for SQL Server configuration change events (Event ID 15457)
+| where Provider == "MSSQLSERVER" and EventID == 15457
+| extend EventDataXml = parse_xml(EventData)
+// Extract configuration details from the event data
+| extend config_name = tostring(EventDataXml.EventData.Data[0])
+| extend new_value = tostring(EventDataXml.EventData.Data[1])
+// Filter for enabling CLR or disabling strict CLR security, both high-risk actions.
+| where (config_name has "clr enabled" and new_value == "1") or (config_name has "clr strict security" and new_value == "0")
+| extend
+    Activity = "SQL CLR Configuration Changed",
+    HostName = Computer,
+    timestamp = TimeGenerated,
+    Details = strcat("Configuration '", config_name, "' was changed to '", new_value, "'.")
+| project
+    timestamp,
+    HostName,
+    Activity,
+    Details,
+    RenderedDescription;
+
+let assemblyLoadedEvents =
+DeviceFileEvents
+// Look for new DLLs being created
+| where ActionType == "FileCreated" and FileName endswith ".dll"
+// Filter for common SQL Server binary directories.
+| where FolderPath has @"\Microsoft SQL Server\" and FolderPath has @"\MSSQL\Binn"
+// FP Tuning: Legitimate updates or installations of SQL CLR assemblies will trigger this.
+// Baseline known good DLLs or initiating processes related to patching/deployment.
+| extend
+    Activity = "Potential SQL CLR Assembly Loaded",
+    HostName = DeviceName,
+    timestamp = TimeGenerated,
+    Details = strcat("File '", FileName, "' created in '", FolderPath, "' by process '", InitiatingProcessFileName, "'.")
+| project
+    timestamp,
+    HostName,
+    Activity,
+    Details,
+    InitiatingProcessFileName,
+    FileName,
+    FolderPath;
+
+union isfuzzy=true clrConfigEvents, assemblyLoadedEvents

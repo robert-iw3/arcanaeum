@@ -1,0 +1,59 @@
+//
+// Name: Kernel Security Check Failure due to Shadow Stack Violation
+//
+// Description:
+// Detects a KERNEL_SECURITY_CHECK_FAILURE (0x139) bugcheck with a first argument of 0x39.
+// This specific combination indicates a shadow stack violation, where a mismatch between
+// the regular stack and the hardware-enforced shadow stack was detected. This is a strong
+// indicator of a control-flow hijack attempt, such as Return-Oriented Programming (ROP),
+// being blocked by the Kernel Shadow Stack mitigation.
+//
+// Author: RW
+// Date: 2025-08-04
+//
+// False Positives:
+// While this is a high-fidelity indicator of a blocked exploit attempt, a legitimate but
+// faulty kernel driver could theoretically cause this specific crash. Analysis of the
+// associated crash dump is recommended for confirmation.
+//
+// Tactic: Defense Evasion
+// Technique: T1211, Exploitation for Defense Evasion
+//
+
+DeviceEvents
+// Filter for bugcheck (system crash) events.
+| where ActionType == "BugCheckReported"
+// Parse the bugcheck parameters from the AdditionalFields JSON.
+| extend AdditionalFieldsParsed = todynamic(AdditionalFields)
+| extend
+    BugCheckCode = tohex(toint(AdditionalFieldsParsed.BugCheckCode)),
+    BugCheckParameter1 = tohex(toint(AdditionalFieldsParsed.BugCheckParameter1))
+// Filter for KERNEL_SECURITY_CHECK_FAILURE (0x139) with the specific shadow stack violation code (0x39).
+| where BugCheckCode == "139" and BugCheckParameter1 == "39"
+// Aggregate alerts to summarize the activity and reduce noise.
+| summarize
+    count(),
+    FirstSeen = min(Timestamp),
+    LastSeen = max(Timestamp)
+    by
+    DeviceName,
+    DeviceId,
+    ReportId,
+    BugCheckCode,
+    BugCheckParameter1,
+    BugCheckParameter2 = tostring(AdditionalFieldsParsed.BugCheckParameter2),
+    BugCheckParameter3 = tostring(AdditionalFieldsParsed.BugCheckParameter3),
+    BugCheckParameter4 = tostring(AdditionalFieldsParsed.BugCheckParameter4)
+// Project and rename fields for a clear and actionable alert.
+| project
+    FirstSeen,
+    LastSeen,
+    Endpoint = DeviceName,
+    DeviceId,
+    BugCheckCode,
+    BugCheckParameter1,
+    BugCheckParameter2,
+    BugCheckParameter3,
+    BugCheckParameter4,
+    AlertCount = count_,
+    ReportId

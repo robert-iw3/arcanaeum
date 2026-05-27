@@ -1,0 +1,54 @@
+let timeframe = 1d;
+// --- Configuration Section ---
+// !!! This rule requires configuration to be effective. !!!
+// You MUST populate the lists below with details of your satellite modem estate to scope the query and avoid excessive false positives.
+// Add the hostnames of your satellite modems/terminals.
+let modem_hostnames = dynamic([]); // e.g., dynamic(["viasat-term-01", "hughes-gw-5"])
+// Add the IP addresses or CIDR ranges of your satellite modems/terminals.
+let modem_ips = dynamic([]); // e.g., dynamic(["192.168.100.1", "10.5.2.0/24"])
+
+// --- Detection Logic ---
+
+// Part 1: Look for signs of Remote Code Execution on the modem itself (Host-based).
+// This is a high-fidelity signal that detects a web server process spawning a command shell.
+let rce_events =
+DeviceProcessEvents
+| where TimeGenerated > ago(timeframe)
+// Scope to known modem devices. This is critical to reduce false positives.
+| where DeviceName in~ (modem_hostnames) or DeviceIP in (modem_ips)
+// Identify a web server as the parent process. The list may need to be expanded based on your specific modem software.
+// "SNORE" is included as a keyword based on the Viasat vulnerability (CVE-2024-6198).
+| where InitiatingProcessFileName has_any ("httpd", "nginx", "lighttpd", "snore") or InitiatingProcessCommandLine has_any ("httpd", "nginx", "lighttpd", "snore")
+// Look for the web server spawning a shell or other suspicious utility.
+| where FileName in~ ("sh", "bash", "ash", "busybox", "wget", "curl", "nc", "netcat", "cmd.exe", "powershell.exe")
+| extend
+    DetectionMethod = "RCE: Web Server Spawning Shell",
+    Host = DeviceName,
+    IP = DeviceIP,
+    ParentProcess = InitiatingProcessFileName,
+    ChildProcess = FileName,
+    CommandLine = ProcessCommandLine,
+    Account = AccountName;
+
+// Part 2: Look for suspicious network traffic targeting the modem's web interface (Network-based).
+// This can detect exploit attempts before they succeed or if endpoint logs are unavailable.
+let network_exploit_attempts =
+CommonSecurityLog
+| where TimeGenerated > ago(timeframe)
+// Scope to traffic destined for known modems.
+| where DestinationIP in (modem_ips) or DestinationHostName in~ (modem_hostnames)
+// Look for indicators of exploit attempts in the URL.
+// A very long URL can be an attempt to trigger a buffer overflow (like CVE-2024-6198).
+// Specific keywords can indicate command injection. "SNORE" is from the Viasat vulnerability.
+| where strlen(RequestURL) > 1024 or RequestURL has_any ("SNORE", "() { :;};", "/bin/sh", "wget ", "curl ")
+| extend
+    DetectionMethod = iff(strlen(RequestURL) > 1024, "Network: Potential Buffer Overflow Attempt", "Network: Suspicious URL Keyword"),
+    Host = DestinationHostName,
+    IP = DestinationIP,
+    Source_IP = SourceIP,
+    RequestURL,
+    Account = SourceUserID;
+
+// Combine the results from both detection methods.
+union rce_events, network_exploit_attempts
+| project-reorder TimeGenerated, DetectionMethod, Host, IP, Source_IP, Account, ParentProcess, ChildProcess, CommandLine, RequestURL

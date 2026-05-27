@@ -1,0 +1,36 @@
+// Name: Unauthorized or Anomalous Command Execution (SPARTA UACE)
+// Author: RW
+// Date: 2025-08-15
+// Description: Detects the execution of commands that may reconfigure system components or alter security settings, aligned
+// with the SPARTA UACE threat pattern. Such activity could indicate unauthorized access or system compromise.
+// Tactic: Defense Evasion, Persistence, Execution
+// Technique: T1562, T1543, T1059
+// False Positive Sensitivity: Medium
+
+let timeframe = 1h;
+// Define a list of suspicious reconfiguration commands for Windows
+let windows_reconfig_tools = dynamic(['sc.exe', 'netsh.exe', 'reg.exe', 'bcdedit.exe', 'wevtutil.exe', 'wmic.exe', 'fsutil.exe']);
+// Define a list of suspicious reconfiguration commands for Linux
+let linux_reconfig_tools = dynamic(['systemctl', 'service', 'iptables', 'ufw', 'sysctl', 'chmod', 'chown', 'setfacl', 'sestatus', 'setenforce']);
+// Define suspicious PowerShell commandlets or strings that can alter system state
+let ps_reconfig_strings = dynamic(['Set-MpPreference', 'DisableRealtimeMonitoring', 'New-NetFirewallRule', 'Set-NetFirewallRule', 'Set-ItemProperty -Path "HKLM:']);
+DeviceProcessEvents
+| where Timestamp > ago(timeframe)
+// Filter for either native tool execution or PowerShell execution with suspicious commands
+| where
+    (DeviceOSPlatform == "Windows" and ProcessVersionInfoOriginalFileName in~ (windows_reconfig_tools)) or
+    (DeviceOSPlatform == "Linux" and FileName in~ (linux_reconfig_tools)) or
+    (FileName in~ ('powershell.exe', 'pwsh.exe') and ProcessCommandLine has_any (ps_reconfig_strings))
+// FP Mitigation: Exclude common legitimate parent processes and system accounts.
+// This list should be customized to your environment. Consider adding known administrative accounts or software deployment service accounts.
+| where not (InitiatingProcessFileName in~ ('MsMpEng.exe', 'System', 'services.exe', 'svchost.exe', 'TiWorker.exe') or AccountName in~ ('SYSTEM', 'NETWORK SERVICE', 'LOCAL SERVICE'))
+// FP Mitigation: Further tuning could involve filtering for commands executed outside of normal business hours,
+// or from processes not associated with standard administrative tools (e.g., SCCM, Intune).
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    FileName,
+    ProcessCommandLine,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine

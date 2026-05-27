@@ -1,0 +1,66 @@
+// Name: Suspicious Invoke-Sqlcmd or sqlcmd.exe Usage
+// Author: RW
+// Date: 2025-08-23
+// Description: Detects suspicious usage of Invoke-Sqlcmd (PowerShell) or sqlcmd.exe (command-line utility).
+// These tools can be used by attackers for database reconnaissance, data exfiltration, or command execution via SQL Server.
+// MITRE ATT&CK: T1003, T1041
+
+let suspicious_sql_keywords = dynamic([
+    "xp_cmdshell",
+    "sp_oacreate",
+    "sp_add_trusted_assembly",
+    "sp_configure",
+    "OPENROWSET"
+]);
+
+let sqlcmd_events =
+DeviceProcessEvents
+// Look for sqlcmd.exe execution
+| where FileName =~ "sqlcmd.exe"
+// Filter for suspicious command-line arguments or patterns
+| where ProcessCommandLine has_any (suspicious_sql_keywords) // Execution of risky procedures
+    or ProcessCommandLine has_any ("-o ", "--outputfile") // Redirecting query output to a file, potential exfiltration
+    or (ProcessCommandLine has_any ("-i ", "--inputfile") and ProcessCommandLine matches regex @'https?://') // Input file from a URL, seen in Atomic Red Team tests
+    or ProcessCommandLine has_any ("-t 0", "--query_timeout=0") // Disabling query timeout, useful for large data exfiltration
+// FP Tuning: Legitimate database administration scripts may use sqlcmd.exe with output files.
+// Consider excluding known parent processes (e.g., approved automation tools) or specific command lines.
+| extend
+    Activity = "Suspicious sqlcmd.exe Execution",
+    HostName = DeviceName,
+    timestamp = TimeGenerated,
+    CommandLine = ProcessCommandLine,
+    InitiatingProcess = InitiatingProcessFileName
+| project
+    timestamp,
+    HostName,
+    AccountName,
+    Activity,
+    CommandLine,
+    InitiatingProcess;
+
+let invoke_sqlcmd_events =
+DeviceEvents
+// Look for PowerShell script block logging
+| where ActionType == "PowerShellCommand"
+// Filter for Invoke-Sqlcmd usage
+| where AdditionalFields.Command has "Invoke-Sqlcmd"
+// Filter for suspicious query content or parameters
+| where AdditionalFields.Command has_any (suspicious_sql_keywords)
+    or AdditionalFields.Command has "-QueryTimeout 0"
+// FP Tuning: Legitimate PowerShell scripts for database management may use Invoke-Sqlcmd.
+// Baseline normal script activity and consider excluding trusted script paths or users.
+| extend
+    Activity = "Suspicious Invoke-Sqlcmd Execution",
+    HostName = DeviceName,
+    timestamp = TimeGenerated,
+    CommandLine = tostring(AdditionalFields.Command),
+    InitiatingProcess = InitiatingProcessFileName
+| project
+    timestamp,
+    HostName,
+    AccountName,
+    Activity,
+    CommandLine,
+    InitiatingProcess;
+
+union isfuzzy=true sqlcmd_events, invoke_sqlcmd_events

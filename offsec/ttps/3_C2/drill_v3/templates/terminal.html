@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Terminal Dashboard</title>
+    {% if style == True %}
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/light/terminal.css') }}"
+    />
+    {% else %}
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/dark/terminal.css') }}"
+    />
+    {% endif %}
+  </head>
+  <body>
+    <header>
+      <nav>
+        <ul>
+          <li><a href="/">Control Panel</a></li>
+          <li><a href="/payload">Payload</a></li>
+          <li><a href="/files">Files</a></li>
+          <li><a href="/logout">Logout</a></li>
+        </ul>
+      </nav>
+    </header>
+
+    <h1>Terminal Dashboard</h1>
+
+    <div id="popup-alert">
+      <div id="popup-message"></div>
+      <button id="popup-ok-btn">OK</button>
+    </div>
+
+    <div id="terminal-container">
+      <iframe id="terminal"></iframe>
+      <div id="button-container">
+        <button class="button" onclick="fullscreen()">Fullscreen</button>
+        <button class="button" onclick="ctrl()">
+          Recover Shell Connection
+        </button>
+        <button class="button" onclick="disconnect()">Disconnect</button>
+      </div>
+    </div>
+    {% if show_login == True %}
+    <script>
+      var show_logout_button = true;
+    </script>
+    {% else %}
+    <script>
+      var show_logout_button = false;
+    </script>
+    {% endif %}
+    <script src="{{ url_for('static', filename='js/terminal.js') }}"></script>
+  </body>
+</html>

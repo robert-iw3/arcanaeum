@@ -1,0 +1,52 @@
+// Name: Pass-the-Hash Attempt
+// Author: RW
+// Date: 2025-08-04
+// Description: Detects a pattern indicative of a Pass-the-Hash attack, where an account performs NTLM-based network logons
+//              (LogonType 3) from a single source to multiple destination computers. This behavior is a strong indicator of
+//              lateral movement, as attackers use stolen hashes to authenticate to other systems on the network without
+//              needing the plaintext password.
+// MITRE ATT&CK: T1550.002
+// False Positive Sensitivity: Medium
+// Tags: Lateral Movement, T1550.002
+
+// Define the time window for the search.
+let timeWindow = 1h;
+// Define the threshold for the number of distinct destination computers targeted by a single account from one source IP.
+// This helps to distinguish legitimate administrative activity from widespread lateral movement.
+let destinationThreshold = 2;
+
+// Placeholder for accounts that may perform legitimate remote administration using NTLM.
+let AccountExclusionList = dynamic([]);
+// Placeholder for source IPs of management servers or other systems that are expected to perform such actions.
+let IPExclusionList = dynamic([]);
+
+SecurityEvent
+| where TimeGenerated > ago(timeWindow)
+// Filter for successful logon events.
+| where EventID == 4624
+// Filter for Network logons, which are typical for remote resource access and lateral movement.
+| where LogonType == 3
+// Filter for logons using the NTLM authentication package, a key component of classic Pass-the-Hash attacks.
+| where AuthenticationPackageName == "NTLM"
+// Exclude machine accounts and the system account, which often use NTLM for legitimate purposes.
+| where not(Account endswith "$") and Account != "SYSTEM"
+// Exclude known legitimate accounts and source IPs to reduce false positives.
+| where Account !in (AccountExclusionList)
+| where IpAddress !in (IPExclusionList)
+// Summarize activity to identify one account from one source IP accessing multiple computers.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    TargetedComputerCount = dcount(Computer),
+    TargetedComputers = make_set(Computer, 100)
+    by Account, IpAddress
+// An alert is triggered if the number of targeted computers exceeds the defined threshold.
+| where TargetedComputerCount > destinationThreshold
+// Project the relevant fields for the alert.
+| project
+    StartTime,
+    EndTime,
+    Account,
+    IpAddress,
+    TargetedComputerCount,
+    TargetedComputers

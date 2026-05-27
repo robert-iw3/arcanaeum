@@ -1,0 +1,57 @@
+//
+// Name: Kernel MSR Write Attempt Blocked by Hypervisor
+//
+// Description:
+// Detects a SYSTEM_SERVICE_EXCEPTION (0x3b) bugcheck with a first argument of STATUS_PRIVILEGED_INSTRUCTION (0xc0000096).
+// This specific combination is a strong indicator that a hypervisor (like Hyper-V) has blocked a privileged operation
+// attempted from the kernel. This is often seen when a malicious driver attempts to write to a protected Model-Specific
+// Register (MSR), such as IA32_S_CET, to disable security features like Kernel Shadow Stack.
+//
+// Author: RW
+// Date: 2025-08-04
+//
+// False Positives:
+// While this is a high-fidelity indicator for this specific attack, a legitimate but faulty kernel driver could theoretically
+// cause a similar crash. Analysis of the associated crash dump is recommended for confirmation.
+//
+// Tactic: Defense Evasion
+// Technique: T1562.001, Impair Defenses: Disable or Modify Tools
+//
+
+DeviceEvents
+// Filter for bugcheck (system crash) events.
+| where ActionType == "BugCheckReported"
+// Parse the bugcheck parameters from the AdditionalFields JSON.
+| extend AdditionalFieldsParsed = todynamic(AdditionalFields)
+| extend
+    BugCheckCode = tohex(toint(AdditionalFieldsParsed.BugCheckCode)),
+    BugCheckParameter1 = tohex(toint(AdditionalFieldsParsed.BugCheckParameter1))
+// Filter for SYSTEM_SERVICE_EXCEPTION (0x3b) with the specific exception code STATUS_PRIVILEGED_INSTRUCTION (0xc0000096).
+| where BugCheckCode == "3b" and BugCheckParameter1 == "c0000096"
+// Aggregate alerts to summarize the activity and reduce noise.
+| summarize
+    count(),
+    FirstSeen = min(Timestamp),
+    LastSeen = max(Timestamp)
+    by
+    DeviceName,
+    DeviceId,
+    ReportId,
+    BugCheckCode,
+    BugCheckParameter1,
+    BugCheckParameter2 = tostring(AdditionalFieldsParsed.BugCheckParameter2),
+    BugCheckParameter3 = tostring(AdditionalFieldsParsed.BugCheckParameter3),
+    BugCheckParameter4 = tostring(AdditionalFieldsParsed.BugCheckParameter4)
+// Project and rename fields for a clear and actionable alert.
+| project
+    FirstSeen,
+    LastSeen,
+    Endpoint = DeviceName,
+    DeviceId,
+    BugCheckCode,
+    ExceptionCode = BugCheckParameter1,
+    FaultingInstructionAddress = BugCheckParameter2,
+    ExceptionContextAddress = BugCheckParameter3,
+    ReservedParameter = BugCheckParameter4,
+    AlertCount = count_,
+    ReportId

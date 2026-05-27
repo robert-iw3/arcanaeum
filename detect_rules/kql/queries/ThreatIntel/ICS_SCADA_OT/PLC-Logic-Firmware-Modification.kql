@@ -1,0 +1,56 @@
+// Name: PLC Logic or Firmware Modification Detected
+// Author: RW
+// Date: 2025-08-11
+// Description: Detects attempts to modify Programmable Logic Controller (PLC) ladder logic or firmware.
+//              Such modifications can indicate a high-impact attack aimed at disrupting physical processes,
+//              damaging equipment, or establishing persistence within the Operational Technology (OT) network.
+// Tactic: Impair Process Control
+// Technique: T0855 - Inhibit Response Function
+// False Positive Sensitivity: Medium
+// - This rule will trigger on legitimate PLC programming and maintenance activities.
+// - It is CRITICAL to populate the 'authorized_engineering_workstations' list with the IP addresses of devices approved for PLC programming to reduce false positives.
+// - Consider scheduling this rule to run outside of planned maintenance windows.
+
+let timeframe = 1h;
+
+// **TUNING REQUIRED**: Add the IP addresses of authorized Engineering Workstations (EWS) or management servers.
+let authorized_engineering_workstations = dynamic(["192.168.1.10", "10.50.1.20", "x.x.x.x"]);
+
+// Define a list of commands across different ICS protocols that indicate a modification or state change.
+// This list is not exhaustive and should be tailored to your specific environment and the capabilities of your OT monitoring solution.
+let modification_commands = dynamic([
+    // EtherNet/IP (CIP)
+    "Download", "Write Tag", "Modify", "Program",
+    // S7
+    "S7_WRITE", "SZL_WRITE", "DOWNLOAD", "BLOCK_DOWNLOAD",
+    // Modbus Function Codes (as strings)
+    "5", "6", "15", "16", // Write Single Coil, Write Single Register, Write Multiple Coils, Write Multiple Registers
+    // DNP3
+    "WRITE", "OPERATE", "DIRECT_OPERATE",
+    // General Commands
+    "Stop PLC", "Run PLC", "PLC Stop", "PLC Run", "Force On", "Force Off", "Upload/download"
+]);
+
+// This rule assumes a dedicated OT/ICS security monitoring solution (e.g., Defender for IoT, Nozomi, Dragos, Claroty)
+// that provides deep packet inspection of industrial protocols.
+// You MUST map the fields from your specific data source to the fields used in this query (e.g., SrcIp, DestIp, Command, Protocol, User).
+// A table like 'SecurityEvent' from Defender for IoT or a custom log table might be appropriate.
+OTSecurityLogs // or Your_ICS_Log_Table
+| where TimeGenerated > ago(timeframe)
+// Filter for events where a modification command was observed.
+| where Command has_any (modification_commands)
+// **CRITICAL TUNING STEP**: Exclude activity from known, authorized engineering workstations.
+| where not(SrcIp in (authorized_engineering_workstations))
+// Focus on PLCs as the destination. You may need to add a filter here if your logs contain device type information.
+// | where DestDeviceType == "PLC"
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    CommandsUsed = make_set(Command),
+    AttemptCount = count()
+    by SrcIp, DestIp, DestPort, Protocol, User
+| extend
+    timestamp = StartTime,
+    HostCustomEntity = DestIp, // The PLC
+    AccountCustomEntity = User,
+    IPCustomEntity = SrcIp // The programming source

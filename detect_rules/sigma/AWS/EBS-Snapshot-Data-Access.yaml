@@ -1,0 +1,25 @@
+title: AWS EBS Volume Created From Snapshot
+id: 31a3d744-4a7e-4756-91b3-500653af1f71
+status: experimental
+description: >-
+  Detects the creation of an AWS EBS volume from a pre-existing snapshot. This is a key step in a known data exfiltration technique where an attacker creates a snapshot of a target volume, creates a new volume from that snapshot, and then attaches it to an instance they control to access the data.
+references:
+  - https://unit42.paloaltonetworks.com/cloud-lateral-movement-techniques/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.exfiltration
+  - attack.t1537
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    eventName: 'CreateVolume'
+    errorCode:
+    requestParameters.snapshotId: '*' # This field indicates the volume is being created from a snapshot, not from scratch.
+  condition: selection
+falsepositives:
+  - This activity is common for legitimate administrative tasks, including disaster recovery, testing, and data migration from a template.
+  - This alert is a precursor and should be correlated with a preceding 'CreateSnapshot' event and a subsequent 'AttachVolume' event by the same user identity within a short time window to represent the full attack pattern.
+level: medium

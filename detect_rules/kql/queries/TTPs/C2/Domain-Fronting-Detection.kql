@@ -1,0 +1,76 @@
+// name Domain Fronting Detected via SNI/Host Mismatch
+// author RW
+// description
+//   This rule detects potential domain fronting, a technique used to conceal the true destination of C2 traffic.
+//   It identifies discrepancies between the Server Name Indication (SNI) in the TLS handshake and the Host header
+//   in the subsequent HTTP request. While some legitimate services (especially CDNs and multi-tenant platforms)
+//   exhibit this behavior, a mismatch can be a strong indicator of an attempt to bypass network filtering by hiding
+//   traffic within a connection to a high-reputation domain.
+// tags
+// - T1071.001
+// - T1102
+// severity Medium
+// false_positives
+// - Content Delivery Networks (CDNs) like Cloudflare, Akamai, and Fastly frequently use different SNI and Host headers as part of their normal operation.
+// - Multi-tenant cloud services (e.g., Azure App Service, Heroku, Shopify) often show the platform's domain in the SNI and the customer's domain in the Host header.
+// - This detection is highly dependent on having an accurate allowlist. It is critical to tune the 'FrontDomainAllowList' for your environment to avoid a high volume of false positives.
+// datasources
+// - CommonSecurityLog (from Palo Alto, Zscaler, or other SSL-inspecting firewalls/proxies)
+//
+// Define an allowlist of domains that are known to act as legitimate "fronts" (e.g., CDNs, cloud platforms).
+// This list is crucial for reducing false positives and must be tuned for your environment.
+
+let FrontDomainAllowList = dynamic([
+    // Common CDNs
+    "akamai.net", "akamaiedge.net", "cloudflare.net", "fastly.net", "cloudfront.net",
+    // Common Cloud Platforms
+    "azurewebsites.net", "appspot.com", "herokuapp.com", "aspnetcdn.com", "windows.net",
+    // Other common services
+    "google.com", "live.com", "office.com", "sharepoint.com"
+]);
+
+// This detection requires a log source with SSL/TLS inspection capabilities.
+// The field names for SNI and Host header may vary. Adjust as needed.
+// CommonSecurityLog is used as an example.
+// - SSLServerName: Represents the SNI from the TLS handshake. Might be named 'sni', 'ServerName', or be in a custom string field.
+// - DestinationHostName: Represents the Host header from the HTTP request. Might be named 'HttpHost', 'Host', or parsed from 'RequestURL'.
+CommonSecurityLog
+| where TimeGenerated > ago(1d)
+// Ensure the necessary fields are present for comparison.
+| where isnotempty(SSLServerName) and isnotempty(DestinationHostName)
+// Filter out cases where SNI and Host are identical, as these are not domain fronting.
+| where SSLServerName != DestinationHostName
+// Approximate the eTLD+1 for both SNI and Host to compare the root domains.
+// Note: This logic may not be perfect for complex TLDs (e.g., .co.uk).
+| extend SNIParts = split(SSLServerName, '.')
+| extend HostParts = split(DestinationHostName, '.')
+| extend SNI_Domain = iif(array_length(SNIParts) > 1, strcat(SNIParts[-2], '.', SNIParts[-1]), SSLServerName)
+| extend Host_Domain = iif(array_length(HostParts) > 1, strcat(HostParts[-2], '.', HostParts[-1]), DestinationHostName)
+// Core detection logic: The root domains of the SNI and Host header do not match.
+| where SNI_Domain != Host_Domain
+// Exclude known legitimate fronting domains to reduce false positives.
+| where not(SNI_Domain in (FrontDomainAllowList))
+// Summarize the findings to create a concise alert.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    EventCount = count(),
+    DistinctSources = dcount(SourceIP),
+    make_set(SourceIP, 5)
+    by
+    DestinationHostName, // The true destination from the Host header
+    SSLServerName,       // The "front" domain from the SNI
+    SNI_Domain,
+    Host_Domain,
+    DestinationIP,
+    DestinationPort
+| project-reorder
+    StartTime,
+    EndTime,
+    EventCount,
+    DistinctSources,
+    SSLServerName,
+    DestinationHostName,
+    DestinationIP,
+    DestinationPort,
+    SourceIP_set

@@ -1,0 +1,45 @@
+// Name: ETW Logging Disruption Detected
+// Author: RW
+// Date: 2025-08-03
+// Description: Detects a sudden and significant drop in the volume of common events from a host.
+//              This could indicate that Event Tracing for Windows (ETW), a primary data source
+//              for many EDRs, has been disabled or tampered with. Rootkits like "Hells Hollow"
+//              can perform syscall hooking to disrupt ETW logging and evade detection.
+//              This rule establishes a baseline event count for a host and alerts when the current count drops dramatically below it.
+// False Positive Sensitivity: Medium.
+// A drop in event volume can occur for legitimate reasons, such as a host going offline, a sensor issue, or a change in host activity.
+// Tune the 'min_baseline_events' and 'drop_threshold' to fit your environment's activity levels.
+
+// --- Query Parameters ---
+let timeframe = 1h; // The time window to check for a drop.
+let baseline_period = 24h; // The period to calculate the baseline average from.
+let drop_threshold = 0.1; // Alert if the recent count is less than 10% of the baseline average.
+let min_baseline_events = 100; // Minimum average events in the baseline to reduce noise from inactive devices.
+let monitored_action = "DnsQueryResponse"; // A common event type used as a proxy for ETW health.
+
+// --- Query Logic ---
+DeviceEvents
+| where ActionType == monitored_action
+| where TimeGenerated between (ago(baseline_period + timeframe) .. now())
+// Bin events into time slots (e.g., 1-hour bins).
+| summarize EventCount = count() by DeviceName, Bin = bin(TimeGenerated, timeframe)
+// For each device, calculate the baseline average and the most recent count.
+| summarize
+    BaselineEvents = todouble(avg(iff(Bin < ago(timeframe), EventCount, double(null)))),
+    RecentEvents = todouble(sum(iff(Bin >= ago(timeframe), EventCount, 0)))
+    by DeviceName
+// Filter for devices that have a valid baseline and recent count.
+| where isnotnull(BaselineEvents) and isnotnull(RecentEvents)
+// Core detection logic:
+// 1. Ensure the baseline activity is high enough to be meaningful.
+| where BaselineEvents > min_baseline_events
+// 2. Check if the recent event count has dropped below the defined threshold compared to the baseline.
+| where RecentEvents < (BaselineEvents * drop_threshold)
+// Project the results for the alert.
+| project
+    Timestamp = now(),
+    DeviceName,
+    MonitoredAction = monitored_action,
+    RecentEventCount = tolong(RecentEvents),
+    AverageBaselineCount = tolong(BaselineEvents),
+    DropThreshold = drop_threshold

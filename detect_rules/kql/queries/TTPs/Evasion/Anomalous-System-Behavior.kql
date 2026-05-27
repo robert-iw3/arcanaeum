@@ -1,0 +1,65 @@
+// Name: Anomalous System Behavior
+// Author: RW
+// Date: 2025-08-11
+// Description: Detects anomalous system behavior that could indicate sophisticated threats deviating from normal activity.
+//              This includes unusual process-parent relationships, unexpected network connections from scripting engines,
+//              and attempts to modify registry keys related to AMSI or ETW configuration.
+// MITRE ATT&CK: TA0002 (Execution), T1070 (Indicator Removal)
+
+// Define common scripting engines to monitor.
+let scriptingEngines = dynamic(["powershell.exe", "pwsh.exe", "cscript.exe", "wscript.exe", "mshta.exe"]);
+// Define parent processes that are unusual for spawning scripting engines.
+let unusualParents = dynamic(["winword.exe", "excel.exe", "powerpnt.exe", "outlook.exe", "chrome.exe", "msedge.exe", "firefox.exe", "acrord32.exe"]);
+// Define registry keys related to PowerShell logging and AMSI providers.
+let sensitiveRegistryKeys = dynamic([
+    "\\SOFTWARE\\Policies\\Microsoft\\Windows\\PowerShell\\ScriptBlockLogging\\",
+    "\\SOFTWARE\\Policies\\Microsoft\\Windows\\PowerShell\\ModuleLogging\\",
+    "\\SOFTWARE\\Policies\\Microsoft\\Windows\\PowerShell\\Transcription\\",
+    "\\SOFTWARE\\Microsoft\\AMSI\\Providers\\"
+]);
+
+(union isfuzzy=true
+    (
+        // Part 1: Detects scripting engines spawned by unusual parent processes.
+        DeviceProcessEvents
+        | where InitiatingProcessFileName in~ (unusualParents) and FileName in~ (scriptingEngines)
+        // FP Tuning: Some applications legitimately launch scripts. Exclude known good parent-child relationships.
+        // Example: | where not (InitiatingProcessFileName =~ "outlook.exe" and ProcessCommandLine contains "MyLoginScript.ps1")
+        | extend
+            AnomalyType = "Unusual Parent-Process Relationship",
+            Details = strcat("Unusual Parent: ", InitiatingProcessFileName, ", Child: ", FileName)
+        | project-rename
+            ParentProcessName = InitiatingProcessFileName,
+            ProcessName = FileName,
+            CommandLine = ProcessCommandLine
+        | project TimeGenerated, DeviceName, AnomalyType, ParentProcessName, ProcessName, CommandLine, Details
+    ),
+    (
+        // Part 2: Detects network connections initiated by scripting engines.
+        DeviceNetworkEvents
+        | where InitiatingProcessFileName in~ (scriptingEngines)
+        // Filter out common local and private network traffic to reduce noise.
+        | where not(ipv4_is_private(RemoteIP) or RemoteIP in ("127.0.0.1", "::1"))
+        // FP Tuning: Legitimate scripts may connect to internal or vendor sites. Exclude known good destinations.
+        // Example: | where RemoteUrl !has "mycompany.sharepoint.com"
+        | extend
+            AnomalyType = "Unexpected Network Connection from Scripting Engine",
+            Details = strcat("Process ", InitiatingProcessFileName, " connected to ", RemoteIP, ":", RemotePort)
+        | project-rename ProcessName = InitiatingProcessFileName
+        | project TimeGenerated, DeviceName, AnomalyType, ProcessName, RemoteIP, RemotePort, RemoteUrl, Details
+    ),
+    (
+        // Part 3: Detects modification of registry keys related to AMSI or ETW logging.
+        DeviceRegistryEvents
+        | where ActionType in ("RegistryValueSet", "RegistryKeyCreated", "RegistryKeyDeleted")
+        | where RegistryKey has_any (sensitiveRegistryKeys)
+        // FP Tuning: Group Policy updates (gpupdate) can legitimately modify these keys.
+        // Example: | where InitiatingProcessFileName !~ "svchost.exe"
+        | extend
+            AnomalyType = "AMSI/ETW Configuration Tampering",
+            Details = strcat("Action: ", ActionType, ", Key: ", RegistryKey, ", Value: ", RegistryValueData)
+        | project-rename ProcessName = InitiatingProcessFileName
+        | project TimeGenerated, DeviceName, AnomalyType, ProcessName, ActionType, RegistryKey, RegistryValueData, Details
+    )
+)
+| project-reorder TimeGenerated, DeviceName, AnomalyType, Details

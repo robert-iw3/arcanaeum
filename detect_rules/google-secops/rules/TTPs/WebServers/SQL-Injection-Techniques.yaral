@@ -1,0 +1,79 @@
+rule combined_sql_injection_detection {
+  meta:
+    author = "RW"
+    date = "2025-08-23"
+    description = "Detects a wide range of SQL Injection (SQLi) attacks by combining signatures for multiple techniques. This rule identifies general attempts, error-based, time-based, database reconnaissance, and authentication bypass attacks from web, authentication, and database audit logs."
+    tags = "attack.injection"
+    tactic = "TA0001"
+    technique = "T1190"
+    false_positives = "Vulnerability scanners may trigger general or time-based detections. Legitimate slow-loading pages may trigger the time-based detection. Database administration tools or ORMs may trigger the DB recon detection. Application bugs can trigger the error-based detection. It is recommended to exclude known scanner IPs, trusted admin tool IPs, and tune the time-based threshold."
+    version = "1.0"
+
+  events:
+    // The event variable $e captures web, authentication, or database audit logs.
+    // The logic is split into OR blocks, each targeting a specific SQLi technique.
+    (
+      // General/In-band SQLi: Looks for common SQLi patterns in the URL.
+      $e.metadata.event_type = "NETWORK_HTTP" and
+      re.regex($e.network.http.url, `(?i)('|\s)(or|and)(\s|'|"|\+)+(true|'[^']+'='[^']+'|1=1)|union\s+select|--|/\*|;`)
+    ) or
+    (
+      // Time-Based Blind SQLi: Looks for time-delay functions in the URL combined with a long server response time.
+      $e.metadata.event_type = "NETWORK_HTTP" and
+      // The response time threshold (in seconds) may need tuning based on your environment's baseline.
+      $e.network.time_to_response.seconds > 5 and
+      re.regex($e.network.http.url, `(?i)sleep\(|waitfor\s+delay|benchmark\(|pg_sleep\(`)
+    ) or
+    (
+      // Error-Based SQLi: Looks for common database error messages in the HTTP response body.
+      $e.metadata.event_type = "NETWORK_HTTP" and
+      re.regex($e.network.http.response_body, `(?i)error in your sql syntax|unclosed quotation mark|invalid column name|sql command not properly ended|ora-\d{5}`)
+    ) or
+    (
+      // Database Reconnaissance: Looks for queries against sensitive schema tables in database audit logs.
+      // Note: The event_type may need to be adjusted for different database audit log sources (e.g., AWS_RDS_AUDIT).
+      $e.metadata.event_type = "GCP_CLOUDSQL_SQL_AUDIT" and
+      re.regex($e.database.query, `(?i)information_schema|sys\.objects|pg_catalog|sqlite_master`)
+    ) or
+    (
+      // Authentication Bypass: Looks for SQLi patterns in the username field of a successful login event.
+      $e.metadata.event_type = "USER_LOGIN" and
+      $e.security_result.action = "ALLOW" and
+      re.regex($e.principal.user.userid, `(?i)('\s*or\s*')|(\s+or\s+1=1)|(admin'--)`)
+    )
+
+  outcome:
+    // Risk score can be adjusted based on organizational risk appetite.
+    $risk_score = 65
+    // Categorize the detection type for easier analysis.
+    $detection_type = if(
+        $e.metadata.event_type = "USER_LOGIN",
+        "SQLi Authentication Bypass",
+        if(
+            $e.metadata.event_type = "GCP_CLOUDSQL_SQL_AUDIT",
+            "SQLi DB Reconnaissance",
+            if(
+                re.regex($e.network.http.response_body, `(?i)error in your sql syntax|unclosed quotation mark|invalid column name|sql command not properly ended|ora-\d{5}`),
+                "Error-Based SQLi",
+                if(
+                    $e.network.time_to_response.seconds > 5,
+                    "Time-Based Blind SQLi",
+                    "General SQLi Attempt"
+                )
+            )
+        )
+    )
+    // Populate common fields for investigation.
+    $principal_ip = array_distinct($e.principal.ip)
+    $principal_user = array_distinct($e.principal.user.userid)
+    $target_ip = array_distinct($e.target.ip)
+    $target_hostname = array_distinct($e.target.hostname)
+    $url = array_distinct($e.network.http.url)
+    $http_method = array_distinct($e.network.http.method)
+    $user_agent = array_distinct($e.network.http.user_agent)
+    $db_query = array_distinct($e.database.query)
+    $response_code = array_distinct($e.network.http.response_code)
+
+  condition:
+    $e
+}

@@ -1,0 +1,49 @@
+// Rule Title: NTLM Relay Attack to LDAP Service
+// Author: RW
+// Date: 2025-08-12
+//
+// References:
+// - https://www.synacktiv.com/publications/gpoddity-exploiting-active-directory-gpos-through-ntlm-relaying-and-more
+// - https://www.hackthebox.com/blog/ntlm-relay-attack-detection
+// - https://www.crowdstrike.com/en-us/blog/how-to-detect-domain-controller-account-relay-attacks-with-crowdstrike-identity-protection/
+//
+// MITRE ATT&CK: T1187 - Forced Authentication, T1557.001 - LLMNR/NBT-NS Poisoning and SMB Relay
+//
+// Description:
+// Detects a successful NTLM network logon from a NULL SID (S-1-0-0). This pattern is a strong indicator of an NTLM relay attack,
+// where an attacker intercepts an authentication attempt and relays it to a target service, such as LDAP on a Domain Controller,
+// to perform actions on behalf of the relayed user. This is often used to modify Group Policy Objects (GPOs).
+//
+// False Positives:
+// Some legitimate applications or network scanners might perform anonymous logons.
+// These should be investigated and excluded if they are determined to be benign.
+//
+// Triage Steps:
+// 1. Identify the source IP address ('IpAddress'). Is this a known and trusted system?
+// 2. Identify the target host ('Computer'). Is it a Domain Controller or another high-value asset?
+// 3. Correlate the source IP with other logs (e.g., LDAP queries, SMB activity) around the time of the alert to understand the attacker's actions post-authentication.
+// 4. Verify that security controls like SMB signing and LDAP signing/channel binding are enabled to mitigate this type of attack.
+
+let timeframe = 1d;
+SecurityEvent
+| where TimeGenerated > ago(timeframe)
+// Event ID 4624 indicates a successful logon.
+| where EventID == 4624
+// Logon Type 3 is a network logon, common for relayed authentication.
+| where LogonType == 3
+// The key indicator for a relayed session is a logon by the NULL SID.
+| where Sid == "S-1-0-0"
+// Filter for NTLM authentication, the protocol being relayed.
+| where AuthenticationPackageName == "NTLM"
+// Exclude local logons which are typically not indicative of a relay attack.
+| where IpAddress !in ("127.0.0.1", "::1")
+| project
+    timestamp = TimeGenerated,
+    TargetComputer = Computer,
+    AttackerIp = IpAddress,
+    LogonTypeName = LogonType,
+    AuthenticationPackage = AuthenticationPackageName,
+    TargetLogonId
+| extend
+    HostCustomEntity = TargetComputer,
+    IpCustomEntity = AttackerIp

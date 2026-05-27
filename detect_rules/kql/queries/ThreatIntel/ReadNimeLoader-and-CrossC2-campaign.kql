@@ -1,0 +1,98 @@
+// Name: Combined ReadNimeLoader and CrossC2 Detections
+// Author: RW
+// Date: 2025-08-14
+// Description: This query combines multiple detection patterns related to the ReadNimeLoader and CrossC2 campaign.
+// It detects the specific DLL sideloading TTP, CrossC2 process behavior on Linux/macOS, and network connections to known C2 infrastructure.
+// Tactic: Command and Control, Execution, Defense Evasion
+// Technique: T1071.001, T1574.001
+
+// Part 1: ReadNimeLoader DLL Sideloading via java.exe
+let DllSideloading =
+    DeviceImageLoadEvents
+    // Look for java.exe loading jli.dll from a recycle bin path.
+    | where InitiatingProcessFileName =~ "java.exe" and FileName =~ "jli.dll" and FolderPath matches regex @"(?i)[a-z]:\\\$recycle\.bin\\"
+    | join kind=inner (
+        DeviceFileEvents
+        // Correlate with the same process accessing the 'readme.txt' data file.
+        | where ActionType == "FileCreated" and FileName =~ "readme.txt" and FolderPath matches regex @"(?i)[a-z]:\\\$recycle\.bin\\"
+    ) on $left.InitiatingProcessId == $right.InitiatingProcessId and $left.DeviceId == $right.DeviceId
+    // Ensure the file access happens shortly after the DLL load.
+    | where TimeGenerated1 > TimeGenerated and (TimeGenerated1 - TimeGenerated) < 5m
+    // This behavior is highly anomalous. FP risk is low but could occur in unusual developer environments.
+    | project
+        Timestamp = TimeGenerated,
+        DeviceName,
+        DetectionName = "ReadNimeLoader DLL Sideloading",
+        Tactic = "Execution, Defense Evasion",
+        Technique = "T1574.001",
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        Details = strcat("java.exe loaded ", FolderPath, FileName, " from recycle bin and accessed ", FolderPath1, FileName1);
+
+// Part 2: CrossC2 Process Forking and Network Activity on Linux/macOS
+let CrossC2Activity =
+    let crossC2Names = dynamic(["gds", "gss"]);
+    DeviceProcessEvents
+    // Look for known CrossC2 process names forking themselves on Linux/macOS.
+    | where DeviceOSPlatform in ("Linux", "macOS")
+    | where FileName in (crossC2Names) and ParentProcessFileName in (crossC2Names)
+    | where InitiatingProcessId != ProcessId
+    | join kind=inner (
+        DeviceNetworkEvents
+        | where InitiatingProcessFileName in (crossC2Names)
+    ) on $left.ProcessId == $right.InitiatingProcessId and $left.DeviceId == $right.DeviceId
+    | where TimeGenerated1 > TimeGenerated and (TimeGenerated1 - TimeGenerated) < 5m
+    // The process names 'gds' and 'gss' are generic. The combination of self-forking and network activity reduces FPs.
+    // Consider adding path or command-line exclusions if legitimate tools cause noise.
+    | summarize
+        StartTime = min(TimeGenerated1),
+        RemoteIPs = make_set(RemoteIP),
+        RemoteUrls = make_set(RemoteUrl)
+        by
+        DeviceName,
+        ParentProcessFileName,
+        FileName,
+        ProcessCommandLine
+    | project
+        Timestamp = StartTime,
+        DeviceName,
+        DetectionName = "CrossC2 Forking and Network Activity",
+        Tactic = "Command and Control",
+        Technique = "T1071.001",
+        InitiatingProcessFileName = FileName,
+        InitiatingProcessCommandLine = ProcessCommandLine,
+        Details = strcat("Process ", FileName, " forked from ", ParentProcessFileName, " and connected to IPs: ", RemoteIPs, " and URLs: ", RemoteUrls);
+
+// Part 3: Network Connections to known Cobalt Strike C2 IOCs
+let IocC2 =
+    let ioc_domains = dynamic([
+        "api.glazeceramics.com",
+        "doc.docu-duplicator.com",
+        "doc2.docu-duplicator.com",
+        "comdoc1.docu-duplicator.com"
+    ]);
+    let ioc_ips = dynamic([
+        "64.52.80.62",
+        "64.95.10.209",
+        "67.217.228.55",
+        "137.184.155.92",
+        "159.65.241.37",
+        "162.33.179.247",
+        "165.227.113.183",
+        "179.60.149.209",
+        "192.241.190.181"
+    ]);
+    DeviceNetworkEvents
+    | where RemoteIP in (ioc_ips) or RemoteUrl has_any (ioc_domains)
+    | project
+        Timestamp = TimeGenerated,
+        DeviceName,
+        DetectionName = "Known Cobalt Strike C2 Connection",
+        Tactic = "Command and Control",
+        Technique = "T1071.001",
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        Details = strcat("Connection to C2: ", coalesce(RemoteUrl, RemoteIP));
+
+// Union all detection parts into a single result set
+union DllSideloading, CrossC2Activity, IocC2

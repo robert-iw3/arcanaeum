@@ -1,0 +1,35 @@
+# Local development dependencies — PostgreSQL only.
+#
+# Start before running `cargo run` or `cargo test --workspace`:
+#
+#   make db-start
+#
+# Then in your shell (add to ~/.zshrc or ~/.bashrc to make it permanent):
+#
+#   export TEST_DATABASE_URL=postgres://rustunnel:test@localhost:5432/rustunnel_test
+#
+# Stop when done:
+#
+#   make db-stop
+
+name: rustunnel-dev-deps
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: rustunnel
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: rustunnel_test
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rustunnel"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres-dev-data:/var/lib/postgresql/data
+
+volumes:
+  postgres-dev-data: {}

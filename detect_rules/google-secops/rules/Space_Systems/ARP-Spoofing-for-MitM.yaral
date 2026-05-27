@@ -1,0 +1,44 @@
+rule potential_arp_spoofing_detected {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects when a single IP address is associated with multiple MAC addresses in a short period. This is a strong indicator of an ARP spoofing (or ARP poisoning) attack, which can be used to launch Man-in-the-Middle (MitM) attacks. The provided intelligence highlights this technique as a precursor to exploiting the Space Link Extension (SLE) protocol."
+    tactic = "TA0006, TA0005" // Credential Access, Defense Evasion
+    technique = "T1557.002" // ARP Poisoning
+    false_positives = "Can occur in environments with high device mobility, network configuration changes, or specific high-availability setups (e.g., VRRP, HSRP). Tune by adjusting the time window, MAC threshold, or by allowlisting known high-availability virtual MAC addresses or specific IPs."
+
+  events:
+    // Looks for network events that map an IP to a MAC address.
+    // UDM NETWORK_DHCP events often contain ARP-like information.
+    $e.metadata.event_type = "NETWORK_DHCP"
+    $e.target.ip = $ip
+    $e.target.mac = $mac
+    // Ensure both IP and MAC fields are populated.
+    $ip != "" and $mac != ""
+
+    // False Positive Tuning: Consider allowlisting known high-availability virtual IPs/MACs.
+    // For example: not net.ip_in_range_cidr($ip, "10.0.0.0/24")
+    // Or: not $mac in ("00:00:5e:00:01:01", "00:00:0c:07:ac:01") // Example HSRP/VRRP MACs
+
+  match:
+    // Group events by the IP address over a 10 minute window.
+    $ip over 10m
+
+  condition:
+    // The condition for an alert is seeing more than 1 unique MAC for a single IP.
+    #e > 1 and count_distinct($e.target.mac) > 1
+
+  outcome:
+    // The IP address that was associated with multiple MACs.
+    $principal_ip = array_distinct($e.target.ip)
+    // The list of distinct MAC addresses associated with the IP.
+    $associated_macs = array_distinct($e.target.mac)
+    // The count of distinct MACs.
+    $mac_count = count_distinct($e.target.mac)
+    // The hostname associated with the IP, if available.
+    $principal_hostname = array_distinct($e.target.hostname)
+    // The total number of events observed.
+    $event_count = count($e.metadata.id)
+    // Risk score for the detection.
+    $risk_score = 45
+}

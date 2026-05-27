@@ -1,0 +1,44 @@
+// Name: Certutil Used to Decode and Execute File
+// Author: RW
+// Date: 2025-08-02
+// Description: Detects the use of certutil.exe to decode a file (e.g., from Base64) which is then executed shortly after. This is a common technique used by adversaries to drop tools or malware on a system while evading some security controls.
+// False Positive Sensitivity: Medium. Legitimate admin scripts might use this technique, but it's uncommon. Review the decoded file and its purpose to determine legitimacy.
+
+let timeWindow = 2m;
+
+// Step 1: Find instances of certutil.exe being used to decode a file.
+let certutilDecodeEvents = DeviceProcessEvents
+| where Timestamp > ago(1d)
+| where FileName =~ "certutil.exe"
+| where ProcessCommandLine has "-decode"
+// Parse the command line to extract the output file path. This assumes the output file is the last argument.
+| extend CommandLineTokens = split(ProcessCommandLine, ' ')
+| extend DecodedFilePath = trim('"', tostring(CommandLineTokens[array_length(CommandLineTokens) - 1]))
+// Filter for potentially executable file types. Attackers may use other extensions.
+| where DecodedFilePath has_any (".exe", ".dll", ".ps1", ".bat", ".vbs", ".js", ".scr")
+| project DecodeTime = Timestamp, DeviceId, CertutilProcessId = ProcessId, CertutilCommandLine = ProcessCommandLine, DecodedFilePath;
+
+// Step 2: Find all process execution events to correlate against.
+let executionEvents = DeviceProcessEvents
+| where Timestamp > ago(1d)
+// Create a full path for the executed file to match against the decoded file path.
+| extend ExecutedFilePath = strcat(FolderPath, FileName)
+| project ExecutionTime = Timestamp, DeviceId, ExecutedProcessId = ProcessId, ExecutedFilePath, ExecutedProcessCommandLine = ProcessCommandLine;
+
+// Step 3: Join the decode events with execution events on the same device.
+certutilDecodeEvents
+| join kind=inner (
+    executionEvents
+) on DeviceId
+// The executed file path must match the file path decoded by certutil (case-insensitive).
+| where ExecutedFilePath =~ DecodedFilePath
+// The execution must happen within the specified time window after the file was decoded.
+| where ExecutionTime between (DecodeTime .. (DecodeTime + timeWindow))
+// Summarize to create a single alert for each unique instance of this behavior.
+| summarize
+    StartTime = min(DecodeTime),
+    EndTime = max(ExecutionTime),
+    CertutilCommandLines = make_set(CertutilCommandLine),
+    ExecutedProcessCommandLines = make_set(ExecutedProcessCommandLine)
+    by DeviceId, DecodedFilePath, CertutilProcessId, ExecutedProcessId
+| project-reorder StartTime, EndTime, DeviceId, DecodedFilePath, CertutilCommandLines, ExecutedProcessCommandLines, CertutilProcessId, ExecutedProcessId

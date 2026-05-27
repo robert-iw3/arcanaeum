@@ -1,0 +1,47 @@
+rule gcp_lxd_privilege_escalation {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects a non-root user, who is a member of the 'lxd' group, executing commands to initialize or launch LXD containers. This behavior is a known privilege escalation vector on misconfigured systems, particularly in GCP environments using OS Login, where users might be added to this group by default."
+    false_positives = "Legitimate use of LXD by developers or administrators for container management. This activity may be expected in development or container orchestration environments. Consider excluding authorized users or specific hostnames."
+    tags = "GCP, LXD, PRIVILEGE_ESCALATION, LINUX"
+    tactic = "TA0004"
+    technique = "T1068"
+
+  events:
+    // Catches process launch events
+    $process.metadata.event_type = "PROCESS_LAUNCH"
+
+    // Focus on non-root users to detect privilege escalation attempts
+    $process.principal.user.userid != "0"
+    $process.principal.user.user_display_name != "root"
+
+    // The user must be a member of the 'lxd' group, which grants permissions to interact with the LXD daemon.
+    any $process.principal.user.group.name = "lxd"
+
+    // Detects commands used to initialize LXD or launch a new container.
+    re.regex($process.target.process.command_line, `\b(lxd\s+init|lxc\s+launch)\b`)
+
+    // Capture the hostname for correlation
+    $process.principal.hostname = $hostname
+
+  match:
+    // Correlate events on the same host over a 10 minute window
+    $hostname over 10m
+
+  outcome:
+    // Risk score set to medium-high due to the privilege escalation potential
+    $risk_score = 65
+    $principal_hostname = array_distinct($process.principal.hostname)
+    $principal_user = array_distinct($process.principal.user.user_display_name)
+    $command_lines = array_distinct($process.target.process.command_line)
+    $event_count = count_distinct($process.metadata.id)
+
+    // Additional context for investigation
+    $principal_process_command_lines = array_distinct($process.principal.process.command_line)
+    $target_process_pids = array_distinct($process.target.process.pid)
+    $target_process_sha256s = array_distinct($process.target.process.file.sha256)
+
+  condition:
+    $process
+}

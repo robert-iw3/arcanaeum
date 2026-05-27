@@ -1,0 +1,52 @@
+rule gcp_anomalous_storage_access_by_user {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects a high volume of access events (get, list) to Google Cloud Storage objects or buckets by a single user from a single IP address within a short time frame. This pattern can indicate data reconnaissance or exfiltration attempts."
+    false_positives = "Legitimate automated processes, such as data backup, replication, or large-scale data analysis jobs, that read a high number of objects from Cloud Storage."
+    tags = "GCP, EXFILTRATION, STORAGE"
+    tactic = "TA0010"
+    technique = "T1530"
+
+  events:
+    // Filter for GCP audit logs related to storage access.
+    $storage_access.metadata.event_type = "GCP_CLOUDAUDIT_LOG"
+    (
+      $storage_access.metadata.method_name = "storage.objects.get" or
+      $storage_access.metadata.method_name = "storage.buckets.get" or
+      $storage_access.metadata.method_name = "storage.objects.list"
+    )
+
+    // Define placeholder variables for correlation.
+    $storage_access.principal.user.userid = $user
+    $storage_access.principal.ip = $ip
+    $storage_access.resource.project.name = $project_id
+
+    // Capture the bucket name from the resource name field.
+    $bucket = re.capture($storage_access.resource.name, `projects/_/buckets/([^/]+)`)
+
+  match:
+    // Group events by user and IP over a 10 minute window.
+    $user, $ip over 10m
+
+  outcome:
+    // A moderate-to-high risk score, as this indicates a high volume of access.
+    $risk_score = 60
+    // Actor and network information.
+    $principal_user_userid = $user
+    $principal_ip = $ip
+    // Resource information.
+    $project_id = array_distinct($project_id)
+    $accessed_buckets = array_distinct($bucket)
+    // Event count.
+    $event_count = count($storage_access.metadata.id)
+
+  condition:
+    // Threshold for anomalous activity. This value should be tuned for the specific environment.
+    #storage_access > 50
+    // To reduce false positives, consider excluding known service accounts or IP ranges
+    // that perform legitimate bulk operations.
+    // For example:
+    // and not $user in %gcp_data_processing_sa
+    // and not net.ip_in_range_cidr($ip, %gcp_trusted_ip_ranges)
+}

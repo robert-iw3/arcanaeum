@@ -1,0 +1,48 @@
+- type: firewall
+  name: Detect Salt Typhoon C2 Connections (IOC Match - Broad Ports)
+  application: "**"
+  direction: out
+  protocol: "TCP,UDP"
+  port: "80,443,53"
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects outbound connections on common C2 ports (HTTP/HTTPS 80/443, DNS 53) potentially used by Salt Typhoon infrastructure. Group employs encrypted multi-hop C2, legitimate cloud services, and DNS for command/control. Specific IPs (e.g., 162.251.82.125) and domains (e.g., aria-hidden.com) not filterable in ENS Firewall; use Web Control for domain blocking and precision. Tune with baseline traffic exclusions."
+- type: expert
+  name: Detect Network Edge Device Exploitation Attempts (Placeholder)
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "**" }
+       }
+       Target {
+          Match PROCESS {
+             Include OBJECT_NAME { -v "**.exe" }
+             Include -access "CREATE"
+          }
+       }
+    }
+  action: Report
+  severity: Medium
+  enabled: true
+  description: "Placeholder for detecting suspicious process creation potentially related to edge device exploitation tools (e.g., targeting CVE-2023-20198 Cisco IOS XE, CVE-2024-3400 Palo Alto PAN-OS). Salt Typhoon's primary initial access is zero-day exploitation of network appliances; ENS is endpoint-focused — pair with NDR/EDR for device coverage."
+- type: expert
+  name: Detect Log Clearing Attempts (Anti-Forensics)
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "rm.exe" -v "shred.exe" -v "truncate.exe" -v "bash.exe" -v "sh.exe" -v "zsh.exe" -v "ksh.exe" }
+       }
+       Target {
+          Match FILE {
+             Include OBJECT_NAME { -v "/home/**/.bash_history" -v "/var/log/auth.log" -v "/var/log/lastlog" -v "/var/log/wtmp" -v "/var/log/btmp" }
+             Include -access "WRITE,DELETE"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects processes (rm/shred/truncate, shells) writing/deleting critical log files (.bash_history, auth.log, wtmp/btmp) — Salt Typhoon clears/disables logs to cover tracks and maintain stealth. Command-line matching limited; approximates via process/file access on Linux endpoints. Tune for legitimate admin cleanup scripts."

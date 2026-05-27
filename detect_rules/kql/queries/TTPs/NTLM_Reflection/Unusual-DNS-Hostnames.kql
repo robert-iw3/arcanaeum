@@ -1,0 +1,22 @@
+// Name: Unusual DNS Hostnames for NTLM Reflection
+// Author: RW
+// Date: 2025-07-31
+// Description: Detects DNS queries for hostnames with unusual patterns, such as long Base64-encoded-like strings. This is a tactic used in NTLM reflection attacks like CVE-2025-33073 to coerce authentication to an attacker-controlled server by exploiting how hostnames are parsed.
+// Mitre TTPs: T1568.001
+// References:
+DeviceEvents
+// Filter for DNS query events
+| where ActionType == "DnsQuery"
+// Use a regex to find long, Base64-like strings in the hostname, a pattern seen in CVE-2025-33073.
+// This looks for 20 or more Base64 characters, optionally ending with padding.
+| where RemoteUrl matches regex @"[A-Za-z0-9+\/]{20,}={0,2}"
+// FP Tuning: This regex is broad and may match legitimate, long, auto-generated hostnames (e.g., from CDNs or cloud services).
+// Consider adding allowlists for known domains or processes that generate such queries.
+// For example: | where InitiatingProcessFileName !in ("msedge.exe", "chrome.exe") and not(RemoteUrl has_any(".cdn.net", ".akamaized.net"))
+| project
+    Timestamp,
+    DeviceName,
+    ActionType,
+    RemoteUrl,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine

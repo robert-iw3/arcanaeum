@@ -1,0 +1,71 @@
+rule resource_based_constrained_delegation_abuse {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects multiple patterns associated with Resource-Based Constrained Delegation (RBCD) abuse, a technique used for privilege escalation and lateral movement. This includes direct modification of RBCD permissions, Kerberos S4U2Proxy ticket requests, and the creation of computer accounts by non-administrative users, which is often a prerequisite."
+    tactic = "TA0004, TA0003"
+    technique = "T1558.003, T1136.001"
+    false_positives = "Legitimate administrative activity, especially the modification of the msDS-AllowedToActOnBehalfOfOtherIdentity attribute. S4U2Proxy is used legitimately by services like Microsoft Exchange and Azure AD Connect. Creation of computer accounts by delegated users or service accounts. Exclusions for known administrative accounts, service accounts, and delegated users should be added to reduce noise."
+
+  events:
+    // This rule combines three distinct but related events into one detection for RBCD abuse.
+    (
+        // Pattern 1: Direct modification of the RBCD attribute (msDS-AllowedToActOnBehalfOfOtherIdentity).
+        $e.metadata.product_event_type = "5136"
+        $e.metadata.event_type = "USER_MODIFICATION"
+        $e.target.user.attribute.name = "msDS-AllowedToActOnBehalfOfOtherIdentity"
+        // This checks for the addition of a security principal, which configures the delegation.
+        // The exact field for "OperationType" may vary based on parser configuration.
+        $e.additional.fields["OperationType"] = "Value Added"
+    ) or (
+        // Pattern 2: Kerberos ticket request using S4U2Proxy, a common method to abuse RBCD.
+        $e.metadata.product_event_type = "4769"
+        $e.metadata.event_type = "USER_LOGIN"
+        $e.security_result.action = "ALLOW"
+        // A non-empty Transited Services field indicates a S4U2Proxy request.
+        $e.network.kerberos.transited_services != "" and $e.network.kerberos.transited_services != "-"
+        // Exclude common legitimate service accounts to reduce false positives.
+        // Consider creating a reference list for these accounts.
+        not re.regex($e.principal.user.userid, `(?i)healthmailbox|msol_`)
+    ) or (
+        // Pattern 3: Creation of a new computer account by a non-administrative user.
+        // This is often a prerequisite for RBCD attacks, where an attacker needs an account they control.
+        $e.metadata.product_event_type = "4741"
+        $e.metadata.event_type = "USER_CREATION"
+        // Exclude creations by well-known administrative and system principals.
+        // This list should be customized for your environment.
+        not $e.principal.user.windows_sid in (
+            "S-1-5-21-0-0-0-512", // Domain Admins SID placeholder
+            "S-1-5-21-0-0-0-519", // Enterprise Admins SID placeholder
+            "S-1-5-32-544",       // Built-in Administrators SID placeholder
+            "S-1-5-20"            // NT AUTHORITY\NETWORK SERVICE
+        )
+        // Exclude machine accounts creating other accounts (e.g., AD FS device registration).
+        not re.regex($e.principal.user.userid, `\$$`)
+    )
+
+  outcome:
+    // Use a conditional to set a human-readable activity type for easier analysis.
+    $activity_type = if(
+        $e.metadata.product_event_type = "5136", "RBCD Attribute Modified",
+        if(
+            $e.metadata.product_event_type = "4769", "S4U2Proxy Kerberos Ticket Request",
+            "Anomalous Computer Account Creation"
+        )
+    )
+
+    // Set risk score based on the detected activity. Modifying RBCD directly is higher risk.
+    $risk_score = if($activity_type = "RBCD Attribute Modified", 75, 50)
+
+    // Consolidate key fields for alerting and investigation.
+    $principal_user = $e.principal.user.userid
+    $principal_ip = $e.principal.ip
+    $target_user = $e.target.user.userid
+    $target_hostname = $e.target.hostname
+    $transited_services = $e.network.kerberos.transited_services
+    $rbcd_attribute_value = $e.target.user.attribute.value
+    $product_event_type = $e.metadata.product_event_type
+
+  condition:
+    $e
+}

@@ -1,0 +1,36 @@
+rule abnormal_lsass_access {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects processes attempting to open a handle to the Local Security Authority Subsystem Service (lsass.exe) with specific access rights (PROCESS_VM_READ or PROCESS_QUERY_INFORMATION). This behavior is a strong indicator of credential theft techniques, such as credential dumping or token extraction, as referenced in the intel."
+    tags = "CREDENTIAL_ACCESS, LSASS, WINDOWS"
+    tactic = "TA0006"
+    technique = "T1003.001"
+    false_positives = "Legitimate security products (AV/EDR), system management tools, and some built-in Windows processes may access LSASS. Tuning the process allowlist is crucial for the environment."
+
+  events:
+    // Event: A process opens a handle to lsass.exe
+    $lsass_access.metadata.event_type = "PROCESS_OPEN"
+    $lsass_access.target.process.file.full_path = /lsass\.exe$/ nocase
+
+    // Filter for access rights indicative of credential reading.
+    // PROCESS_VM_READ (0x10 or 16) or PROCESS_QUERY_INFORMATION (0x400 or 1024)
+    re.regex($lsass_access.target.process.granted_access_rights, `(0x10|16|0x400|1024)`)
+
+    // FP Tuning: Exclude known legitimate processes that are expected to access LSASS.
+    // This list should be customized for your environment to reduce noise.
+    not re.regex($lsass_access.principal.process.file.full_path, `(?i)(\\svchost\.exe|\\services\.exe|\\wininit\.exe|\\csrss\.exe|\\smss\.exe|\\winlogon\.exe|\\MsMpEng\.exe|\\sense\.exe|\\healthservice\.exe|\\WmiPrvSE\.exe|\\taskmgr\.exe)$`)
+
+  outcome:
+    // The risk is higher if the process is a common target for process injection or a LOLBAS.
+    $risk_score = if(re.regex($lsass_access.principal.process.file.full_path, `(?i)(\\rundll32\.exe|\\regsvr32\.exe|\\dllhost\.exe|\\wermgr\.exe|\\werfault\.exe|\\explorer\.exe|\\powershell\.exe|\\msiexec\.exe)$`), 75, 50)
+    $principal_hostname = $lsass_access.principal.hostname
+    $principal_process_pid = $lsass_access.principal.process.pid
+    $principal_process_path = $lsass_access.principal.process.file.full_path
+    $principal_process_commandline = $lsass_access.principal.process.command_line
+    $principal_user = $lsass_access.principal.user.userid
+    $granted_access = $lsass_access.target.process.granted_access_rights
+
+  condition:
+    $lsass_access
+}

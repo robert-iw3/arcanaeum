@@ -1,0 +1,82 @@
+// Name: Salt Typhoon LOLBin Execution Techniques
+// Id: bc526ef8-fe88-413c-9d05-a12aacf0327a
+// Version: 1
+//
+// Severity: Medium
+//
+// QueryFrequency: 1h
+// QueryPeriod: 1h
+//
+// ThreatIntel:
+//   - Salt Typhoon
+//
+// Tactics:
+//   - Execution
+//   - CommandAndControl
+//   - Persistence
+//   - DefenseEvasion
+//
+// MITRE ATT&CK Framework:
+//   - T1059: Command and Scripting Interpreter
+//   - T1059.001: PowerShell
+//   - T1105: Ingress Tool Transfer
+//   - T1197: BITS Jobs
+//
+// Description:
+// Detects the use of LOLBins such as BITSAdmin, CertUtil, and PowerShell for command execution and file download/transfer operations.
+// This behavior is commonly associated with the threat actor Salt Typhoon.
+//
+// Version History:
+// - 1.0 (2025-07-31) - Initial version
+//
+// Author: RW
+//
+// False Positives:
+// Legitimate administrative scripts, software installers, or management tools may use these commands.
+// Consider filtering based on known parent processes (InitiatingProcessFileName), user accounts (AccountName),
+// or specific command-line arguments associated with legitimate tools in your environment.
+let lolbin_lookback = 1h;
+let powershell_suspicious_strings = dynamic([
+    " -e ",
+    " -en ",
+    " -enc ",
+    " -encodedcommand ",
+    "DownloadFile",
+    "DownloadString",
+    "Invoke-Expression",
+    "Net.WebClient"
+]);
+DeviceProcessEvents
+| where TimeGenerated > ago(lolbin_lookback)
+| where
+    // Detects BITSAdmin used for file transfers, a common method for downloading tools.
+    (FileName =~ "bitsadmin.exe" and ProcessCommandLine has_any ("/transfer", "/create"))
+    or
+    // Detects CertUtil used to download remote files.
+    (FileName =~ "certutil.exe" and ProcessCommandLine has "-urlcache" and ProcessCommandLine has "-f")
+    or
+    // Detects CertUtil used to decode base64 encoded files, often to drop malware.
+    (FileName =~ "certutil.exe" and ProcessCommandLine has "-decode")
+    or
+    // Detects suspicious PowerShell execution via encoded commands or download cradles.
+    (
+        FileName in ("powershell.exe", "pwsh.exe") and
+        (
+            ProcessCommandLine has_any (powershell_suspicious_strings) or
+            ProcessCommandLine has "IEX " // Note the trailing space to avoid matching unrelated strings.
+        )
+    )
+// FP Filtering: Consider excluding known administrative tools or scripts.
+// | where InitiatingProcessFileName !in ("legit_installer.exe", "sccm_agent.exe")
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    AccountDomain,
+    FileName,
+    ProcessCommandLine,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    ReportId,
+    ProcessId,
+    InitiatingProcessId

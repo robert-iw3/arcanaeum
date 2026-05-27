@@ -1,0 +1,53 @@
+// Name: BitLocker COM Hijacking for Lateral Movement
+// Author: RW
+// Date: 2025-08-06
+// Description: Detects a lateral movement technique that abuses BitLocker's COM functionality by hijacking a specific CLSID to execute arbitrary code. This is achieved by modifying a registry key to point to a malicious DLL, which is then loaded by a BitLocker-related process triggered via DCOM.
+// Tactic: Lateral Movement
+// Technique: T1021.003 - Remote Services: Distributed Component Object Model
+// False Positive Sensitivity: Medium
+
+// Define a time window for correlating the events.
+let timeframe = 5m;
+
+// Find registry modifications indicative of the BitLocker COM hijack.
+// This targets the specific CLSID {A7A63E5C-3877-4840-8727-C1EA9D7A4D50} which is vulnerable.
+let RegistryHijackEvents =
+    DeviceRegistryEvents
+    | where RegistryKey endswith @"\SOFTWARE\Classes\CLSID\{A7A63E5C-3877-4840-8727-C1EA9D7A4D50}\InProcServer32"
+    // The 'Default' value of the InProcServer32 key is set to the path of the malicious DLL.
+    | where ActionType == "RegistryValueSet" and isnotempty(RegistryValueData) and RegistryValueData has ".dll"
+    | project RegistryModTime = Timestamp, DeviceId, DeviceName, InitiatingProcessFileName, InitiatingProcessAccountName, RegistryKey, HijackedDllPath = RegistryValueData;
+
+// Find the subsequent process creation that triggers the hijacked COM object.
+// The DCOM call to the BDEUILauncher class spawns BdeUISrv.exe via svchost.exe.
+let ProcessTriggerEvents =
+    DeviceProcessEvents
+    | where FileName =~ "BdeUISrv.exe"
+    | where InitiatingProcessFileName =~ "svchost.exe"
+    | where ProcessCommandLine has "-Embedding"
+    | project ProcessCreationTime = Timestamp, DeviceId, AccountName, FileName, ProcessCommandLine, InitiatingProcessFileName;
+
+// Correlate the registry hijack with the process trigger on the same device within the specified timeframe.
+RegistryHijackEvents
+| join kind=inner (
+    ProcessTriggerEvents
+) on DeviceId
+| where ProcessCreationTime between (RegistryModTime .. (RegistryModTime + timeframe))
+// FP Tuning: The combination of these two events is a strong indicator. However, to further reduce potential noise from legitimate but rare administrative actions,
+// you could filter for DLLs dropped in unusual or user-writable locations.
+// Example: | where HijackedDllPath has_any ("C:\\tmp\\", "C:\\Perflogs\\", "C:\\Windows\\Temp\\", "\\Users\\Public\\")
+| project
+    Timestamp = ProcessCreationTime,
+    DeviceName,
+    AccountName,
+    Tactic = "Lateral Movement",
+    Technique = "T1021.003 - Remote Services: Distributed Component Object Model",
+    Description = "BitLocker COM Hijacking detected. A registry key was modified to point to a malicious DLL, which was then loaded by a BitLocker-related process.",
+    HijackedDllPath,
+    ProcessFileName = FileName,
+    ProcessCommandLine,
+    ParentProcess = InitiatingProcessFileName,
+    RegistryModificationTime = RegistryModTime,
+    RegistryKey,
+    InitiatingProcessOfRegistryMod = InitiatingProcessFileName,
+    InitiatingUserOfRegistryMod = InitiatingProcessAccountName

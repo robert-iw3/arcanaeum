@@ -1,0 +1,50 @@
+rule gcp_docker_privilege_escalation {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects a non-root user, who is a member of the 'docker' group, executing a docker command to mount the host's root filesystem into a container. This is a well-known privilege escalation technique, as it allows the user to modify sensitive system files from within the container. This can be prevalent in GCP environments using OS Login where users might be added to the 'docker' group."
+    false_positives = "Legitimate use of Docker by administrators or developers for debugging or system management tasks that require access to the host filesystem. Consider excluding authorized users or specific hostnames where this activity is expected."
+    tags = "GCP, DOCKER, PRIVILEGE_ESCALATION, LINUX, T1068"
+    tactic = "TA0004"
+    technique = "T1068"
+
+  events:
+    // Catches process launch events for Docker.
+    $process.metadata.event_type = "PROCESS_LAUNCH"
+    re.regex($process.target.process.file.path, `.*/docker$`)
+
+    // Focus on non-root users to detect privilege escalation attempts.
+    $process.principal.user.userid != "0"
+
+    // The user must be a member of the 'docker' group, which grants permissions to interact with the Docker daemon.
+    // This condition is critical as membership in this group is often equivalent to root access.
+    any $process.principal.user.group.name = "docker"
+
+    // Detects the 'docker run' command attempting to mount the host's root directory ('/').
+    // This is a common pattern for container-based privilege escalation.
+    // Example: docker run -v /:/mnt/host -ti alpine
+    re.regex($process.target.process.command_line, `\srun\s+.*(-v|--volume)\s+"?/\s*:.+`)
+
+    // Capture the hostname for correlation.
+    $process.principal.hostname = $hostname
+
+  match:
+    // Correlate events on the same host over a 10 minute window.
+    $hostname over 10m
+
+  outcome:
+    // Risk score is high due to the direct privilege escalation potential.
+    $risk_score = 75
+    $principal_hostname = array_distinct($process.principal.hostname)
+    $principal_user = array_distinct($process.principal.user.user_display_name)
+    $command_lines = array_distinct($process.target.process.command_line)
+    $event_count = count_distinct($process.metadata.id)
+
+    // Additional context for investigation.
+    $principal_process_command_lines = array_distinct($process.principal.process.command_line)
+    $target_process_pids = array_distinct($process.target.process.pid)
+    $target_process_sha256s = array_distinct($process.target.process.file.sha256)
+
+  condition:
+    $process
+}

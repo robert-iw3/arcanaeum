@@ -1,0 +1,51 @@
+// name: Potentially Vulnerable Satellite Libraries Found on Control Systems
+// author: RW
+// date: 2025-08-18
+// description: Hunts for files on satellite control systems that may be vulnerable third-party libraries (e.g., uffs, libcsp).
+// The presence of these libraries could expose the system to known vulnerabilities like buffer overflows or cryptographic weaknesses.
+// This query is intended for hunting and asset inventory purposes.
+// references: https://www.ndss-symposium.org/wp-content/uploads/2023/02/ndss2023_s25_paper.pdf
+// data_source: microsoft_defender_for_endpoint
+// false_positive_sensitivity: medium
+
+// --- Configuration ---
+// This list must be populated with the hostnames of your satellite control systems.
+let satellite_control_systems = datatable(DeviceName:string) [
+    "sat-control-win.corp.net",
+    "sat-control-lnx.corp.net"
+];
+// List of filenames associated with potentially vulnerable libraries mentioned in the intel.
+let vulnerable_library_names = dynamic([
+    "uffs", // Library with a known buffer overflow vulnerability.
+    "libcsp" // Library with known cryptographic implementation weaknesses.
+]);
+// --- End Configuration ---
+
+// Use DeviceFileInventory to get a snapshot of files on disk.
+DeviceFileInventory
+// Scope the search to designated satellite control systems.
+| where DeviceName in (satellite_control_systems)
+// Filter for files that match the names of the vulnerable libraries.
+// Using 'has_any' provides a case-insensitive search for the substrings.
+| where FileName has_any (vulnerable_library_names)
+// Further refine to common library file types to reduce noise from unrelated files.
+| where FileName endswith ".dll" or FileName endswith ".so" or FileName endswith ".a"
+| summarize
+    make_set(FolderPath),
+    arg_max(TimeGenerated, *) by DeviceName, FileName, SHA1
+| project
+    TimeGenerated,
+    DeviceName,
+    FileName,
+    set_FolderPath,
+    SHA1,
+    FileSize
+| rename
+    SatelliteControlSystem = DeviceName,
+    LibraryFileName = FileName,
+    LibraryPath = set_FolderPath,
+    LibrarySHA1 = SHA1,
+    LibraryFileSize = FileSize
+// FP Mitigation: This is a hunting query and may identify files with similar names that are not the actual vulnerable libraries.
+// The primary value is in asset identification. Once a potentially vulnerable library is found, the file hash (SHA1) should be
+// used to confirm its identity and version against known vulnerable versions.

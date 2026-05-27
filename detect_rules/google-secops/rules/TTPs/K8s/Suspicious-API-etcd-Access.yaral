@@ -1,0 +1,45 @@
+rule kubernetes_suspicious_api_etcd_access {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects suspicious access to the Kubernetes API server or etcd. This includes unauthenticated/anonymous reconnaissance via the API, or direct interaction with etcd using tools like etcdctl to dump all keys. These actions are strong indicators of an attacker attempting to discover cluster resources and steal secrets."
+    tactic = "TA0007, TA0006"
+    technique = "T1482, T1212"
+    false_positives = "Legitimate unauthenticated access to health check endpoints (e.g., /healthz, /livez) is common and filtered. Some monitoring or readiness probes might access other endpoints anonymously, which may require tuning. The etcdctl portion of the rule is high-fidelity and unlikely to be triggered by legitimate activity."
+    tags = "KUBERNETES, API_SERVER, ETCD, DISCOVERY, ANONYMOUS_ACCESS"
+
+  events:
+    // Event 1: Detects anonymous/unauthenticated access to the K8s API server for reconnaissance.
+    $api_access.metadata.event_type = "KUBERNETES_AUDIT"
+    // Filter for anonymous or unauthenticated users, a key indicator of external probing.
+    (
+      $api_access.principal.user.userid = "system:anonymous" or
+      "system:unauthenticated" in $api_access.principal.user.group_names
+    )
+    // Filter out common, legitimate health check endpoints to reduce noise.
+    not re.regex($api_access.network.http.url, `/(healthz|livez|readyz|version)($|/|\\?)`)
+
+    // Event 2: Detects a process launching etcdctl to dump all keys from etcd.
+    $etcd_dump.metadata.event_type = "PROCESS_LAUNCH"
+    // Look for the etcdctl binary being executed.
+    re.regex($etcd_dump.target.process.file.full_path, `/etcdctl$`)
+    // This regex matches the specific command used to dump all keys from etcd, as seen in the provided intel.
+    re.regex($etcd_dump.target.process.command_line, `get\s+(""|'')\s+("\\x00"|'\\x00')\s+--prefix`)
+
+  condition:
+    $api_access or $etcd_dump
+
+  outcome:
+    // Set a risk score for the detection.
+    $risk_score = 75
+    // Consolidate fields from either event type for uniform alerting.
+    $detection_type = if($api_access, "Anonymous API Access", "Direct etcd Dump")
+    $principal_user = if($api_access, $api_access.principal.user.userid, $etcd_dump.principal.user.userid)
+    $principal_hostname = if($api_access, $api_access.principal.hostname, $etcd_dump.principal.hostname)
+    $principal_ip = if($api_access, array_distinct($api_access.principal.ip), array_distinct($etcd_dump.principal.ip))
+    $request_uri = if($api_access, $api_access.network.http.url, "")
+    $verb = if($api_access, $api_access.additional.verb, "")
+    $target_resource = if($api_access, $api_access.target.resource.resource_subtype, "etcd")
+    $command_line = if($etcd_dump, $etcd_dump.target.process.command_line, "")
+    $user_agent = if($api_access, $api_access.network.http.user_agent, $etcd_dump.target.process.command_line)
+}

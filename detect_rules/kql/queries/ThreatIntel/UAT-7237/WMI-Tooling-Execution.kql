@@ -1,0 +1,38 @@
+// Name: UAT-7237 WMI Tooling Execution
+// Author: RW
+// Date: 2025-08-15
+// Description: Detects the execution of WMI-based tooling for remote command execution and reconnaissance, a technique leveraged by UAT-7237.
+// False Positive Sensitivity: Medium
+// References: https://blog.talosintelligence.com/uat-7237-targets-web-hosting-infra/
+// MITRE TTPs: T1047, T1021.006
+
+let timeframe = 1d;
+// Define known WMI-based tools used by the actor.
+let wmi_tools = dynamic(["SharpWMI.exe", "WMICmd.exe"]);
+DeviceProcessEvents
+| where TimeGenerated > ago(timeframe)
+| where
+    // Detects known WMI tools by filename.
+    FileName in~ (wmi_tools)
+    or
+    // Detects the native wmic.exe used for remote process creation.
+    // This is a common administrative activity, so it's filtered for specific remote execution patterns.
+    (
+        FileName =~ "wmic.exe"
+        and ProcessCommandLine has "/node:"
+        and ProcessCommandLine has "process"
+        and ProcessCommandLine has "call"
+        and ProcessCommandLine has "create"
+    )
+// Note: Legitimate remote administration using wmic.exe may trigger this rule.
+// Consider adding allowlists for specific source/destination hosts or administrative user accounts if this proves to be noisy.
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    FileName,
+    ProcessCommandLine,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    MD5,
+    SHA256

@@ -1,0 +1,81 @@
+- type: firewall
+  name: Detect Exposed Docker API Exploitation Attempts
+  application: "**"
+  direction: out
+  protocol: TCP
+  port: "2375"
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects outbound connections to TCP port 2375 (unsecured Docker Engine API). Strong indicator of exploitation attempts against exposed Docker daemons (common in 2025-2026 malware campaigns exploiting misconfigurations or CVE-2025-9074). Note: Cannot filter specific API paths (/containers/create*, /images/create*); use Web Control for URI filtering if available. Baseline known-good source IPs to reduce FPs."
+- type: expert
+  name: Detect Suspicious Package Installation and Downloader in Containers
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "sh" -v "bash" -v "apk" -v "apt" -v "yum" }
+       }
+       Target {
+          Match PROCESS {
+             Include OBJECT_NAME { -v "**" }
+             Include -access "CREATE"
+             Include -command_line "*curl*"
+             Include -command_line "*wget*"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects shell processes (sh/bash) spawning package managers (apk/apt/yum) or downloaders (curl/wget) — common in cryptojacking/miner payloads exploiting Docker APIs (2025 campaigns)."
+- type: expert
+  name: Detect Masscan/ZMap-like Port Scanning from Docker
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "masscan" -v "zmap" -v "nmap" }
+       }
+       Target {
+          Match PROCESS {
+             Include OBJECT_NAME { -v "**" }
+             Include -access "CREATE"
+             Include -command_line "* -p2375*"
+             Include -command_line "* --rate 10000*"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects masscan/zmap/nmap executing high-rate scans on Docker API port (2375) — used by Docker malware (2025 campaigns) for rapid internet-wide scanning of exposed ports (e.g., 2375). Very high-fidelity indicator of propagation activity."
+- type: firewall
+  name: Detect Tor-Related C2 Communication
+  application: "**"
+  direction: out
+  protocol: UDP
+  port: "53"
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects outbound DNS queries (UDP 53) potentially resolving .onion domains for Tor-based C2 (widely used in 2025 Docker malware for miner/backdoor delivery). Specific .onion filtering not supported in ENS; use external DNS enrichment or proxy logs for precision."
+- type: expert
+  name: Detect Torsocks Execution for C2
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "torsocks" }
+       }
+       Target {
+          Match PROCESS {
+             Include OBJECT_NAME { -v "**" }
+             Include -access "CREATE"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects torsocks execution — frequently installed by Docker malware (2025 variants) to proxy C2/mining traffic over Tor for anonymity. High-fidelity indicator of Tor-enabled persistence or exfiltration."

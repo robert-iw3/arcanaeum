@@ -1,0 +1,85 @@
+- type: expert
+  name: Detect Warlock SharePoint Privilege Escalation (GPO/Guest Abuse)
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "w3wp.exe" }
+       }
+       Target {
+          Match PROCESS {
+             Include OBJECT_NAME { -v "**" }
+             Include -access "CREATE"
+             Include -command_line "*New-GPO*"
+             Include -command_line "*net user guest *"
+             Include -command_line "*net localgroup administrators guest /add*"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects IIS worker process (w3wp.exe) executing commands to create new Group Policy Objects (New-GPO) or enable/modify the Guest account and add it to Administrators — specific privilege escalation technique used by Warlock ransomware (Russian-linked, 2024-2025 variants) via compromised SharePoint servers. High-fidelity; tune for legitimate SharePoint admin scripts or automation."
+- type: expert
+  name: Detect Warlock Defense Evasion via Process Termination
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "taskkill.exe" -v "powershell.exe" -v "sc.exe" -v "net.exe" }
+       }
+       Target {
+          Match PROCESS {
+             Include OBJECT_NAME { -v "**" }
+             Include -access "CREATE"
+             Include -command_line "* /f /im *"
+             Include -command_line "*Stop-Service*"
+             Include -command_line "*sc delete*"
+             Include -command_line "*net stop*"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects taskkill/powershell/sc/net commands terminating services/processes — defense evasion TTP of Warlock ransomware (2025 variants) targeting AV/EDR. Tune for legitimate admin tasks."
+- type: expert
+  name: Detect Warlock Cloudflare Tunnel C2 Establishment
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "hpmews03.exe" -v "macfee_agent.exe" }
+       }
+       Target {
+          Match PROCESS {
+             Include OBJECT_NAME { -v "**" }
+             Include -access "CREATE"
+             Include -command_line "*tunnel run --token *"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects renamed binaries (hpmews03.exe, macfee_agent.exe) executing Cloudflare tunnel commands (tunnel run --token) — used by Warlock for persistent, encrypted C2 and exfiltration. High-fidelity renamed-tool detection. Tune for legitimate Cloudflare usage."
+- type: expert
+  name: Detect Warlock Rclone Exfiltration to Proton Drive
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "rclone.exe" -v "TrendSecurity.exe" }
+       }
+       Target {
+          Match PROCESS {
+             Include OBJECT_NAME { -v "**" }
+             Include -access "CREATE"
+             Include -command_line "*copy * --protondrive-username * --protondrive-password *"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects Rclone (or disguised TrendSecurity.exe) executing copy commands with Proton Drive credentials — exfiltration method used by Warlock ransomware (2025 variants). Can be noisy with legitimate cloud sync; add exclusions for authorized rclone configs/users."

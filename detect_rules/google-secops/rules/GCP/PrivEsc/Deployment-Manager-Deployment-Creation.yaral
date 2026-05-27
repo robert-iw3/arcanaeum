@@ -1,0 +1,39 @@
+rule gcp_privilege_escalation_via_deployment_manager_creation {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects the creation of a new deployment using Google Cloud Deployment Manager. This action can be abused for privilege escalation, as the deployment is created with the permissions of the default cloud services service account, which typically has the Editor role on the project."
+    false_positives = "Legitimate use of Deployment Manager by developers or administrators for infrastructure-as-code (IaC) deployments. Baselining for known administrative users or service accounts is recommended to reduce potential noise."
+    tags = "attack.privilege_escalation, attack.t1078.004, cloud, gcp"
+    tactic = "TA0004"
+    technique = "T1078.004"
+
+  events:
+    // Filter for successful GCP Deployment Manager deployment creation events.
+    $e.metadata.event_type = "GCP_AUDIT_LOG"
+    $e.metadata.product_name = "deploymentmanager.googleapis.com"
+    $e.metadata.product_event_type = "v2.deploymentmanager.deployments.insert"
+    $e.security_result.action = "ALLOW"
+
+    // Placeholder for the principal user to use in the match section.
+    $principal_user = $e.principal.user.email_addresses
+
+    // Placeholder for filtering out known legitimate accounts to reduce noise.
+    // For example: not $e.principal.user.email_addresses in %gcp_deployment_manager_allowlist
+
+  match:
+    // Group events by the user over a 10 minute window.
+    $principal_user over 10m
+
+  outcome:
+    // High risk score due to direct privilege escalation potential.
+    $risk_score = 70
+    $principal_ip = array_distinct($e.principal.ip)
+    $principal_user_list = array_distinct($e.principal.user.email_addresses)
+    $target_project_id = array_distinct($e.target.resource.attribute.project_id)
+    $deployment_name = array_distinct($e.target.resource.name)
+    $event_count = count_distinct($e.metadata.id)
+
+  condition:
+    $e
+}

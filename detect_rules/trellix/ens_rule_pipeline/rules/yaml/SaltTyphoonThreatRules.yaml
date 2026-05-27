@@ -1,0 +1,62 @@
+- type: firewall
+  name: Detect Salt Typhoon C2 Connections (IOC Match - Broad Ports)
+  application: "**"
+  direction: out
+  protocol: "TCP,UDP"
+  port: "80,443,53"
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects outbound connections on common C2 ports (HTTP/HTTPS 80/443, DNS 53) potentially used by Salt Typhoon infrastructure. Group employs encrypted multi-hop C2, legitimate cloud services, and DNS for command/control. Specific IPs (e.g., 162.251.82.125) and domains (e.g., aria-hidden.com) not filterable in ENS Firewall; use Web Control for domain blocking and precision. Tune with baseline traffic exclusions."
+- type: expert
+  name: Detect Network Edge Device Exploitation Attempts (Placeholder)
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "**" }
+       }
+       Target {
+          Match PROCESS {
+             Include OBJECT_NAME { -v "**.exe" }
+             Include -access "CREATE"
+          }
+       }
+    }
+  action: Report
+  severity: Medium
+  enabled: true
+  description: "Placeholder for detecting suspicious process creation potentially related to edge device exploitation tools (e.g., targeting CVE-2023-20198 Cisco IOS XE, CVE-2024-3400 Palo Alto PAN-OS). Salt Typhoon's primary initial access is zero-day exploitation of network appliances; ENS is endpoint-focused — pair with NDR/EDR for device coverage."
+- type: expert
+  name: Detect PowerShell Evasion and Defender Disablement (Salt Typhoon)
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "powershell.exe" -v "pwsh.exe" }
+       }
+       Target {
+          Match PROCESS {
+             Include OBJECT_NAME { -v "**" }
+             Include -access "CREATE"
+             Include -command_line "*-Version 2*"
+             Include -command_line "*-enc*"
+             Include -command_line "*-command*"
+             Include -command_line "*Set-MpPreference -DisableRealtimeMonitoring*"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects PowerShell execution with downgrade (-Version 2), encoded (-enc), or command-line bypass arguments, plus Defender real-time monitoring disable — observed in Salt Typhoon and related PRC campaigns for evasion. Limited command-line matching in ENS; applies to Windows endpoints. Tune for legitimate scripting."
+- type: firewall
+  name: Detect C2-Exfiltration via Public Services (Cloud Abuse)
+  application: "**"
+  direction: out
+  protocol: TCP
+  port: "80,443"
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects outbound HTTP/HTTPS traffic potentially used for C2 or exfiltration to public cloud services (e.g., github.com, gmail.com, dropbox) — Salt Typhoon blends malicious traffic with legitimate platforms. Domain-specific filtering and byte-size checks not supported; use Web Control for precision and domain blocking. Tune for baseline cloud usage."

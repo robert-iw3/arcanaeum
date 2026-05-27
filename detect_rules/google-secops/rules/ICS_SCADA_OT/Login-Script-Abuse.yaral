@@ -1,0 +1,39 @@
+rule suspicious_process_spawned_by_logon_script {
+  meta:
+    description = "Detects suspicious child processes spawned by the Group Policy logon script handler (gpscript.exe). Adversaries may abuse logon scripts to execute malicious commands, perform reconnaissance, or establish persistence, as referenced in the provided intelligence."
+    author = "RW"
+    date = "2025-08-18"
+    reference = "https://attack.mitre.org/techniques/T1037/001/"
+    tags = "PERSISTENCE, EXECUTION, T1037.001, WINDOWS"
+    tactic = "TA0003, TA0002"
+    technique = "T1037.001"
+    false_positives = "Legitimate logon scripts may use tools like 'net.exe' to map network drives. The list of suspicious child processes may need to be tuned for the specific environment. Consider excluding specific, known-good command lines if they generate noise."
+
+  events:
+    $p.metadata.event_type = "PROCESS_CREATION"
+
+    // Identify the parent process as the Group Policy script handler.
+    $p.principal.process.file.name = "gpscript.exe" nocase
+
+    // Identify child processes that are unusual or suspicious in the context of a logon script.
+    $p.target.process.file.name in (
+      "powershell.exe", "pwsh.exe", "cmd.exe", "cscript.exe", "wscript.exe",
+      "whoami.exe", "net.exe", "net1.exe", "nltest.exe", "systeminfo.exe",
+      "quser.exe", "qwinsta.exe", "reg.exe", "certutil.exe", "bitsadmin.exe",
+      "rundll32.exe", "regsvr32.exe"
+    ) nocase
+
+  condition:
+    $p
+
+  outcome:
+    // Risk score is medium, as this is a strong indicator of abuse but may require tuning for legitimate scripts.
+    $risk_score = 60
+    $principal_hostname = array_distinct($p.principal.hostname)
+    $principal_user = array_distinct($p.principal.user.userid)
+    $parent_process_path = array_distinct($p.principal.process.file.full_path)
+    $parent_command_line = array_distinct($p.principal.process.command_line)
+    $child_process_path = array_distinct($p.target.process.file.full_path)
+    $child_command_line = array_distinct($p.target.process.command_line)
+    $event_count = count_distinct($p.metadata.id)
+}

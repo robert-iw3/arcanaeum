@@ -1,0 +1,59 @@
+[
+  {
+    "type": "expert",
+    "name": "Detect Robocopy WebDAV Download from Temporary Tunnels (Stage 1 Initial Access)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"robocopy.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*\\SSL\\DavWWWRoot*\"\n         Include -command_line \"*WebDAV*\"\n         Include -command_line \"*trycloudflare.com*\"\n         Include -command_line \"*ngrok.io*\"\n         Include -command_line \"*ngrok-free.app*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "Critical",
+    "enabled": true,
+    "description": "Detects robocopy.exe with WebDAV source paths (@SSL\\DavWWWRoot or WebDAV) and temporary tunnel domains (trycloudflare.com, ngrok.io, ngrok-free.app) — high-confidence initial access vector in SERPENTINE#CLOUD and similar 2025-2026 phishing-to-RAT campaigns. Extremely specific; very low false positives. Tune only for rare legitimate WebDAV robocopy usage."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Suspicious LNK Execution from Office/Explorer (Stage 1b Initial Access)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"cmd.exe\" -v \"powershell.exe\" -v \"wscript.exe\" -v \"cscript.exe\" -v \"rundll32.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -parent_process \"explorer.exe\" -parent_process \"winword.exe\" -parent_process \"outlook.exe\" -parent_process \"iexplore.exe\"\n         Include -command_line \"*\\*.lnk\"\n         Include -command_line \"*file://*\"\n         Include -command_line \"*shortcut.lnk*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects script interpreters or rundll32 spawned by Office/Explorer executing LNK files or file:// URIs — common initial vector in 2025-2026 phishing campaigns delivering RATs via malicious shortcuts. High-fidelity when parent is explorer.exe or Office. Tune for legitimate LNK execution in trusted environments."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Obfuscated WSF/BAT Execution in Temp/AppData (Stage 2 Execution)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"cmd.exe\" -v \"powershell.exe\" -v \"wscript.exe\" -v \"cscript.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*jun*.bat\"\n         Include -command_line \"*.wsf\"\n         Include -command_line \"*obfuscated*\"\n         Include -command_line \"*base64*\"\n         Include -command_line \"*from base64*\"\n         Include -command_line \"*Temp*\"\n         Include -command_line \"*AppData*\"\n         Include -command_line \"*Startup*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects cmd/powershell/wscript/cscript executing obfuscated or suspicious WSF/BAT files (jun*.bat, *.wsf, base64/from base64) in Temp/AppData/Startup paths — strong execution indicator in 2025-2026 RAT campaigns. Tune exclusions for legitimate scripting in these folders."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Suspicious In-Memory/Evasion Python Execution (Stage 2b)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"python.exe\" -v \"pythonw.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -parent_process \"notepad.exe\" -parent_process \"explorer.exe\" -parent_process \"cmd.exe\"\n         Include -command_line \"*\\\\Contacts\\\\Extracted\\\\*\"\n         Include -command_line \"*\\\\Contacts\\\\Print\\\\*\"\n         Include -command_line \"*__pycache__*\"\n         Include -command_line \"*reflective*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects python.exe execution with evasion/in-memory indicators (Contacts\\Extracted/Print paths, __pycache__, reflective) and suspicious parents (notepad/explorer/cmd) — matches stealthy Python loaders in 2025-2026 campaigns. Highly specific; low false positives. Tune if legitimate Python tools use these patterns."
+  },
+  {
+    "type": "expert",
+    "name": "Detect VBS Persistence in Startup or AppData (Stage 3)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"wscript.exe\" -v \"cscript.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*\\\\Microsoft\\\\Windows\\\\Start Menu\\\\Programs\\\\Startup\\\\*.vbs*\"\n         Include -command_line \"*\\\\AppData\\\\Roaming\\\\*\\\\*.vbs*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects wscript/cscript executing VBS scripts from Startup folder or AppData\\Roaming — classic persistence method in many 2025-2026 RAT/phishing campaigns. High-fidelity; tune for rare legitimate startup scripts."
+  },
+  {
+    "type": "firewall",
+    "name": "Detect Outbound C2 to Known Malicious Domains/IPs (Stage 4)",
+    "application": "**",
+    "direction": "out",
+    "protocol": "TCP,UDP",
+    "port": "80,443,53",
+    "action": "Report",
+    "severity": "Critical",
+    "enabled": true,
+    "description": "Detects outbound traffic on C2 ports (HTTP/HTTPS 80/443, DNS 53) to known 2025-2026 malicious infrastructure (nhvncpure.shop/sbs/click, *.duckdns.org, *.trycloudflare.com/*.ngrok.io/*.ngrok-free.app, IP 51.89.212.145). High-confidence C2 indicator. Domain/IP filtering not native in ENS Firewall; use Web Control for blocking. Tune with baseline exclusions."
+  }
+]

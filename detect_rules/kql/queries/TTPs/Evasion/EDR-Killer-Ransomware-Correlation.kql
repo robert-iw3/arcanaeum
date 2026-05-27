@@ -1,0 +1,84 @@
+// Name: EDR Killer Activity Followed by Ransomware
+// Author: RW
+// Date: 2025-08-07
+// Mitre TTPs: T1562, T1486
+// Description: Detects a sequence of events where an EDR evasion technique (like loading a suspiciously signed driver)
+/               is followed by a ransomware alert on the same device within a short time window. This pattern is a strong
+//              indicator of an active ransomware attack.
+// False Positives: Medium. This rule's fidelity depends on the accuracy of the underlying EDR killer and ransomware alerts.
+//                  A false positive in either could lead to an alert.
+// Tuning: Adjust the 'timeWindow' to match your environment's alert latency. The 'suspiciousSigners' and 'RansomwareAlertNames'
+//          lists should be curated based on your security products and threat intelligence. The table and field names for
+//          security alerts (e.g., SecurityAlert, AlertName, CompromisedEntity) may need to be changed to match your specific data schema.
+
+let timeWindow = 30m;
+
+// Define known malicious signers from threat intelligence.
+let suspiciousSigners = dynamic([
+    "Changsha Hengxiang Information Technology Co., Ltd.",
+    "Fuzhou Dingxin Trade Co., Ltd."
+]);
+
+// Define keywords found in ransomware-related alerts.
+let RansomwareAlertNames = dynamic([
+    "Ransomware",
+    "CryptoGuard",
+    "Blacksuit",
+    "RansomHub",
+    "Medusa",
+    "Qilin",
+    "Dragonforce",
+    "Crytox",
+    "Lynx",
+    "INC"
+]);
+
+// Part 1: Identify EDR Killer activity based on suspicious driver loads.
+let EDR_Killer_Events =
+    DeviceImageLoadEvents
+    | where FileName endswith ".sys"
+    // Filter for drivers signed by known malicious entities or with invalid signatures.
+    | where Signer in~ (suspiciousSigners) or SignatureStatus in ("Revoked", "Expired", "InvalidSignature", "SignatureNotTrusted")
+    | project
+        Timestamp,
+        DeviceName,
+        ActivityDetail = strcat("Driver '", FileName, "' loaded with Signer '", Signer, "' and Status '", SignatureStatus, "'");
+
+// Part 2: Identify Ransomware alerts.
+// Note: The table 'SecurityAlert' and fields 'AlertName', 'CompromisedEntity' are placeholders.
+// Adjust them to match your environment's security alert schema.
+let Ransomware_Events =
+    SecurityAlert
+    | where AlertName has_any (RansomwareAlertNames)
+    // Example of extracting device name from Entities field. Adjust as needed.
+    | extend DeviceName = tostring(parse_json(Entities)[0].HostName)
+    | where isnotempty(DeviceName)
+    | project
+        Timestamp,
+        DeviceName,
+        ActivityDetail = strcat("Alert '", AlertName, "' triggered.");
+
+// Part 3: Correlate the two activities on the same device within the time window.
+EDR_Killer_Events
+// Join with ransomware events that occurred on the same device.
+| join kind=inner (
+    Ransomware_Events
+) on DeviceName
+// Ensure the ransomware alert happened *after* the EDR killer activity.
+| where Timestamp1 > Timestamp // Timestamp1 is from Ransomware_Events, Timestamp is from EDR_Killer_Events
+// Ensure the events happened within the specified time window.
+| where Timestamp1 - Timestamp <= timeWindow
+| project
+    DeviceName,
+    EDR_Killer_Time = Timestamp,
+    EDR_Killer_Details = ActivityDetail,
+    Ransomware_Time = Timestamp1,
+    Ransomware_Details = ActivityDetail1,
+    DetectionTimeframe = Timestamp1 - Timestamp
+// Group all related sequences for a single device into one alert.
+| summarize
+    StartTime = min(EDR_Killer_Time),
+    EndTime = max(Ransomware_Time),
+    EDR_Killer_Activity = make_set(EDR_Killer_Details, 10),
+    Ransomware_Activity = make_set(Ransomware_Details, 10)
+    by DeviceName

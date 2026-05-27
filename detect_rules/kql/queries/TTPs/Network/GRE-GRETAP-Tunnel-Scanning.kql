@@ -1,0 +1,58 @@
+// Name: GRE/GRETAP Tunnel Scanning
+// Description: Detects potential GRE/GRETAP tunnel scanning activity. Attackers may encapsulate ICMP echo requests within
+//              GRE packets, embedding potential peer IP addresses in the ICMP identifier and sequence number fields to
+//              discover misconfigured or vulnerable tunnels. This detection looks for a single source sending multiple
+//              GRE-encapsulated ICMP echo requests with a high variety of ICMP identifiers or sequence numbers, which is
+//              indicative of this scanning technique.
+// Tactic: Reconnaissance
+// Technique: T1595.002
+// Author: RW
+// Date: 2025-08-13
+// Data Source: Network Session logs with deep packet inspection (e.g., Zeek, NGFW).
+// Data Requirement: This query requires fields for encapsulated ICMP Type, Identifier, and Sequence.
+// These are represented as placeholders and may need to be extracted from a dynamic field like 'AdditionalFields'.
+// False Positives: Medium. Some non-standard network diagnostic tools might use high ICMP identifier or sequence values.
+// The combination of GRE encapsulation and a high volume of varied requests from a single source is highly indicative of scanning.
+// Legitimate, high-volume GRE/ICMP traffic should be investigated and potentially added to an exclusion list.
+
+let timeframe = 10m;
+let packet_threshold = 10;
+let icmp_variety_threshold = 5;
+let value_threshold = 4096;
+_Im_NetworkSession
+// The following 'extend' statement uses placeholder fields for encapsulated ICMP data.
+// You must adapt this to your schema, for example:
+// | extend IcmpId = toint(AdditionalFields.icmp_id), IcmpSequence = toint(AdditionalFields.icmp_seq), IcmpType = toint(AdditionalFields.icmp_type)
+| extend IcmpId = todynamic(AdditionalFields).icmp_id, IcmpSequence = todynamic(AdditionalFields).icmp_seq, IcmpType = todynamic(AdditionalFields).icmp_type
+// Filter for GRE traffic (IP Protocol 47) containing an ICMP Echo Request (Type 8).
+| where NetworkProtocolNumber == 47 and isnotnull(IcmpType) and tostring(IcmpType) == "8"
+// Heuristic for embedded IP: high values in ICMP ID or Sequence fields.
+| where toint(IcmpId) > value_threshold or toint(IcmpSequence) > value_threshold
+// Aggregate by the source IP to identify scanning behavior.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    EventCount = count(),
+    DistinctDestCount = dcount(DstIpAddr),
+    DistinctIcmpIdCount = dcount(IcmpId),
+    DistinctIcmpSeqCount = dcount(IcmpSequence),
+    TargetIpSet = make_set(DstIpAddr, 100),
+    IcmpIdSet = make_set(IcmpId, 100),
+    IcmpSeqSet = make_set(IcmpSequence, 100)
+    by SrcIpAddr, bin(TimeGenerated, timeframe)
+// A single source must send multiple packets with a high variety of ICMP fields.
+| where EventCount > packet_threshold and (DistinctIcmpIdCount > icmp_variety_threshold or DistinctIcmpSeqCount > icmp_variety_threshold)
+| project-reorder
+    StartTime,
+    EndTime,
+    SrcIpAddr,
+    EventCount,
+    DistinctDestCount,
+    DistinctIcmpIdCount,
+    DistinctIcmpSeqCount,
+    TargetIpSet,
+    IcmpIdSet,
+    IcmpSeqSet
+| extend
+    timestamp = StartTime,
+    AccountCustomEntity = SrcIpAddr

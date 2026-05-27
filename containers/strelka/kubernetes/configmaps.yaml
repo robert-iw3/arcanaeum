@@ -1,0 +1,169 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: update-yara
+data:
+  update-yara.sh: |
+    #!/bin/bash
+    cd /app/configs/python/backend/yara/rules
+
+    # Backup
+    mv rules.yara rules.yara.bak 2>/dev/null
+
+    # Fetch from sources
+    git clone --depth 1 https://github.com/Yara-Rules/rules.git yr-temp || git -C yr-temp pull
+    cp -r yr-temp/* .
+
+    git clone --depth 1 https://github.com/reversinglabs/reversinglabs-yara-rules.git rl-temp || git -C rl-temp pull
+    cp -r rl-temp/* .
+
+    git clone --depth 1 https://github.com/Neo23x0/signature-base.git sb-temp || git -C sb-temp pull
+    cp -r sb-temp/yara/* .
+
+    git clone --depth 1 https://github.com/advanced-threat-research/Yara-Rules.git tr-temp || git -C tr-temp pull
+    cp -r tr-temp/* .
+
+    git clone --depth 1 https://github.com/bartblaze/Yara-rules.git bb-temp || git -C bb-temp pull
+    cp -r bb-temp/* .
+
+    # Compile
+    yarac rules.yara compiled_rules.yarac
+
+    # Cleanup
+    rm -rf *-temp
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: integrator-script
+data:
+  integrator.py: |
+    import json
+    import os
+    import shutil
+    import time
+
+    EVE_JSON = '/suricata-logs/eve.json'
+    FILE_STORE = '/suricata-files'
+    DROP_DIR = '/file-drop'
+    STRELKA_HOST = os.getenv('STRELKA_HOST', 'frontend:8732')
+
+    def tail_file(file_path):
+        with open(file_path, 'r') as f:
+            f.seek(0, 2)  # Go to end
+            while True:
+                line = f.readline()
+                if not line:
+                    time.sleep(0.1)
+                    continue
+                yield line
+
+    for line in tail_file(EVE_JSON):
+        try:
+            event = json.loads(line)
+            if event.get('event_type') == 'alert' and 'fileinfo' in event:
+                file_hash = event['fileinfo']['sha256']
+                file_path = os.path.join(FILE_STORE, file_hash)
+                if os.path.exists(file_path):
+                    dest_path = os.path.join(DROP_DIR, os.path.basename(event['fileinfo']['filename']))
+                    shutil.copy(file_path, dest_path)
+                    print(f"Triggered Strelka scan for {dest_path}")
+        except json.JSONDecodeError:
+            pass
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: watcher-script
+data:
+  watcher.py: |
+    import os
+    import json
+    import time
+    import requests
+    import shutil
+    from watchdog.observers import Observer
+    from watchdog.events import FileSystemEventHandler
+    from strelka.client import Client
+
+    DROP_DIR = '/file-drop'
+    SCAN_LOGS = '/scan-logs'
+    STRELKA_HOST = os.getenv('STRELKA_HOST', 'frontend:8732')
+    SIEM_TYPE = os.getenv('SIEM_TYPE', 'elastic')
+    SIEM_URL = os.getenv('SIEM_URL')
+    INDEX_NAME = os.getenv('INDEX_NAME', 'strelka-scans')
+
+    # Read secret
+    with open('/run/secrets/siem_token', 'r') as f:
+        SIEM_TOKEN = f.read().strip()
+
+    client = Client(f"{STRELKA_HOST}")
+
+    class Handler(FileSystemEventHandler):
+        def on_created(self, event):
+            if not event.is_directory:
+                full_path = event.src_path
+                try:
+                    scan_result = client.scan_file(full_path)
+                    scan_json = json.dumps(scan_result)
+
+                    # Transform to SIEM schema
+                    transformed = {}
+                    if SIEM_TYPE == 'splunk':
+                        transformed = {
+                            'sourcetype': 'strelka:scan',
+                            'event': {
+                                'source': scan_result.get('filename'),
+                                'action': 'blocked' if scan_result.get('scan', {}).get('yara', {}).get('matches') else 'allowed',
+                                'signature': scan_result.get('scan', {}).get('yara', {}).get('matches', []),
+                                'file_hash_sha256': scan_result.get('scan', {}).get('hash', {}).get('sha256'),
+                                'vendor_product': 'Strelka'
+                            }
+                        }
+                        headers = {'Authorization': f'Splunk {SIEM_TOKEN}'}
+                        requests.post(SIEM_URL, json=transformed, headers=headers)
+
+                    elif SIEM_TYPE == 'elastic':
+                        transformed = {
+                            '@timestamp': scan_result.get('time'),
+                            'event': {'category': 'file', 'kind': 'event', 'module': 'strelka'},
+                            'file': {'name': scan_result.get('filename'), 'hash': {'sha256': scan_result.get('scan', {}).get('hash', {}).get('sha256')}},
+                            'threat': {'indicator': {'type': 'file', 'yara_matches': scan_result.get('scan', {}).get('yara', {}).get('matches', [])}}
+                        }
+                        headers = {'Content-Type': 'application/json'}
+                        auth = ('elastic', SIEM_TOKEN) if 'elastic' in SIEM_URL else None
+                        requests.post(f"{SIEM_URL}/{INDEX_NAME}/_doc/", json=transformed, headers=headers, auth=auth)
+
+                    # Log
+                    with open(f"{SCAN_LOGS}/strelka-{int(time.time())}.json", 'w') as f:
+                        json.dump(transformed, f)
+
+                    # Archive
+                    shutil.move(full_path, os.path.join(DROP_DIR, 'scanned', os.path.basename(full_path)))
+                except Exception as e:
+                    print(f"Error: {e}")
+
+    observer = Observer()
+    observer.schedule(Handler(), DROP_DIR, recursive=False)
+    observer.start()
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        observer.stop()
+    observer.join()
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: suricata-config
+data:
+  suricata.yaml: |  # Excerpt; full config from image, override as needed
+    file-store:
+      enabled: yes
+      force-filestore: yes
+  emerging-download.rules: |  # Your rules
+    alert http any any -> any any (msg:"ET INFO Potentially Suspicious Download"; filemagic; filestore; sid:2020001; rev:1;)

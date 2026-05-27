@@ -1,0 +1,35 @@
+// Name: PowerShell Download Cradle
+// Author: RW
+// Date: 2025-08-12
+// MITRE ATT&CK: T1059.001, T1105
+// Description: Detects suspicious PowerShell execution that includes command-line parameters often used to download and execute remote payloads.
+// This is a common technique for initial access and code execution by infostealers and other malware, as seen in the "Man-in-the-Malware" intelligence.
+// False Positive Sensitivity: Medium. Legitimate administrative or deployment scripts may sometimes use these patterns.
+// Consider tuning by excluding known safe parent processes (e.g., configuration management tools) or scripts.
+
+let downloadCradleKeywords = dynamic([
+    "IEX",
+    "Invoke-Expression",
+    "DownloadString",
+    "DownloadFile",
+    "Net.WebClient"
+]);
+DeviceProcessEvents
+| where ProcessFileName =~ "powershell.exe"
+// Look for command lines that set a specific execution policy, often to ensure a downloaded script can run.
+| where ProcessCommandLine has_all ("-NoProfile", "-ExecutionPolicy", "RemoteSigned")
+// And also contain keywords associated with downloading or executing remote content.
+| where ProcessCommandLine has_any (downloadCradleKeywords)
+// Further refine the logic to common download cradle constructs for higher fidelity.
+| where (ProcessCommandLine contains "New-Object" and ProcessCommandLine contains "Net.WebClient") or ProcessCommandLine has "IEX" or ProcessCommandLine has "Invoke-Expression"
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    ProcessCommandLine,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessParentFileName,
+    ReportId,
+    ProcessId,
+    InitiatingProcessId

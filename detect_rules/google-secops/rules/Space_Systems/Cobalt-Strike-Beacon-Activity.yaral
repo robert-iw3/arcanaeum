@@ -1,0 +1,57 @@
+rule cobalt_strike_beacon_activity {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects indicators of Cobalt Strike beacon activity. The rule looks for the creation of default named pipes used for C2 session passing and for network connections to default URIs used by common Malleable C2 profiles. This activity is common in post-exploitation frameworks used by advanced threat actors in environments like satellite ground systems."
+    false_positives = "Default Cobalt Strike artifacts are often changed by sophisticated attackers; however, their presence is a high-fidelity indicator of compromise. Legitimate tools are unlikely to use these specific patterns. Vulnerability scanners may generate false positives."
+    reference = "https://www.cobaltstrike.com/product/features/beacon"
+    tactic = "TA0011"
+    technique = "T1071.001, T1105"
+    tags = "COBALT_STRIKE, C2, BEACON, GROUND_SYSTEM, T1071.001, T1105"
+
+  events:
+    // Condition 1: Detects network connections to default Cobalt Strike C2 URIs.
+    $network_beacon.metadata.event_type = "NETWORK_HTTP"
+    $network_beacon.principal.hostname = $hostname
+    // FP Tuning: This list contains default URIs. Add or remove paths to tune for your environment.
+    strings.ends_with($network_beacon.target.http.url, "/jquery.js") nocase or
+    strings.ends_with($network_beacon.target.http.url, "/jquery.min.js") nocase or
+    strings.ends_with($network_beacon.target.http.url, "/jquery-3.3.1.js") nocase or
+    strings.ends_with($network_beacon.target.http.url, "/jquery-3.3.1.min.js") nocase or
+    strings.ends_with($network_beacon.target.http.url, "/ga.js") nocase or
+    strings.ends_with($network_beacon.target.http.url, "/pixel.gif") nocase or
+    strings.ends_with($network_beacon.target.http.url, "/submit.php") nocase or
+    strings.ends_with($network_beacon.target.http.url, "/__utm.gif") nocase or
+    strings.ends_with($network_beacon.target.http.url, "/cdn.jquery-3.3.1.min.js") nocase or
+    strings.ends_with($network_beacon.target.http.url, "/load.js") nocase
+
+    // Condition 2: Detects the creation of default Cobalt Strike named pipes.
+    // Note: This requires EDR logs (e.g., Sysmon EventCode 17) mapped to a UDM event type.
+    // 'GENERIC_EVENT' is a placeholder; adjust to your specific data source and mapping.
+    $host_beacon.metadata.event_type = "GENERIC_EVENT"
+    $host_beacon.principal.hostname = $hostname
+    // The pipe name is often in target.resource.name for pipe creation events.
+    re.regex($host_beacon.target.resource.name, `(?i)\\pipe\\(msagent|postex|status)_[a-f0-9]{4,6}$`)
+
+  match:
+    // Correlate host and network indicators on the same host over a 30 minute window.
+    $hostname over 30m
+
+  outcome:
+    // A high risk score is assigned due to the strong indication of a C2 beacon.
+    $risk_score = 70
+    $principal_hostname = array_distinct($hostname)
+    $principal_ip = array_distinct($network_beacon.principal.ip)
+    $c2_server_ip = array_distinct($network_beacon.target.ip)
+    $suspicious_urls = array_distinct($network_beacon.target.http.url)
+    $suspicious_pipe_names = array_distinct($host_beacon.target.resource.name)
+    $pipe_creating_process = array_distinct($host_beacon.principal.process.file.full_path)
+    $pipe_creating_process_commandline = array_distinct($host_beacon.principal.process.command_line)
+    $network_process = array_distinct($network_beacon.principal.process.file.full_path)
+    $network_process_commandline = array_distinct($network_beacon.principal.process.command_line)
+    $network_event_count = count_distinct($network_beacon.metadata.id)
+    $host_event_count = count_distinct($host_beacon.metadata.id)
+
+  condition:
+    $network_beacon or $host_beacon
+}

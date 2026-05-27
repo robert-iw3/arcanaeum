@@ -1,0 +1,76 @@
+// Name: APT28 NotDoor Backdoor Activity
+// Author: RW
+// Date: 2025-09-03
+// Description: This rule detects various activities associated with the NotDoor backdoor, used by APT28.
+// It looks for specific file creation events, process command lines, registry modifications, and network communications.
+// False Positive Sensitivity: Medium
+
+let MaliciousHashes = dynamic([
+    "5a88a15a1d764e635462f78a0cd958b17e6d22c716740febc114a408eef66705", // SSPICLI.dll
+    "8f4bca3c62268fff0458322d111a511e0bcfba255d5ab78c45973bd293379901"  // testtemp.ini
+]);
+let StagingFileNames = dynamic(["report", "invoice", "contract", "photo", "scheme", "document"]);
+let StagingFileExtensions = dynamic(["jpg", "jpeg", "gif", "bmp", "ico", "png", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "mp3", "mp4", "xml"]);
+
+(union isfuzzy=true
+    (
+        // Detects initial backdoor file placement and known malicious file hashes
+        DeviceFileEvents
+        | where ActionType == "FileCreated"
+        | where SHA256 in (MaliciousHashes)
+            or (FolderPath =~ @"c:\programdata\" and FileName =~ "testtemp.ini")
+        | extend DetectionMethod = "NotDoor Initial File Drop/Hash Match"
+        | project TimeGenerated, DetectionMethod, DeviceName, FileName, FolderPath, SHA256, InitiatingProcessCommandLine
+    ),
+    (
+        // Detects PowerShell commands used for installation and C2 verification
+        DeviceProcessEvents
+        | where InitiatingProcessFileName =~ "powershell.exe"
+        | where ProcessCommandLine has_all ("copy", "c:\\programdata\\testtemp.ini", "VbaProject.OTM")
+            or (ProcessCommandLine has "nslookup" and ProcessCommandLine has ".dnshook.site")
+            or (ProcessCommandLine has "curl" and ProcessCommandLine has "webhook.site")
+        | extend DetectionMethod = "NotDoor PowerShell Activity"
+        | project TimeGenerated, DetectionMethod, DeviceName, FileName, ProcessCommandLine, InitiatingProcessCommandLine
+    ),
+    (
+        // Detects registry modifications to enable Outlook macros and suppress warnings
+        DeviceRegistryEvents
+        | where RegistryKey has @"\Microsoft\Office\16.0\Outlook"
+        | where (RegistryKey endswith @"\Outlook" and RegistryValueName =~ "LoadMacroProviderOnBoot" and RegistryValueData == "1")
+            // FP Note: Setting the macro security Level to 1 (Enable all) is highly suspicious but may be used by administrators in some cases. Correlate with other activity.
+            or (RegistryKey endswith @"\Outlook\Security" and RegistryValueName =~ "Level" and RegistryValueData == "1")
+            or (RegistryKey endswith @"\Outlook\Options\General" and RegistryValueName =~ "PONT_STRING" and RegistryValueData == ";")
+        | extend DetectionMethod = "NotDoor Outlook Registry Modification"
+        | project TimeGenerated, DetectionMethod, DeviceName, RegistryKey, RegistryValueName, RegistryValueData, InitiatingProcessCommandLine
+    ),
+    (
+        // Detects network connections to C2 infrastructure
+        DeviceNetworkEvents
+        | where RemoteUrl has "webhook.site" or RemoteUrl has "dnshook.site"
+        // FP Note: Legitimate use of webhook.site or dnshook.site may occur.
+        // Consider adding specific subdomains from the report or correlating with other activity if this is too noisy.
+        | extend DetectionMethod = "NotDoor C2 Network Connection"
+        | project TimeGenerated, DetectionMethod, DeviceName, RemoteUrl, InitiatingProcessFileName, InitiatingProcessCommandLine
+    ),
+    (
+        // Detects creation of staging files for exfiltration
+        DeviceFileEvents
+        | where ActionType == "FileCreated"
+        | where FolderPath has @"\Local\Temp\Test\" // Looks for the specific staging directory %TEMP%\Test
+            and isnotempty(FileName)
+            and array_length(split(FileName, "_")) > 1 // Ensure the file name contains an underscore as per the pattern <NAME>_<ID>.<EXTENSION>
+            and tostring(split(FileName, "_")[0]) in (StagingFileNames)
+            and tostring(split(FileName, ".")[-1]) in (StagingFileExtensions)
+        | extend DetectionMethod = "NotDoor Staging File Creation"
+        | project TimeGenerated, DetectionMethod, DeviceName, FileName, FolderPath, InitiatingProcessCommandLine
+    ),
+    (
+        // Detects email exfiltration activity
+        // This query depends on having the EmailEvents table (or equivalent) available.
+        EmailEvents
+        | where RecipientEmailAddress has "a.matti444@proton.me" and Subject has "Re: 0"
+        | extend DetectionMethod = "NotDoor Email Exfiltration"
+        | project TimeGenerated, DetectionMethod, Subject, SenderFromAddress, RecipientEmailAddress
+    )
+)
+| order by TimeGenerated desc

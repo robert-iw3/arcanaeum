@@ -1,0 +1,70 @@
+// Name: Anomalous RabbitMQ Server Activity
+// Author: RW
+// Date: 2025-08-15
+// Description: Detects suspicious activity related to RabbitMQ servers, which are often used for critical data transfer in satellite ground systems.
+// The rule looks for connections from non-standard processes or from external IP addresses to the management interface.
+// This could indicate reconnaissance, lateral movement, or data exfiltration attempts.
+// Tactic: Exfiltration, Lateral Movement
+// Technique: T1041, T1567, T1071.001
+// False Positive Sensitivity: Medium. Legitimate administrative scripts or monitoring tools might cause false positives.
+// Exclude known tools or source IPs to improve fidelity.
+// References:
+// - https://www.ssec.wisc.edu/datacenter/amqpfind/
+// - https://www.rabbitmq.com/networking.html
+
+let lookback = 1d;
+// Define standard RabbitMQ ports. AMQP and Management UI, including SSL variants.
+let RabbitMQPorts = dynamic([5672, 5671, 15672, 15671]);
+// Define suspicious processes that typically should not be connecting directly to a message queue server.
+let SuspiciousProcesses = dynamic([
+    "powershell.exe",
+    "pwsh.exe",
+    "cmd.exe",
+    "rundll32.exe",
+    "cscript.exe",
+    "wscript.exe",
+    "bash",
+    "sh",
+    "zsh",
+    "python.exe",
+    "python3.exe",
+    "perl.exe",
+    "ncat.exe",
+    "netcat.exe",
+    "nc.exe"
+]);
+// Define known private IP address ranges for filtering external connections.
+let PrivateIPRanges = dynamic([
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "127.0.0.0/8"
+]);
+
+DeviceNetworkEvents
+| where TimeGenerated > ago(lookback)
+| where DestinationPort in (RabbitMQPorts)
+// The core logic identifies two suspicious conditions:
+// 1. A connection to any RabbitMQ port from a suspicious process (like a shell or script interpreter).
+// 2. A connection to the management UI (port 15672) from an external, non-private IP address.
+| where (InitiatingProcessFileName in~ (SuspiciousProcesses)) or (DestinationPort == 15672 and not(ipv4_is_in_any_range(RemoteIP, PrivateIPRanges)))
+// FP Tuning: Add legitimate scripting or application processes to this exclusion list if they connect to RabbitMQ in your environment.
+// and InitiatingProcessFileName !in~ ("my_admin_script.exe")
+// FP Tuning: Exclude known/trusted external IPs that need to access the management UI.
+// and RemoteIP !in ("<trusted_partner_ip>")
+| project
+    TimeGenerated,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RemoteIP,
+    RemotePort,
+    DestinationIP,
+    DestinationPort,
+    TotalBytesOut,
+    TotalBytesIn
+| extend
+    timestamp = TimeGenerated,
+    HostName = tostring(split(DeviceName, ".")[0]),
+    DvcHostname = DeviceName,
+    AccountCustomEntity = RemoteIP

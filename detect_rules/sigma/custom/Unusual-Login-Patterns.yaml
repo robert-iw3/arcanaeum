@@ -1,0 +1,51 @@
+title: Successful Logon from Cloud, VPN, or Hosting Provider
+id: 22e81159-d6d3-4d3f-a611-a88c5de734da
+status: experimental
+description: Detects successful user authentication from an IP address associated with a cloud, VPN, or hosting provider. This activity can indicate an adversary using anonymity services or compromised cloud infrastructure for initial access via valid accounts (T1078), as highlighted in recent threat intelligence on cloud-conscious actors.
+references:
+  - Threat Intel ID: 6e487ba759c8e80223efef2a739cd68b6586a6454f568bafdb580d896b47660a
+author: RW
+date: 2025-08-19
+tags:
+  - attack.initial_access
+  - attack.t1078
+logsource:
+  category: cloud
+  # This rule can be adapted for various cloud identity and access management logs.
+detection:
+  # Defines successful authentication events across different cloud providers.
+  okta_success:
+    product: okta
+    event_type: 'user.session.start'
+    outcome.result: 'SUCCESS'
+  aws_success:
+    product: aws
+    service: cloudtrail
+    aws.eventName: 'ConsoleLogin'
+    aws.responseElements.ConsoleLogin: 'Success'
+  azure_success:
+    product: azure
+    category: signinlogs
+    status.errorCode: 0
+  gcp_success:
+    product: gcp
+    service: gcp.audit
+    gcp.method_name: 'google.login.LoginService.loginSuccess'
+
+  # This filter identifies source IPs from non-standard locations.
+  # Note: These fields depend on log enrichment from your security tools (e.g., GeoIP, ASN).
+  is_hosting:
+    source.ip.is_hosting: true
+  is_vpn:
+    source.ip.is_vpn: true
+  is_proxy:
+    source.ip.is_proxy: true
+  is_tor:
+    source.ip.is_tor: true
+
+  condition: (1 of *_success) and (1 of is_*)
+falsepositives:
+  - Legitimate administrative activity from corporate-sanctioned cloud or VPN infrastructure.
+  - Users legitimately using personal VPNs for privacy.
+  - It is recommended to baseline and create an allowlist for known corporate IP ranges and sanctioned VPN providers to reduce noise.
+level: medium

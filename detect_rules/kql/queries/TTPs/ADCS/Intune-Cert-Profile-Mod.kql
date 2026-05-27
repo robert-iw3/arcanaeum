@@ -1,0 +1,60 @@
+// name: Suspicious Intune Certificate Profile Modification for PrivEsc
+// id: 4a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d
+// version: 1
+// date: 2025-07-31
+// author: RW
+// description: |
+//   Detects the modification or creation of an Intune certificate configuration profile that includes a Subject Alternative Name (SAN) with a strong mapping SID for a highly privileged Active Directory account.
+//   As detailed in research by Dirk-jan Mollema, an attacker with Intune administrative privileges can create or modify a certificate profile to request a certificate for a privileged on-premises account (e.g., a Domain Controller or a member of Domain Admins).
+//   By embedding the privileged account's SID into the SAN using the `URL=tag:microsoft.com,2022-09-14:sid:<value>` format, the attacker can obtain a certificate that allows them to impersonate that account, escalating privileges from the cloud to the on-premises environment.
+//   This rule specifically looks for the addition of this SID tag format containing a well-known privileged SID.
+// severity: High
+// tactics:
+//   - PrivilegeEscalation
+//   - CredentialAccess
+// techniques:
+//   - T1484.002 # Domain Policy Modification: Group Policy Modification (includes Intune)
+//   - T1649 # Steal or Forge Authentication Certificates
+// dataSources:
+//   - AuditLogs
+// how_to_implement: You must be ingesting Microsoft Intune audit logs into your Log Analytics workspace.
+// known_false_positives: It is highly unusual and not recommended to issue certificates to privileged accounts like Domain Admins or Domain Controllers via Intune. A false positive could occur if an organization has a legitimate, albeit risky, administrative reason for such a configuration. Any alert should be investigated to confirm the intent and authorization of the change.
+
+
+query: |
+  AuditLogs
+  | where Category == "DeviceConfiguration" and Result == "Success"
+  | where OperationName has_any ("Add deviceConfiguration", "Patch deviceConfiguration")
+  // comment: Expand the TargetResources array which contains details of the modified object.
+  | mv-expand TargetResources
+  | extend ProfileName = tostring(TargetResources.displayName)
+  // comment: Expand the modifiedProperties array to inspect each change.
+  | mv-expand ModifiedProperties = TargetResources.modifiedProperties
+  | extend NewValue = tostring(ModifiedProperties.newValue)
+  // comment: Look for the specific SID tag format used for strong mapping in certificate SANs.
+  | where NewValue has "tag:microsoft.com,2022-09-14:sid:"
+  // comment: To reduce false positives, extract the SID only if it matches a well-known privileged account or group.
+  // SIDs for: Administrator(500), Domain Admins(512), Domain Controllers(516), Schema Admins(518), Enterprise Admins(519).
+  | extend PrivilegedSid = extract("tag:microsoft\\.com,2022-09-14:sid:(S-1-5-21-[0-9-]+-(500|512|516|518|519))", 1, NewValue)
+  | where isnotempty(PrivilegedSid)
+  | extend ActorUPN = tostring(InitiatedBy.user.userPrincipalName)
+  | extend ActorIP = tostring(InitiatedBy.ip.ipAddress)
+  | project
+      TimeGenerated,
+      ActorUPN,
+      ActorIP,
+      OperationName,
+      ProfileName,
+      PrivilegedSid
+entityMappings:
+  - entityType: Account
+    fieldMappings:
+      - identifier: FullName
+        columnName: ActorUPN
+  - entityType: IP
+    fieldMappings:
+      - identifier: Address
+        columnName: ActorIP
+customDetails:
+  ProfileName: ProfileName
+  PrivilegedSid: PrivilegedSid

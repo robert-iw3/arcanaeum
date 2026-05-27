@@ -1,0 +1,40 @@
+rule renamed_system_binary_execution {
+  meta:
+    description = "Detects the execution of a legitimate Windows system binary that has been renamed. Adversaries, as shown in the referenced intelligence, may rename system utilities (e.g., 'cmd.exe' to 'alarms.exe') to bypass application whitelisting, GPO restrictions, or other security controls based on file names."
+    author = "RW"
+    date = "2025-08-18"
+    reference = "https://attack.mitre.org/techniques/T1036/003/"
+    tags = "DEFENSE_EVASION, T1036.003, WINDOWS"
+    tactic = "TA0005"
+    technique = "T1036.003"
+    false_positives = "Legitimate software installers or custom applications may embed and execute renamed copies of system binaries. Review the parent process and file path for legitimacy."
+
+  events:
+    $p.metadata.event_type = "PROCESS_CREATION"
+
+    // Match processes where the internal original filename is a known system binary.
+    $p.target.process.file.original_file_name in (
+      "cmd.exe", "powershell.exe", "pwsh.exe", "cscript.exe", "wscript.exe",
+      "mshta.exe", "rundll32.exe", "regsvr32.exe", "bitsadmin.exe", "certutil.exe",
+      "msiexec.exe", "psexec.exe"
+    ) nocase
+
+    // The core detection logic: trigger if the process's file path does NOT end with its original name.
+    // This indicates the binary has been renamed.
+    not re.regex($p.target.process.file.full_path, /\\(cmd|powershell|pwsh|cscript|wscript|mshta|rundll32|regsvr32|bitsadmin|certutil|msiexec|psexec)\.exe$/ nocase)
+
+  condition:
+    $p
+
+  outcome:
+    // Risk score set to medium-high, as this is a strong indicator of evasion.
+    $risk_score = 65
+    $principal_hostname = array_distinct($p.principal.hostname)
+    $principal_user = array_distinct($p.principal.user.userid)
+    $process_name = array_distinct($p.target.process.file.name)
+    $original_name = array_distinct($p.target.process.file.original_file_name)
+    $process_path = array_distinct($p.target.process.file.full_path)
+    $command_line = array_distinct($p.target.process.command_line)
+    $parent_process_path = array_distinct($p.principal.process.file.full_path)
+    $parent_command_line = array_distinct($p.principal.process.command_line)
+}

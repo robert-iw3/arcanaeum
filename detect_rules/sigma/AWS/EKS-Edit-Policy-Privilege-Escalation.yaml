@@ -1,0 +1,27 @@
+title: AWS EKS Edit Policy Assigned to a Principal
+id: a497ce73-3bcf-45ef-ae95-bb9e15f18027
+status: experimental
+description: Detects when the `AmazonEKSEditPolicy` is associated with a principal in an EKS cluster. While not an administrative policy by name, this policy grants permissions (like creating pods) that can be abused for privilege escalation within the cluster.
+references:
+  - https://securitylabs.datadoghq.com/articles/eks-cluster-access-management-deep-dive/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.privilege_escalation
+  - attack.t1078
+  - cloud
+  - aws
+  - eks
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+        # Detects the association of a policy to a principal in EKS
+    eventName: 'AssociateAccessPolicy'
+        # Filters for the EKS Edit policy which can be used for privilege escalation
+    requestParameters.policyArn: 'arn:aws:eks::aws:cluster-access-policy/AmazonEKSEditPolicy'
+  condition: selection
+falsepositives:
+  - Legitimate assignment of the edit policy to developers or other users who require permissions to create resources like pods. This may be a common policy in some environments.
+level: medium

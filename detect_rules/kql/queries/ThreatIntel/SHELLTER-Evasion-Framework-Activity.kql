@@ -1,0 +1,60 @@
+// Name: SHELLTER Evasion Framework Activity
+// Author: RW
+// Date: 2025-08-23
+// Description: This rule detects indicators and behaviors associated with the SHELLTER evasion framework.
+// It identifies known malicious file hashes, C2 network communications, and TTPs like remapping ntdll.dll to bypass API hooks.
+// References: https://www.elastic.co/security-labs/taking-shellter
+// False Positive Sensitivity: Medium
+// Tactic: Defense Evasion, Command and Control
+// Technique: T1055, T1574.002, T1071
+
+// Define known IOCs from the report
+let shellter_hashes = dynamic([
+    "c865f24e4b9b0855b8b559fc3769239b0aa6e8d680406616a13d9a36fbbc2d30",
+    "7d0c9855167e7c19a67f800892e974c4387e1004b40efb25a2a1d25a99b03a10",
+    "b3e93bfef12678294d9944e61d90ca4aa03b7e3dae5e909c3b2166f122a14dad",
+    "da59d67ced88beae618b9d6c805f40385d0301d412b787e9f9c9559d00d2c880",
+    "70ec2e65f77a940fd0b2b5c0a78a83646dec17583611741521e0992c1bf974f1",
+    "263ab8c9ec821ae573979ef2d5ad98cda5009a39e17398cd31b0fad98d862892"
+]);
+let shellter_ips = dynamic([
+    "185.156.72.80",
+    "94.141.12.182"
+]);
+let shellter_domains = dynamic([
+    "eaglekl.digital"
+]);
+
+(union
+    // Part 1: Detect known malicious file hashes
+    (DeviceProcessEvents
+    | where SHA256 in (shellter_hashes)
+    | extend DetectionMethod = "Known SHELLTER-related hash", Tactic = "Execution", Technique = "T1204"
+    ),
+    // Part 2: Detect known C2 network indicators
+    (DeviceNetworkEvents
+    | where RemoteIP in (shellter_ips) or RemoteUrl has_any (shellter_domains)
+    | extend DetectionMethod = "Known SHELLTER-related C2", Tactic = "Command and Control", Technique = "T1071"
+    ),
+    // Part 3: Detect ntdll.dll unhooking via file mapping
+    // SHELLTER maps a fresh copy of ntdll.dll to bypass user-mode API hooks placed by security products.
+    (DeviceEvents
+    | where ActionType == "CreateFileMapping" and FileName endswith "\\ntdll.dll"
+    // FP Tuning: Legitimate security products or packers might perform this action.
+    // Consider excluding known good processes if this is noisy in your environment.
+    // | where not(InitiatingProcessFileName in~ ('legit_process1.exe', 'legit_process2.exe'))
+    | extend DetectionMethod = "Behavioral - NTDLL Remapping for Hook Evasion", Tactic = "Defense Evasion", Technique = "T1055"
+    ),
+    // Part 4: Detect suspicious preloading of modules
+    // SHELLTER can preload multiple modules to support its payload. This looks for a suspicious combination.
+    (DeviceImageLoadEvents
+    | where FileName in~ ("wininet.dll", "crypt32.dll", "advapi32.dll", "urlmon.dll")
+    | summarize LoadedModules=make_set(FileName), FirstSeen=min(Timestamp), LastSeen=max(Timestamp) by DeviceId, DeviceName, InitiatingProcessId, InitiatingProcessFileName, InitiatingProcessCommandLine
+    // The report mentions specific sets of preloaded modules. This looks for a combination of key DLLs.
+    | where array_length(LoadedModules) >= 3
+    // FP Tuning: This behavior can be common for legitimate applications like web browsers.
+    // Increase the array_length threshold or filter by unusual initiating processes to improve fidelity.
+    // | where not(InitiatingProcessFileName in~ ('chrome.exe', 'msedge.exe', 'explorer.exe'))
+    | extend DetectionMethod = "Behavioral - Suspicious Module Preloading", Tactic = "Defense Evasion", Technique = "T1574.002"
+    )
+)

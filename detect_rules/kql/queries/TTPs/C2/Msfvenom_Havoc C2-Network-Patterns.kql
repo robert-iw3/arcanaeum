@@ -1,0 +1,32 @@
+// Name: Msfvenom/Havoc C2 Stager Network Patterns
+// Author: RW
+// Date: 2025-08-02
+// Description: Detects network traffic patterns characteristic of a Metasploit stager used to deliver a Havoc C2 payload, as described in the reference article. This query looks for specific URI paths, host headers, or user agents.
+// False Positive Sensitivity: Medium. The indicators are specific to the example in the article but could be changed by an attacker. The LURI and Host Header are fairly unique. The User-Agent is generic and may cause FPs if not combined with other logic.
+
+let suspiciousUserAgent = "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36";
+
+DeviceNetworkEvents
+| where Timestamp > ago(1d)
+// Parse the User-Agent from the AdditionalFields if available.
+| extend ParsedFields = parse_json(AdditionalFields)
+| extend UserAgent = tostring(ParsedFields.UserAgent)
+// Look for network connections with specific indicators from the article.
+// An OR condition is used to catch any of the indicators.
+| where
+    // The LURI is a strong indicator.
+    RemoteUrl endswith "/blog.html" or
+    // The Host header is another strong indicator.
+    RemoteUrl has "www.factbook.com" or
+    // The User-Agent is a weaker indicator and might be noisy. It's included for completeness based on the article.
+    // Consider removing or strengthening this condition if it generates false positives.
+    UserAgent == suspiciousUserAgent
+| summarize
+    StartTime = min(Timestamp),
+    EndTime = max(Timestamp),
+    InitiatingProcess = take_any(InitiatingProcessFileName),
+    RemoteUrls = make_set(RemoteUrl, 5),
+    RemoteIPs = make_set(RemoteIP, 5),
+    DetectedUserAgent = take_any(UserAgent)
+    by DeviceId, InitiatingProcessId, InitiatingProcessCommandLine
+| project-reorder StartTime, EndTime, DeviceId, InitiatingProcess, InitiatingProcessId, InitiatingProcessCommandLine, RemoteUrls, RemoteIPs, DetectedUserAgent

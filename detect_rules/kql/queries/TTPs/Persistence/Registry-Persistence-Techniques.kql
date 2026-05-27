@@ -1,0 +1,106 @@
+// Name: Registry Persistence Techniques
+// Author: RW
+// Date: 2025-08-06
+// Description: Detects multiple rare or "forgotten" Windows registry persistence techniques in a single query.
+//              This includes Boot Verification Program, App Path Hijacking, SMSS Configuration Abuse, RDP Startup
+//              Program Hijacking, and new Credential Provider registrations.
+// False Positive Sensitivity: Medium
+// Tactics: Persistence, Credential Access, Privilege Escalation, Execution
+
+let bootVerification =
+    DeviceRegistryEvents
+    | where ActionType == "RegistryValueSet"
+    // Detects modification of the BootVerificationProgram registry key for persistence.
+    | where RegistryKey endswith @"\Control\BootVerificationProgram" and RegistryValueName == "ImagePath"
+    | where isnotempty(RegistryValueData)
+    | project
+        Timestamp,
+        DeviceName,
+        DetectionName = "Boot Verification Program Persistence",
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        RegistryKey,
+        RegistryValueName,
+        RegistryValueData,
+        PreviousRegistryValueData,
+        Description = strcat("A boot verification program was set to: ", RegistryValueData);
+let appPathHijack =
+    DeviceRegistryEvents
+    | where ActionType == "RegistryValueSet"
+    // Detects App Paths registry key modification to hijack application execution.
+    | where RegistryKey has_all (@"\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\", ".exe") and isempty(RegistryValueName)
+    | where isnotempty(RegistryValueData) and RegistryValueData contains ".exe"
+    | extend HijackedApp = tostring(split(RegistryKey, '\\')[-1])
+    | extend LauncherAppPath = RegistryValueData
+    | extend LauncherApp = trim('"', tostring(split(LauncherAppPath, '\\')[-1]))
+    // Comment: Legitimate installers use App Paths. This logic focuses on the hijack pattern where the target app name differs from the launcher app name.
+    | where HijackedApp != LauncherApp
+    | project
+        Timestamp,
+        DeviceName,
+        DetectionName = "App Path Hijacking",
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        RegistryKey,
+        RegistryValueName = "(Default)",
+        RegistryValueData,
+        PreviousRegistryValueData,
+        Description = strcat("App path for '", HijackedApp, "' was hijacked to launch '", LauncherAppPath, "'");
+let smssAbuse =
+    DeviceRegistryEvents
+    | where ActionType == "RegistryValueSet"
+    // Detects modifications to Session Manager (SMSS) registry values for early-boot persistence.
+    | where RegistryKey endswith @"\Control\Session Manager"
+    | where RegistryValueName in ("BootExecute", "PlatformExecute", "SetupExecute", "s0InitialCommand")
+    | where isnotempty(RegistryValueData)
+    | where RegistryValueData != PreviousRegistryValueData
+    | project
+        Timestamp,
+        DeviceName,
+        DetectionName = "SMSS Configuration Abuse",
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        RegistryKey,
+        RegistryValueName,
+        RegistryValueData,
+        PreviousRegistryValueData,
+        Description = strcat("SMSS registry value '", RegistryValueName, "' was modified.");
+let rdpHijack =
+    DeviceRegistryEvents
+    | where ActionType == "RegistryValueSet"
+    // Detects modifications to the RDP Startup Program registry value for persistence via RDP logins.
+    | where RegistryKey endswith @"\Control\Terminal Server\Wds\rdpwd" and RegistryValueName == "StartupPrograms"
+    | where isnotempty(RegistryValueData)
+    // Comment: The default value is 'rdpclip.exe'. Any other value is suspicious.
+    | where RegistryValueData !~ "rdpclip.exe"
+    | project
+        Timestamp,
+        DeviceName,
+        DetectionName = "RDP Startup Program Hijack",
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        RegistryKey,
+        RegistryValueName,
+        RegistryValueData,
+        PreviousRegistryValueData,
+        Description = strcat("RDP startup program set to a non-default value: ", RegistryValueData);
+let credProvider =
+    DeviceRegistryEvents
+    | where ActionType == "RegistryKeyCreated"
+    // Detects the registration of a new Logon UI Credential Provider for persistence and credential access.
+    | where RegistryKey startswith @"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Authentication\Credential Providers\"
+    | where RegistryKey matches regex @'\\{[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}\\}'$
+    | extend CredentialProviderCLSID = tostring(extract(@'({[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}})', 0, RegistryKey))
+    | project
+        Timestamp,
+        DeviceName,
+        DetectionName = "Logon UI Credential Provider Registration",
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        RegistryKey,
+        RegistryValueName = "N/A (Key Created)",
+        RegistryValueData = CredentialProviderCLSID,
+        PreviousRegistryValueData = "N/A",
+        Description = strcat("New credential provider registered with CLSID: ", CredentialProviderCLSID);
+// Union all detection sets into a single result table.
+union bootVerification, appPathHijack, smssAbuse, rdpHijack, credProvider

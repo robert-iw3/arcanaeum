@@ -1,0 +1,4 @@
+FROM python:3.12-slim
+RUN pip install strelka
+COPY integrator.py /app/integrator.py
+CMD ["python", "/app/integrator.py"]

@@ -1,0 +1,43 @@
+// Name: DNS Communication on Non-Standard Port
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects DNS protocol traffic occurring over non-standard UDP ports. This is highly anomalous as standard
+//              DNS operates over port 53. Adversaries use non-standard ports to exfiltrate data or establish command and
+//              control (C2) channels, bypassing firewall rules and network monitoring tools configured only for standard ports.
+// False Positive Sensitivity: Medium
+
+// Note: This detection requires a log source that can identify the application-layer protocol, such as a Next-Generation Firewall (NGFW), network sensor, or an advanced EDR.
+// The query uses 'CommonSecurityLog' as a generic example; table and field names may need to be adjusted for your specific data source.
+
+// --- Query Tuning ---
+// Define standard ports for DNS, mDNS, and LLMNR.
+let standard_dns_ports = dynamic([53, 5353, 5355]);
+// Allowlist legitimate processes that may exhibit this behavior.
+let process_allowlist = dynamic(["some_legit_app.exe"]);
+
+CommonSecurityLog
+| where TimeGenerated > ago(1h)
+// This is the key field. It must be populated by a device capable of Deep Packet Inspection (DPI) or protocol identification.
+// Adjust 'ApplicationProtocol' to the field name used in your log source (e.g., 'AppID', 'Service', etc.).
+| where ApplicationProtocol == "dns"
+// Focus on UDP, the protocol most commonly used for this evasion technique.
+| where Protocol == "udp"
+// Core detection logic: Trigger if the destination port is not one of the standard DNS ports.
+| where isnotempty(DestinationPort) and toint(DestinationPort) !in (standard_dns_ports)
+// Filter out any known and approved processes.
+| where SourceProcessName !in (process_allowlist)
+// Potential for false positives:
+// - Some peer-to-peer (P2P) applications or custom software might use DNS-like protocols on non-standard ports.
+// - Misconfigured internal applications or DNS servers.
+// - Investigate the source and destination to determine legitimacy before taking action.
+| project
+    TimeGenerated,
+    DeviceName,
+    SourceProcessName,
+    SourceIP,
+    DestinationIP,
+    DestinationPort,
+    ApplicationProtocol,
+    ReceiptTime,
+    RequestURL, // May contain the queried domain if available in logs
+    AdditionalExtensions // This field often contains useful, non-standard data from the source device

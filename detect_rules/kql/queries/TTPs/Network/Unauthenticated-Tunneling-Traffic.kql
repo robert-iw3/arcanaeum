@@ -1,0 +1,41 @@
+//    Unauthenticated Tunneling Traffic from External Source
+//    Vulnerable tunneling protocols (IPIP, GRE, GUE, 4in6, 6in4) accepting unauthenticated traffic from arbitrary sources can be
+//    abused for various attacks, including spoofing and DoS. Detecting such traffic is fundamental to securing network infrastructure.
+//    Tactics = "Initial Access, Defense Evasion"
+//    Techniques = "T1090"
+//    Author = "RW"
+//    Date = "2025-08-14"
+
+// Define a list of known, legitimate external peers that use tunneling protocols.
+// This is a critical step to reduce false positives. Populate this list based on your network architecture.
+let known_tunnel_peers = dynamic([]); // e.g., dynamic(["203.0.113.55", "198.51.100.10"])
+
+// Define the tunneling protocols by name and IANA protocol numbers.
+// IPIP = 4, 6in4/4in6 = 41, GRE = 47
+let tunnel_protocol_names = dynamic(["ipip", "gre", "ipv6-in-ipv4", "4", "41", "47"]);
+
+// Define the default port for GUE, as noted in the research.
+let gue_port = 6080;
+
+let timeframe = 1h;
+
+// This query requires firewall logs that provide IP protocol information.
+CommonSecurityLog
+| where TimeGenerated > ago(timeframe)
+// Focus on traffic originating from the internet. This logic assumes a standard private IP address space.
+// Adjust if your internal network uses public IP addresses.
+| where isnotempty(DestinationIP) and isnotempty(SourceIP) and ipv4_is_private(DestinationIP) and not(ipv4_is_private(SourceIP))
+// Exclude traffic from known/approved tunnel endpoints to reduce noise.
+| where SourceIP !in (known_tunnel_peers)
+// Combine the logic for IP-based tunnels and UDP-based tunnels (GUE).
+// The 'tolower' function makes the protocol name matching case-insensitive.
+| where (isnotempty(Protocol) and tolower(Protocol) in (tunnel_protocol_names)) or (tolower(Protocol) == "udp" and DestinationPort == gue_port)
+// Summarize to get an overview of the activity and reduce alert volume.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    ConnectionCount = count(),
+    TotalBytesReceived = sum(ReceivedBytes),
+    DestinationPorts = make_set(DestinationPort)
+    by InternalHost = DestinationIP, ExternalSource = SourceIP, TunnelProtocol = iif(tolower(Protocol) == "udp", "GUE", Protocol)
+| project-reorder StartTime, EndTime, InternalHost, ExternalSource, TunnelProtocol, ConnectionCount, TotalBytesReceived, DestinationPorts

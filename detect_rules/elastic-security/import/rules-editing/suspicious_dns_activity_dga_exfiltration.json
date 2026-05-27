@@ -1,0 +1,62 @@
+{
+  "rule_id": "suspicious_dns_activity_dga_exfiltration",
+  "name": "Suspicious DNS Activity (DGA/Exfiltration)",
+  "description": "Detects DNS activity indicative of Domain Generation Algorithms (DGA) or data exfiltration. This includes a high number of distinct, long, or numerically-rich queries, and an excessive number of TXT record queries, while filtering out known benign domains.",
+  "severity": "high",
+  "enabled": true,
+  "language": "esql",
+  "query": "from * | where (event.dataset = 'stream.dns' OR tags = 'dns') and dns.question.name != 'localhost' | eval query_len = LENGTH(dns.question.name), numeric_chars = REGEXP_REPLACE(dns.question.name, '[^0-9]', ''), numeric_ratio = LENGTH(numeric_chars) / query_len | stats total_queries = COUNT(), distinct_query_count = COUNT_DISTINCT(dns.question.name), sample_queries = ARRAY_AGG(dns.question.name), query_types = ARRAY_AGG(dns.question.type), avg_query_len = AVG(query_len), max_numeric_ratio = MAX(numeric_ratio), total_txt_queries = COUNT(case(dns.question.type = 'TXT', 1, NULL)) BY source.ip, dns.question.registered_domain | where (distinct_query_count > 15 and avg_query_len > 20 and max_numeric_ratio > 0.2) OR (total_txt_queries > 10 and distinct_query_count > 5) | where NOT (dns.question.registered_domain like '%.amazonaws.com' OR dns.question.registered_domain like '%.google.com' OR dns.question.registered_domain like '%.microsoft.com' OR dns.question.registered_domain like '%.icloud.com' OR dns.question.registered_domain like '%.akamai.net')",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0011",
+        "name": "Command and Control",
+        "reference": "https://attack.mitre.org/tactics/TA0011/"
+      },
+      "technique": [
+        {
+          "id": "T1568",
+          "name": "Domain Generation Algorithms",
+          "reference": "https://attack.mitre.org/techniques/T1568/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0010",
+        "name": "Exfiltration",
+        "reference": "https://attack.mitre.org/tactics/TA0010/"
+      },
+      "technique": [
+        {
+          "id": "T1048",
+          "name": "Exfiltration Over Alternative Protocol",
+          "reference": "https://attack.mitre.org/techniques/T1048/"
+        }
+      ]
+    }
+  ],
+  "interval": "30m",
+  "from": "now-30m",
+  "max_signals": 100,
+  "risk_score": 85,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://www.elastic.co/guide/en/security/current/dns-tunneling.html"
+  ],
+  "tags": [
+    "DNS",
+    "DGA",
+    "Exfiltration",
+    "Command and Control"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "source.ip, dns.question.registered_domain"
+}

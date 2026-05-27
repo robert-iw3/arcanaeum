@@ -1,0 +1,33 @@
+title: AWS S3 Public Access Block Disabled
+id: f91de299-b7b1-4516-9d4a-c6b46e6ce3ed
+status: experimental
+description: >-
+  Detects attempts to disable or weaken the S3 Public Access Block settings at the bucket or account level. Attackers may perform this action to make S3 buckets or their objects public, facilitating data exfiltration or exposure.
+references:
+  - https://rhinosecuritylabs.com/aws/s3-ransomware-part-2-prevention-and-defense/
+  - https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutPublicAccessBlock.html
+author: RW
+date: 2025-08-19
+tags:
+  - attack.defense_evasion
+  - attack.t1562
+logsource:
+  product: aws
+  service: s3
+detection:
+  selection_event:
+    # Detects API calls to modify public access block settings for a bucket or an entire account
+    eventName:
+      - 'PutBucketPublicAccessBlock'
+      - 'PutAccountPublicAccessBlock'
+  selection_disabled:
+    # Checks if any of the four block settings are being set to 'false'
+    - requestParameters.PublicAccessBlockConfiguration.BlockPublicAcls: 'false'
+    - requestParameters.PublicAccessBlockConfiguration.IgnorePublicAcls: 'false'
+    - requestParameters.PublicAccessBlockConfiguration.BlockPublicPolicy: 'false'
+    - requestParameters.PublicAccessBlockConfiguration.RestrictPublicBuckets: 'false'
+  condition: selection_event and 1 of selection_disabled
+falsepositives:
+  - Legitimate administrative actions to intentionally change public access settings. These changes should be rare and well-documented.
+  - Automated configuration tools (e.g., Terraform, CloudFormation) making intended changes. It is recommended to filter out events originating from known service accounts or roles associated with these tools.
+level: medium

@@ -1,0 +1,42 @@
+// Name: Process Accessing Physical Memory for Kernel Modification
+// Author: RW
+// Date: 2025-08-14
+// Description: Detects processes attempting to open a handle to PhysicalMemory. This is a common step for malware or rootkits
+// attempting to bypass security controls like PatchGuard by modifying critical kernel structures (e.g., IDT, GDT, SSDT).
+// False Positive Sensitivity: Medium. Legitimate diagnostic tools, debugging software, and some security products may access physical memory.
+// Tuning is required.
+
+DeviceEvents
+// Look for file creation events, which includes opening handles to devices.
+| where ActionType == "CreateFile"
+// Target the PhysicalMemory device object.
+| where FolderPath == "\\device\\" and FileName == "physicalmemory"
+// Exclude common system processes and known good tools to reduce noise.
+// FP Mitigation: This list should be customized for your environment. Add any legitimate diagnostic or security tools that access physical memory.
+| where InitiatingProcessFileName !in~ (
+    "csrss.exe",
+    "lsass.exe",
+    "wininit.exe",
+    "services.exe",
+    "svchost.exe",
+    "procexp.exe",
+    "procmon.exe",
+    "windbg.exe",
+    "livekd.exe",
+    "vmms.exe"
+)
+// Exclude processes signed by Microsoft, as they are less likely to be malicious.
+// Note: An attacker could inject into a legitimate Microsoft process, which might bypass this filter.
+| where InitiatingProcessSignerType != "Windows"
+| project
+    Timestamp,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessFolderPath,
+    InitiatingProcessCommandLine,
+    InitiatingProcessSignerType,
+    InitiatingProcessId,
+    ReportId,
+    ActionType,
+    FileName,
+    FolderPath

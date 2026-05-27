@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: selinux-guardian
+spec:
+  selector:
+    matchLabels:
+      app: selinux-guardian
+  template:
+    spec:
+      hostPID: true
+      hostNetwork: true
+      securityContext:
+        runAsUser: 0
+      containers:
+        - name: guardian
+          image: selinux-guardian:latest
+          command: ["python3", "/configure_selinux.py", "--mode=setup"]
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: host-root
+              mountPath: /host
+            - name: selinux-fs
+              mountPath: /sys/fs/selinux
+            - name: audit-log
+              mountPath: /var/log/audit
+      volumes:
+        - name: host-root
+          hostPath:
+            path: /
+        - name: selinux-fs
+          hostPath:
+            path: /sys/fs/selinux
+        - name: audit-log
+          hostPath:
+            path: /var/log/audit

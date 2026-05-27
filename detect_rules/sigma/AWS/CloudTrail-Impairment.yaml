@@ -1,0 +1,24 @@
+title: AWS CloudTrail Impairment
+description: Detects attempts to disable or impair AWS CloudTrail logging by deleting a trail, stopping logging, or updating a trail's configuration. This is a common defense evasion technique used by adversaries to hide their activities.
+references:
+    - https://stratus-red-team.cloud/attack-techniques/AWS/aws.defense-evasion.cloudtrail-delete/
+    - https://stratus-red-team.cloud/attack-techniques/AWS/aws.defense-evasion.cloudtrail-stop/
+author: RW
+date: 2025-08-19
+tags:
+    - attack.t1562.008
+    - attack.defense_evasion
+logsource:
+    product: aws
+    service: cloudtrail
+detection:
+    selection:
+        # CloudTrail events that indicate potential tampering or disabling of logging
+        eventName:
+            - DeleteTrail
+            - StopLogging
+            - UpdateTrail
+    condition: selection
+falsepositives:
+    - Legitimate administrative actions to reconfigure or decommission CloudTrail trails. The `UpdateTrail` event can be common during normal operations. To reduce noise, consider creating more specific rules for `UpdateTrail` that look for changes like disabling multi-region support (`requestParameters.isMultiRegionTrail: false`) or log file validation (`requestParameters.enableLogFileValidation: false`).
+level: high

@@ -1,0 +1,36 @@
+// Name: MFA Bypass via Legacy Authentication Protocols
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects successful authentications using legacy protocols where MFA was the required authentication method.
+//              This pattern indicates a potential MFA bypass, as legacy protocols often do not support MFA, and could be
+//              exploited after a successful password spray.
+// False Positive Sensitivity: Medium
+// Tags:
+// - Tactic: Defense Evasion
+// - Technique: T1556.006, Multi-Factor Authentication
+
+let timeframe = 1d;
+// List of legacy authentication protocols. This list can be customized.
+let legacyProtocols = dynamic(['IMAP4', 'POP3', 'SMTP', 'Exchange ActiveSync', 'Exchange Web Services', 'MAPI Over HTTP', 'RPC', 'AutoDiscover', 'Other clients']);
+
+SigninLogs
+| where TimeGenerated > ago(timeframe)
+// Filter for successful sign-ins.
+| where ResultType == 0
+// Filter for sign-ins where MFA was the determined authentication requirement.
+| where AuthenticationRequirement == "multiFactorAuthentication"
+// Filter for sign-ins that used a legacy authentication client app.
+| where ClientApp in (legacyProtocols)
+// FP Tuning: This activity may be legitimate if your organization still uses legacy authentication for specific applications or service accounts.
+// It is highly recommended to disable legacy authentication entirely.
+// If needed, you can exclude known accounts or applications:
+// | where UserPrincipalName !in ("service_account@domain.com")
+| project
+    TimeGenerated,
+    UserPrincipalName,
+    IPAddress,
+    ClientApp,
+    AppDisplayName,
+    Location,
+    AuthenticationRequirement,
+    UserAgent

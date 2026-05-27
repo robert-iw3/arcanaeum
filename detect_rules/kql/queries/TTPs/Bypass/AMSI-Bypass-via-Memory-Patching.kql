@@ -1,0 +1,44 @@
+// name: AMSI Bypass via Memory Patching
+// id: 1a7b3c9d-8e5f-4a2b-9c1d-6f8a7b3c9d1e
+// version: 1
+// date: 2025-07-31
+// author: RW
+// description: Detects attempts to patch the AmsiScanBuffer function in memory to bypass AMSI. This technique involves a process calling VirtualProtect or a similar API to change the memory permissions of amsi.dll to be writable (e.g., PAGE_EXECUTE_READWRITE), allowing the adversary to overwrite the function and disable AMSI scanning.
+// data_source:
+// - EDR API Monitoring
+// how_to_implement: Ensure your EDR is ingesting API call data, specifically for memory protection changes like VirtualProtect or NtProtectVirtualMemory. The logs must contain the target module path (e.g., amsi.dll) and the new memory protection flags being set. Field names like `ApiFunction`, `TargetModulePath`, and `NewMemoryProtection` should be mapped to your EDR's schema.
+// known_false_positives: Some legitimate software, such as debuggers, security research tools, or application compatibility shims, may perform this action. It is important to investigate the initiating process and filter known benign applications to reduce noise.
+// references:
+// mitre_attack_id:
+// - T1562.001
+// analytic_story:
+// - AMSI Bypass
+
+// Define the table containing EDR API call events. Replace with your specific table.
+let edr_events = materialize(union isfuzzy=true
+    (DeviceEvents), // MDE table
+    (SecurityEvent) // Other potential tables
+    );
+edr_events
+// Medium comment: Filter for API calls that change memory permissions.
+| where ActionType has_any ("VirtualProtect", "NtProtectVirtualMemory") or ApiFunction in~ ("VirtualProtect", "NtProtectVirtualMemory")
+// Medium comment: The core of the technique is making amsi.dll writable to patch it.
+| where
+    // The target module must be amsi.dll. Field name may vary (e.g., ModuleName, TargetModulePath, FileName).
+    (FileName endswith "\\amsi.dll" or TargetModulePath endswith "\\amsi.dll") and
+    // The new permissions must allow writing to an executable page.
+    // Field name may vary (e.g., AdditionalFields.MemProtection, NewProtectionFlags).
+    (AdditionalFields has "ExecuteReadWrite" or NewMemoryProtection has "PAGE_EXECUTE_READWRITE")
+// Medium comment: Project key fields for investigation and alerting.
+| project
+    TimeGenerated,
+    DeviceName,
+    ProcessName = InitiatingProcessFileName,
+    ParentProcessName = InitiatingProcessParentFileName,
+    ProcessCommandLine = InitiatingProcessCommandLine,
+    User = InitiatingProcessAccountName,
+    TargetModulePath = iif(isnotempty(FileName), FileName, TargetModulePath),
+    NewMemoryProtection = iif(isnotempty(NewMemoryProtection), NewMemoryProtection, tostring(AdditionalFields)),
+    ApiFunction = ActionType
+// Medium comment: Consider filtering for common legitimate processes that may exhibit this behavior.
+// | where ProcessName !in~ ("known_debugger.exe", "legit_tool.exe")

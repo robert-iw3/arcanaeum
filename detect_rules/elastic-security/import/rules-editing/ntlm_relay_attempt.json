@@ -1,0 +1,50 @@
+{
+  "rule_id": "ntlm_reflection_attack_detection",
+  "name": "Potential NTLM Reflection Attack",
+  "description": "Detects network NTLM authentication (Event ID 4624, Logon Type 3) where the source workstation and destination hostname are identical. This behavior is indicative of an NTLM relay loop or reflection attack.",
+  "severity": "high",
+  "enabled": true,
+  "language": "esql",
+  "query": "from winlogbeat-* | where winlog.channel == 'Security' and winlog.event_id == '4624' and winlog.event_data.LogonType == '3' and winlog.event_data.AuthenticationPackageName == 'NTLM' and source.ip != '127.0.0.1' and source.ip != '::1' | eval dest_host = LOWER(SPLIT(host.name, '.')[0]), src_workstation = LOWER(SPLIT(winlog.event_data.WorkstationName, '.')[0]) | where dest_host == src_workstation and dest_host != '' and dest_host != '-' | stats count() by dest_host, source.ip, winlog.event_data.TargetUserName, winlog.event_data.SubjectUserName",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0008",
+        "name": "Lateral Movement",
+        "reference": "https://attack.mitre.org/tactics/TA0008/"
+      },
+      "technique": [
+        {
+          "id": "T1187",
+          "name": "NTLM Reflection",
+          "reference": "https://attack.mitre.org/techniques/T1187/"
+        }
+      ]
+    }
+  ],
+  "interval": "10m",
+  "from": "now-10m",
+  "max_signals": 100,
+  "risk_score": 75,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://docs.microsoft.com/en-us/windows/security/threat-protection/auditing/event-4624",
+    "https://attack.mitre.org/techniques/T1187/"
+  ],
+  "tags": [
+    "Active Directory",
+    "NTLM",
+    "Lateral Movement"
+  ],
+  "author": [
+    "RW"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "dest_host, source.ip, winlog.event_data.TargetUserName, winlog.event_data.SubjectUserName"
+}

@@ -1,0 +1,60 @@
+// Name: Login Script Abuse
+// Author: RW
+// Date: 2025-08-17
+// Adversaries may abuse login scripts for persistence or to execute malicious commands. This can involve
+// modifying existing scripts stored on a domain controller's SYSVOL share or embedding suspicious commands
+// that are executed when a user logs in. This rule detects both the modification of common login script
+// files in SYSVOL and the execution of suspicious child processes by the Group Policy script handler (gpscript.exe).
+
+// Define a list of suspicious child processes often used for discovery or execution
+let suspicious_child_processes = dynamic([
+    "powershell.exe", "pwsh.exe", "cmd.exe", "cscript.exe", "wscript.exe",
+    "whoami.exe", "net.exe", "net1.exe", "nltest.exe", "systeminfo.exe",
+    "quser.exe", "qwinsta.exe", "reg.exe", "certutil.exe", "bitsadmin.exe"
+]);
+
+(union isouter=true
+    (
+        // Part 1: Detect modification of GPO-defined login scripts in SYSVOL
+        DeviceFileEvents
+        | where ActionType in ("FileCreated", "FileRenamed")
+        // Login scripts are often stored in the SYSVOL share for domain-wide execution
+        | where FolderPath contains "\\SYSVOL\\" and FolderPath contains "\\scripts\\"
+        // Filter for common script file types
+        | where FileName endswith ".bat" or FileName endswith ".cmd" or FileName endswith ".vbs" or FileName endswith ".ps1"
+        // FP Tuning: Exclude known administrative tools that manage GPOs and file replication services.
+        | where InitiatingProcessFileName !in~ ("gpmc.exe", "gpoadmin.exe", "dfsrc.exe")
+        | extend
+            DetectionMethod = "Login Script File Modified in SYSVOL",
+            SuspiciousProcess = FileName,
+            SuspiciousCommandLine = strcat("File '", FileName, "' created/renamed in ", FolderPath),
+            AccountName = tostring(InitiatingProcessAccountName)
+        | project TimeGenerated, DeviceName, AccountName, InitiatingProcessFileName, DetectionMethod, SuspiciousProcess, SuspiciousCommandLine
+    ),
+    (
+        // Part 2: Detect suspicious processes launched by the GPO script handler
+        DeviceProcessEvents
+        | where ActionType == "ProcessCreated"
+        // gpscript.exe is the engine that processes GPO-based login scripts
+        | where InitiatingProcessFileName =~ "gpscript.exe"
+        // Look for suspicious child processes being launched by the script
+        | where FileName in~ (suspicious_child_processes)
+        // FP Tuning: Legitimate scripts may call these tools. Exclude known good command lines if they cause noise.
+        // Example: | where ProcessCommandLine !contains "net use X: \\\\server\\share"
+        | extend
+            DetectionMethod = "Suspicious Process Launched by Login Script",
+            SuspiciousProcess = FileName,
+            SuspiciousCommandLine = ProcessCommandLine
+        | project TimeGenerated, DeviceName, AccountName, InitiatingProcessFileName, DetectionMethod, SuspiciousProcess, SuspiciousCommandLine
+    )
+)
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    Detections = make_set(DetectionMethod, 10),
+    SuspiciousProcesses = make_set(SuspiciousProcess, 10),
+    CommandLines = make_set(SuspiciousCommandLine, 10)
+    by DeviceName, AccountName, InitiatingProcessFileName
+| extend
+    Tactic = "Persistence, Execution",
+    Technique = "T1037.001"

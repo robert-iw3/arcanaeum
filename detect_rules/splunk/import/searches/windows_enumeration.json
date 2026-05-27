@@ -1,0 +1,17 @@
+[
+  {
+    "name": "Windows Reconnaissance Commands",
+    "description": "Detects the execution of various reconnaissance commands on a Windows host by monitoring event logs.",
+    "search": "index=* source=\"WinEventLog:*\" AND (CommandLine=\"*ipconfig /all*\" OR CommandLine=\"*netsh interface show interface*\" OR CommandLine=\"*netsh interface firewall show all*\" OR CommandLine=\"*arp -a*\" OR CommandLine=\"*nbtstat -n*\" OR CommandLine=\"*net config*\" OR CommandLine=\"*net group /dom*\" OR CommandLine=\"*net group \\\"Domain Admins\\\" /dom*\" OR CommandLine=\"*route print*\" OR CommandLine=\"*curl www.ip-api.com*\" OR CommandLine=\"*dnscmd*\" OR CommandLine=\"*ldifde.exe -f c:\\\\windows\\\\temp\\\\.txt -p subtree*\" OR CommandLine=\"*netlocalgroup*\" OR CommandLine=\"*netsh interface portproxy show*\" OR CommandLine=\"*netstat -ano*\" OR CommandLine=\"*reg query hklm\\\\software\\\\*\" OR CommandLine=\"*systeminfo*\" OR CommandLine=\"*tasklist /v *\" OR CommandLine=\"*wmic volume list brief*\" OR CommandLine=\"*wmic service brief*\" OR CommandLine=\"*wmic product list brief*\" OR CommandLine=\"*wmic baseboard list brief*\" OR CommandLine=\"*wevtutil qe security /rd:true /f:text /q:*[System[(EventID=4624) *\")",
+    "is_scheduled": 1,
+    "disabled": 0,
+    "cron_schedule": "*/30 * * * *",
+    "dispatch.earliest_time": "-24h",
+    "dispatch.latest_time": "now",
+    "sharing": "global",
+    "acl": {
+      "read": ["power", "admin"],
+      "write": ["admin"]
+    }
+  }
+]

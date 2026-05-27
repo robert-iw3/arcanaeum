@@ -1,0 +1,62 @@
+// Name: Large-Scale Data Transfer via AzCopy or Storage Explorer
+// Author: RW
+// Date: 2025-10-26
+// Description: Detects potential data exfiltration from Azure Blob Storage using common tools like AzCopy or Azure Storage Explorer. The detection flags two suspicious patterns: 1) A large volume of data or a high number of files being downloaded from a single IP address. 2) Files being written to the '$web' container, which is always publicly accessible and can be used to stage data for exfiltration.
+// Tactics: Exfiltration, Collection
+// Techniques: T1567.002, T1537
+// References: https://www.microsoft.com/en-us/security/blog/2025/10/20/inside-the-attack-chain-threat-activity-targeting-azure-blob-storage/
+// False Positive Sensitivity: Medium
+
+let timeframe = 1h;
+// Define thresholds for large-scale download activity.
+// Tune these values based on your environment's baseline. Legitimate data transfers may exceed these limits.
+let dataThreshold_MB = 1024; // 1 GB
+let fileCountThreshold = 1000;
+
+// Define a threshold for writes to the $web container. Any write can be suspicious, but this can be tuned.
+let webWriteFileCountThreshold = 0;
+
+// Placeholder for trusted IP ranges (e.g., corporate network, VPN, known data processing nodes).
+let IP_Allowlist = dynamic([]);
+// Placeholder for trusted user/service principal Object IDs that perform legitimate large-scale data transfers.
+let Caller_Allowlist = dynamic([]);
+
+StorageBlobLogs
+| where TimeGenerated > ago(timeframe)
+// Filter for successful operations initiated by AzCopy or Storage Explorer.
+| where StatusCode / 100 == 2 // e.g., 200, 201, 202
+| where UserAgentHeader has "AzCopy" or UserAgentHeader has "Microsoft Azure Storage Explorer"
+// Filter out known trusted callers and IPs to reduce false positives.
+| where not(ipv4_is_in_any_range(CallerIpAddress, IP_Allowlist)) and not(RequesterObjectId in (Caller_Allowlist))
+// Identify the two suspicious patterns: large-scale download and writes to the $web container.
+| extend
+    isWebContainerWrite = OperationName in ("PutBlob", "CopyBlob", "PutBlockList") and ObjectName startswith "$web/",
+    isGetBlobOperation = OperationName == "GetBlob"
+| where isWebContainerWrite or isGetBlobOperation
+// Aggregate activity by source IP and storage account to assess the scale.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    TotalDataDownloaded_MB = round(sum(iff(isGetBlobOperation, ResponseBodySize, 0)) / 1024.0 / 1024.0, 2),
+    TotalFilesDownloaded = dcountif(ObjectName, isGetBlobOperation),
+    TotalFilesWrittenToWeb = dcountif(ObjectName, isWebContainerWrite),
+    SampleDownloadedFiles = make_set_if(ObjectName, isGetBlobOperation, 5),
+    SampleWebContainerFiles = make_set_if(ObjectName, isWebContainerWrite, 5),
+    Operations = make_set(OperationName, 10)
+    by CallerIpAddress, AccountName, UserAgentHeader, AuthenticationType, RequesterObjectId
+// Alert if any of the defined thresholds are met.
+| where TotalFilesWrittenToWeb > webWriteFileCountThreshold or TotalDataDownloaded_MB > dataThreshold_MB or TotalFilesDownloaded > fileCountThreshold
+| project
+    StartTime,
+    EndTime,
+    CallerIpAddress,
+    AccountName,
+    UserAgentHeader,
+    AuthenticationType,
+    RequesterObjectId,
+    TotalDataDownloaded_MB,
+    TotalFilesDownloaded,
+    TotalFilesWrittenToWeb,
+    SampleDownloadedFiles,
+    SampleWebContainerFiles,
+    Operations

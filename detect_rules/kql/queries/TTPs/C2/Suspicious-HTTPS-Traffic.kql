@@ -1,0 +1,107 @@
+// name C2 Traffic via Suspicious HTTP/S Patterns
+// author RW
+// description
+//   This detection identifies potential Command and Control (C2) traffic over HTTP/S by looking for a combination of suspicious indicators.
+//   The rule flags traffic from non-standard user agents when combined with other anomalies like unusual HTTP methods (not GET/POST),
+//   content types indicative of binary data transfer, or long connection times (long polling). Such combinations are often used by malware
+//   and red team tools to blend in with legitimate traffic while exfiltrating data or receiving commands.
+// tags
+// - T1071.001
+// - T1102
+// severity Medium
+// false_positives
+// - Legitimate applications or scripts that use non-browser user agents for API calls may be flagged.
+// - Some legitimate software update mechanisms might use 'application/octet-stream'.
+// - Network monitoring tools or specific applications might hold connections open, triggering the long polling logic.
+// - Tuning the 'UserAgentAllowList' and 'DestinationAllowList' is recommended to reduce noise from known benign sources.
+// datasources
+// - CommonSecurityLog (Web Proxy, Firewall)
+// - DeviceNetworkEvents
+//
+// Define a list of known legitimate but non-browser User-Agents to exclude.
+// This list should be customized for your environment to allow known good applications.
+
+let UserAgentAllowList = dynamic([
+    "Microsoft-CryptoAPI/",
+    "Microsoft-WinRM",
+    "Windows-Update-Agent",
+    "Microsoft-Delivery-Optimization",
+    "SCCM"
+]);
+// Define a list of known suspicious User-Agents associated with tools.
+let SuspiciousUserAgents = dynamic([
+    "curl",
+    "wget",
+    "python-requests",
+    "Go-http-client",
+    "powershell",
+    "bitsadmin",
+    "winhttp",
+    "Binalyze",
+    "masscan"
+]);
+// Define a threshold for long polling in milliseconds (e.g., 30 seconds).
+// This may need tuning based on your environment's baseline.
+let LongPollingThreshold = 30000;
+// Define a list of suspicious HTTP methods not typically used in user web browsing.
+let SuspiciousHttpMethods = dynamic(["PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH"]);
+// Define a list of suspicious content types often used for binary data.
+let SuspiciousContentTypes = dynamic(["application/octet-stream", "application/x-msdownload"]);
+// Define a list of destination domains/IPs to exclude from this rule.
+let DestinationAllowList = dynamic([""]); // Add known good API endpoints or update servers.
+CommonSecurityLog
+| where TimeGenerated > ago(1d)
+// This rule is designed for web proxy logs. Filter for your specific DeviceProduct if possible.
+// Example: | where DeviceProduct in ("Zscaler", "PAN-OS", "Squid")
+| where isnotempty(RequestURL) and isnotempty(UserAgent)
+// Exclude known good destinations and user agents.
+| where not(DestinationHostName has_any (DestinationAllowList) or DestinationIP has_any (DestinationAllowList))
+| where not(UserAgent has_any (UserAgentAllowList))
+// The TimeTaken field name can vary (e.g., 'ElapsedTime', 'TimeElapsed'). Adjust as needed for your log source.
+| where isnotempty(TimeTaken)
+// Calculate flags for different suspicious characteristics.
+| extend
+    // Flag 1: Non-standard or suspicious User-Agent.
+    IsSuspiciousUA = UserAgent has_any (SuspiciousUserAgents) or not(UserAgent startswith "Mozilla/5.0"),
+    // Flag 2: Suspicious HTTP Method (not common for user browsing).
+    IsSuspiciousMethod = HttpMethod in (SuspiciousHttpMethods),
+    // Flag 3: Suspicious Content-Type indicating binary transfer.
+    IsSuspiciousContentType = HttpContentType has_any (SuspiciousContentTypes),
+    // Flag 4: Long connection time, indicative of long polling.
+    IsLongPolling = tolong(TimeTaken) > LongPollingThreshold
+// Core detection logic: A suspicious UA combined with at least one other suspicious indicator.
+| where IsSuspiciousUA and (IsSuspiciousMethod or IsSuspiciousContentType or IsLongPolling)
+// Summarize to reduce noise, grouping by key indicators.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    EventCount = count(),
+    DistinctURLs = make_set(RequestURL, 5),
+    DistinctMethods = make_set(HttpMethod),
+    DistinctContentTypes = make_set(HttpContentType),
+    TotalBytesSent = sum(SentBytes),
+    TotalBytesReceived = sum(ReceivedBytes),
+    MaxTimeTaken = max(tolong(TimeTaken))
+    by
+    SourceUserID,
+    SourceIp,
+    DestinationIp,
+    DestinationHostName,
+    UserAgent,
+    IsSuspiciousUA,
+    IsSuspiciousMethod,
+    IsSuspiciousContentType,
+    IsLongPolling
+| project-reorder
+    StartTime,
+    EndTime,
+    EventCount,
+    SourceUserID,
+    SourceIp,
+    DestinationIp,
+    DestinationHostName,
+    UserAgent,
+    IsSuspiciousUA,
+    IsSuspiciousMethod,
+    IsSuspiciousContentType,
+    IsLongPolling

@@ -1,0 +1,35 @@
+// name: AMSI Bypass via NtSetContextThread
+// id: f5d1e2c3-a4b5-4c6d-8e9f-0a1b2c3d4e5f
+// version: 1
+// date: 2025-07-31
+// author: RW
+// description: Detects the use of the `NtSetContextThread` or `SetThreadContext` API call. Adversaries can leverage this API to set hardware breakpoints on sensitive functions, such as `amsi.dll!AmsiScanBuffer`, as a method of bypassing AMSI. This technique involves modifying the debug registers (Dr0-Dr7) within the thread's CONTEXT structure to hook the function and redirect execution, effectively neutralizing the security control without patching it in memory. This activity can be monitored by observing Event ID 4 from the `Microsoft-Windows-Kernel-Audit-API-Calls` ETW provider.
+// data_source:
+// - EDR API Monitoring
+// - Microsoft-Windows-Kernel-Audit-API-Calls: 4
+// how_to_implement: Ensure your EDR is ingesting API call data, specifically for `SetThreadContext` or `NtSetContextThread`. For Microsoft Sentinel, this data can be collected via the AMA connector with a data collection rule for the `Microsoft-Windows-Kernel-Audit-API-Calls/Operational` ETW provider (Event ID 4), which populates the `DeviceEvents` table.
+// known_false_positives: Legitimate software, such as debuggers (e.g., WinDbg, x64dbg), some anti-cheat systems for games, and certain performance monitoring or security tools, may use `SetThreadContext` for valid purposes. It is crucial to investigate the context of the process making the call and filter out known benign applications in your environment.
+// references:
+// mitre_attack_id:
+// - T1562.001
+// analytic_story:
+// - AMSI Bypass
+
+DeviceEvents
+// Medium comment: Filter for the SetThreadContext API call, which is used to modify a thread's context, including debug registers.
+| where ActionType in~ ("SetThreadContext", "ApiCall")
+    and (ActionType !~ "ApiCall" or ApiFunction in~ ("SetThreadContext", "NtSetContextThread"))
+// Medium comment: Project key fields for investigation and alerting.
+| project
+    TimeGenerated,
+    DeviceName,
+    ActionType,
+    ApiFunction,
+    ProcessName = InitiatingProcessFileName,
+    ParentProcessName = InitiatingProcessParentFileName,
+    ProcessCommandLine = InitiatingProcessCommandLine,
+    User = InitiatingProcessAccountName,
+    ProcessId = InitiatingProcessId,
+    TargetThreadId = ThreadId
+// Medium comment: Consider filtering for common legitimate processes that may exhibit this behavior.
+// | where ProcessName !in~ ("windbg.exe", "x64dbg.exe", "ida.exe", "legit_tool.exe")

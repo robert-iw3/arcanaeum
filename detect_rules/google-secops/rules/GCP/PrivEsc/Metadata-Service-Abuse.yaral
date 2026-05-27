@@ -1,0 +1,46 @@
+rule gcp_excessive_metadata_service_access {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects a high volume of requests to the GCP instance metadata service from a single source process. This behavior can indicate an attacker performing reconnaissance to steal credentials, SSH keys, or other sensitive data for privilege escalation and lateral movement."
+    tags = "GCP, METADATA, RECONNAISSANCE, CREDENTIAL_ACCESS"
+    tactic = "TA0007, TA0006"
+    technique = "T1552.005"
+    false_positives = "Legitimate startup scripts or applications that frequently query the metadata service. Monitoring tools or custom agents might also generate a high volume of requests. Tuning may be required to exclude known benign processes or hosts."
+
+  events:
+    // Filter for network connections to the GCP metadata service IP or hostname
+    $network.metadata.event_type = "NETWORK_CONNECTION"
+    (
+      $network.target.ip = "169.254.169.254" or
+      $network.target.hostname = "metadata.google.internal"
+    )
+
+    // Define match variables for aggregation
+    $network.principal.hostname = $hostname
+    $network.principal.process.command_line = $command_line
+    $network.principal.user.userid = $user
+
+    // Capture the URL for counting distinct paths, indicating enumeration
+    $network.network.http.url = $url
+
+    // To reduce noise, consider excluding known Google agents that legitimately access the metadata service.
+    // and not re.regex($network.principal.process.file.path, `/google_guest_agent|/google_accounts_daemon/`)
+
+  match:
+    // Group events by source host and process command line over a 10 minute window
+    $hostname, $command_line over 10m
+
+  outcome:
+    $risk_score = 45
+    $principal_hostname = array_distinct($hostname)
+    $principal_user = array_distinct($user)
+    $principal_process_command_line = array_distinct($command_line)
+    $parent_process_command_line = array_distinct($network.principal.process.parent_process.command_line)
+    $event_count = count($network.metadata.id)
+    $distinct_urls_accessed = count_distinct($url)
+
+  condition:
+    // Alert if a high number of connections are made or a high number of distinct URLs are accessed
+    $event_count > 30 or $distinct_urls_accessed > 15
+}

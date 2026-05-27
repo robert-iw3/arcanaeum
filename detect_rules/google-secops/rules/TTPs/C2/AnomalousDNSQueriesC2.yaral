@@ -1,0 +1,72 @@
+rule AnomalousDNSQueriesC2 {
+  meta:
+    name = "Anomalous DNS Queries Indicative of C2"
+    author = "RW"
+    description = "Detects potential C2 activity over DNS by identifying anomalous patterns like high NXDOMAIN responses, DGA behavior, suspicious TXT record use, and unusually long query names."
+    tags = "T1071.004, T1568.002, T1048"
+    severity = "MEDIUM"
+    false_positives = "CDNs, ad networks, legitimate software, security scanners. Tune thresholds and DomainAllowList."
+
+  // Define detection thresholds (adjust as needed in your Chronicle environment)
+  strings:
+    $nxdomain_threshold = 20
+    $distinct_subdomain_threshold = 10
+    $avg_query_length_threshold = 40
+    $txt_query_threshold = 2
+
+  events:
+    // Filter for DNS events and exclude localhost, PTR records, and allowlisted domains
+    $dns_event.metadata.event_type = "NETWORK_DNS"
+    $dns_event.network.dns.questions.name != "localhost"
+    $dns_event.network.dns.questions.name contains "." // Ensure it's a domain name, not just a label
+    not $dns_event.network.dns.questions.name contains "in-addr.arpa"
+    not $dns_event.network.dns.questions.name contains "ip6.arpa"
+    $dns_event.network.dns.questions.name !in %dns_domain_allowlist // Use a Chronicle reference list
+
+  match:
+    // Aggregate DNS queries by Client IP, Parent Domain, and a time window.
+    $dns_event.principal.ip, $parent_domain
+    group by $dns_event.principal.ip, $parent_domain
+    interval 1h on $dns_event.metadata.event_timestamp
+
+  outcome:
+    // Calculate metrics and apply detection logic.
+    $nxdomain_count = count_distinct(if($dns_event.network.dns.response_code = "NXDomain", $dns_event.metadata.event_id))
+    $distinct_subdomains = count_distinct($dns_event.network.dns.questions.name)
+    $txt_query_count = count_distinct(if($dns_event.network.dns.questions.type = "TXT", $dns_event.metadata.event_id))
+    $avg_query_length = avg(strlen($dns_event.network.dns.questions.name))
+
+    // Define boolean flags based on the detection thresholds
+    $is_high_nxdomain = $nxdomain_count > $nxdomain_threshold
+    $is_high_distinct_ratio = $distinct_subdomains > $distinct_subdomain_threshold and (todouble($distinct_subdomains) / count($dns_event.metadata.event_id) > 0.8)
+    $is_suspicious_txt = $txt_query_count > $txt_query_threshold
+    $is_long_query = $avg_query_length > $avg_query_length_threshold
+
+    // Extracting parent domain. Chronicle UDM does not natively support a direct 'parent domain' field,
+    $parent_domain = regexp_extract($dns_event.network.dns.questions.name, "([^.]+\\.[^.]+)$")
+
+    // Collect sample queries for context in the alert.
+    $sample_queries = array($dns_event.network.dns.questions.name) limit 5
+
+  condition:
+    // Trigger an alert if any of the suspicious conditions are met.
+    $is_high_nxdomain or $is_high_distinct_ratio or $is_suspicious_txt or $is_long_query
+}
+
+// Reference Lists:
+// Create a Chronicle Reference List named `dns_domain_allowlist` and populate it with the allowed domains:
+// google.com
+// microsoft.com
+// apple.com
+// amazonaws.com
+// windowsupdate.com
+// g.doubleclick.net
+// google-analytics.com
+// googlesyndication.com
+// msftncsi.com
+// office.com
+// live.com
+// outlook.com
+// akamai.net
+// cdn.net
+// office365.com

@@ -1,0 +1,25 @@
+title: AWS EC2 Instance Connect Used to Push SSH Key
+id: 9189d8ce-e900-4084-bf2e-6fe8a4c30cba
+status: experimental
+description: >-
+  Detects the use of the EC2 Instance Connect service to push a public SSH key to an EC2 instance. Attackers with sufficient IAM permissions can use this method to gain SSH access to an instance for lateral movement, potentially bypassing other network controls.
+references:
+  - https://unit42.paloaltonetworks.com/cloud-lateral-movement-techniques/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.lateral_movement
+  - attack.t1098.004
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    eventName: 'SendSSHPublicKey' # API call to push a public SSH key to an instance
+    eventSource: 'ec2-instance-connect.amazonaws.com'
+    errorCode:      # Filter for successful API calls
+  condition: selection
+falsepositives:
+  - Legitimate use by administrators for temporary access or troubleshooting.
+  - It is recommended to filter out trusted roles or user identities that are authorized to perform this action.
+level: medium

@@ -1,0 +1,40 @@
+title: Unusual S3 Activity from Command-Line Tools
+id: 74d1fd09-4c30-4fcf-b298-cfba1352cd4c
+status: experimental
+description: Detects high-impact S3 bucket activities, such as object deletion, creation, or retrieval, originating from common command-line tools or scripting libraries. This could indicate data exfiltration, ransomware activity, or other malicious data manipulation.
+references:
+  - https://www.vectra.ai/detections/aws-ransomware-s3-activity
+  - https://stratus-red-team.cloud/attack-techniques/AWS/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.t1567.002
+  - attack.t1490
+  - attack.exfiltration
+  - attack.impact
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection_events:
+        # S3 data events are logged via CloudTrail
+    eventSource: s3.amazonaws.com
+    eventName:
+      - GetObject
+      - PutObject
+      - DeleteObject
+      - DeleteObjects       # A specific indicator for bulk deletion
+  selection_tools:
+    userAgent|contains:
+            # These user agents correspond to tools that can be used for bulk data operations,
+            # but are less common for legitimate, integrated applications.
+      - 'rclone'       # Common data syncing/exfiltration tool
+      - 'curl'       # Command-line tool for transferring data, unusual for direct S3 API interaction
+      - 'Wget'       # Command-line tool for downloading files, unusual for direct S3 API interaction
+      - 'Python-urllib'       # Generic Python library that could indicate a custom script
+  condition: selection_events and selection_tools
+falsepositives:
+  - Legitimate administrative scripts or data transfer tasks may use these tools.
+  - To detect "high-volume" activity, it is recommended to aggregate these events in a SIEM and alert when a high count of events is seen from a single user or IP address over a short time frame.
+  - Consider adding known safe user agents or IP ranges to an exclusion list.
+level: medium

@@ -1,0 +1,50 @@
+// Name: DCSync Attack
+// Author: RW
+// Date: 2025-08-04
+// Description: Detects Directory Replication Service (DRS) requests, such as 'GetNCChanges', originating from
+//              devices that are not domain controllers. This is a strong indicator of a DCSync attack, where
+//              an adversary impersonates a domain controller to retrieve password hashes from other DCs.
+// MITRE ATT&CK: T1003.006
+// False Positive Sensitivity: Medium
+// Tags: Credential Access, T1003.006
+
+// Define the time window for the search.
+let timeWindow = 1d;
+
+// This is the most critical part of the rule for tuning.
+// You MUST populate this list with the hostnames of all your legitimate Domain Controllers to avoid false positives.
+let DomainControllers = dynamic([
+    "DC01.contoso.local",
+    "DC02.contoso.local"
+    // "DC03", // Add all your DC hostnames here.
+]);
+
+// This detection relies on Microsoft Defender for Identity (MDI) data.
+IdentityDirectoryEvents
+| where TimeGenerated > ago(timeWindow)
+// Filter for directory service replication activity.
+| where ActionType == "Directory Service Replication"
+// The core logic: filter for activity where the source device is NOT a known domain controller.
+| where DeviceName !in (DomainControllers)
+// Focus on the specific replication functions commonly used in DCSync attacks.
+| where AdditionalFields has "GetNCChanges"
+// Summarize to create a single, concise alert per attacking device and account.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    EventCount = count(),
+    TargetedDCs = make_set(DestinationDeviceName, 10)
+    by AttackingDevice = DeviceName,
+       AttackingAccount = AccountDisplayName,
+       AttackingAccountUPN = AccountUpn,
+       Application
+// Project the relevant fields for the alert.
+| project
+    StartTime,
+    EndTime,
+    AttackingDevice,
+    AttackingAccount,
+    AttackingAccountUPN,
+    TargetedDCs,
+    Application,
+    EventCount

@@ -1,0 +1,84 @@
+// Name: Error-Based SQL Injection Attempt
+// Author: RW
+// Date: 2025-08-23
+
+// Define common SQL error message patterns from various database engines.
+let sql_error_patterns = dynamic([
+    "you have an error in your sql syntax",
+    "unclosed quotation mark after the character string",
+    "syntax error at or near",
+    "ora-[0-9]{5}", // Oracle error format
+    "sql command not properly ended",
+    "microsoft ole db provider for odbc drivers",
+    "invalid column name",
+    "unterminated string constant",
+    "odbc driver error",
+    "a syntax error has occurred"
+]);
+
+// Define the time window for the search
+let lookback = 1h;
+
+// Search across WAF and web server logs that may contain response bodies or error messages.
+union isfuzzy=true AzureDiagnostics, AzureWebAppFirewallLogs, CommonSecurityLog
+| where TimeGenerated > ago(lookback)
+// Filter to relevant log categories.
+| where (TableName == "AzureDiagnostics" and Category in ("ApplicationGatewayFirewallLog", "FrontdoorWebApplicationFirewallLog"))
+    or TableName == "AzureWebAppFirewallLogs"
+    or TableName == "CommonSecurityLog"
+// Normalize the fields containing the response/error message into a single searchable field.
+| extend SearchableResponse = tolower(case(
+    TableName == "AzureDiagnostics", details_message_s,
+    TableName == "AzureWebAppFirewallLogs", details_data_s,
+    TableName == "CommonSecurityLog", Message,
+    ""
+))
+// Core detection logic: Look for SQL error patterns in the response/error message.
+| where SearchableResponse has_any (sql_error_patterns)
+// Extract the specific error pattern that was matched for easier analysis.
+| extend MatchedError = extract(strcat("(",tostring(sql_error_patterns),")"), 1, SearchableResponse)
+// FP Tuning:
+// - Legitimate application bugs can also expose database errors.
+// - Exclude known benign error-producing endpoints or specific error messages that are common in your environment.
+//   Example: | where RequestURL !has "/api/known_buggy_endpoint"
+// Extract and normalize fields for investigation.
+| extend
+    Timestamp = TimeGenerated,
+    ClientIP = case(
+        isnotempty(clientIp_s), clientIp_s,
+        isnotempty(clientIP_s), clientIP_s,
+        isnotempty(SourceIP), SourceIP,
+        ""
+    ),
+    RequestURL = case(
+        isnotempty(requestUri_s), requestUri_s,
+        isnotempty(RequestURL), RequestURL,
+        ""
+    ),
+    HttpResponseCode = case(
+        isnotempty(httpStatus_d), httpStatus_d,
+        isnotempty(httpStatusCode_s), httpStatusCode_s,
+        0
+    ),
+    RuleName = case(
+        isnotempty(ruleName_s), ruleName_s,
+        isnotempty(RuleName), RuleName,
+        ""
+    ),
+    Action = case(
+        isnotempty(action_s), action_s,
+        isnotempty(action_s), action_s,
+        isnotempty(DeviceAction), DeviceAction,
+        ""
+    )
+| where isnotempty(ClientIP) and isnotempty(RequestURL)
+// Project the most relevant fields for analysis.
+| project
+    Timestamp,
+    ClientIP,
+    RequestURL,
+    HttpResponseCode,
+    Action,
+    RuleName,
+    MatchedError,
+    TableName

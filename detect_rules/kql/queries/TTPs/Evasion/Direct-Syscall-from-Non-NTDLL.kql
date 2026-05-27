@@ -1,0 +1,37 @@
+// Name: Direct Syscall from Non-NTDLL Module
+// Author: RW
+// Date: 2025-08-02
+// Description: Detects sensitive API calls that appear to originate directly from an executable's memory space rather than from a standard system library like ntdll.dll. This is a common EDR evasion technique known as direct syscalls, where malware implements the syscall stub in its own code to bypass user-mode hooks.
+// Tactic: Defense Evasion
+// Technique: T1055 Process Injection
+// False Positive Sensitivity: Medium
+
+// Define sensitive API calls often used in process injection and malware execution.
+let sensitiveApiCalls = dynamic([
+    "AllocateVirtualMemoryApiCall",
+    "ProtectVirtualMemoryApiCall",
+    "WriteMemoryApiCall",
+    "CreateRemoteThreadApiCall",
+    "MapViewOfSectionApiCall"
+]);
+DeviceEvents
+// Filter for the sensitive API calls that would involve a syscall.
+| where ActionType in (sensitiveApiCalls)
+// The InitiatingProcessFolderPath field indicates the module that initiated the call.
+// In a direct syscall scenario, this will be the executable itself, not a system DLL.
+| where InitiatingProcessFolderPath endswith ".exe"
+// FP Mitigation: Some legitimate applications, especially those that are packed, protected,
+// or some low-level system utilities, might exhibit this behavior.
+// Exclude known legitimate processes by adding them to the list below.
+| where not(InitiatingProcessFileName in~ ('known_good_app1.exe', 'known_good_app2.exe')) // Placeholder for FP tuning
+| project
+    TimeGenerated,
+    DeviceName,
+    ActionType,
+    InitiatingProcessFileName,
+    InitiatingProcessFolderPath,
+    InitiatingProcessCommandLine,
+    FileName,
+    FolderPath,
+    SHA1,
+    ReportId

@@ -1,0 +1,75 @@
+{
+  "name": "QuirkyLoader Malware Activity",
+  "type": "signal_correlation",
+  "message": "QuirkyLoader Activity: {{distinct_count}} indicator(s) on host {{host}} by user {{usr}}: {{case_names}}",
+  "is_enabled": true,
+  "options": {
+    "detection_method": "signal_correlation",
+    "correlation_rule": {
+      "correlated_by_fields": [
+        "host",
+        "usr"
+      ],
+      "distinct_fields": [
+        "case_id"
+      ],
+      "correlation_expression": "distinct_count >= 1",
+      "correlation_time_frame": 3600
+    },
+    "evaluation_window": 3600,
+    "keep_alive": 3600,
+    "max_signal_duration": 3600
+  },
+  "queries": [
+    {
+      "name": "process_hollowing_targets",
+      "query": "@process.name:(AddInProcess32.exe OR InstallUtil.exe OR aspnet_wp.exe)",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "known_malicious_file_hashes",
+      "query": "@file.hash:(011257eb766f253982b717b390fc36eb570473ed7805c18b101367c68af5 OR 0ea3a55141405ee0e2dfbf333de01fe93c12cf34555550e4f7bb3fdec2a7673b)",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "known_malicious_domains",
+      "query": "@dns.query:(catherinereynolds.info OR mail.catherinereynolds.info)",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "known_malicious_ips",
+      "query": "@network.destination.ip:(157.66.22.11 OR 103.75.77.90 OR 161.248.178.212)",
+      "data_source": "logs",
+      "aggregation": "count"
+    }
+  ],
+  "cases": [
+    {
+      "name": "Process Hollowing Targets",
+      "status": "medium",
+      "condition": "process_hollowing_targets >= 1"
+    },
+    {
+      "name": "Known Malicious File Hashes",
+      "status": "high",
+      "condition": "known_malicious_file_hashes >= 1"
+    },
+    {
+      "name": "Known Malicious Domains",
+      "status": "high",
+      "condition": "known_malicious_domains >= 1"
+    },
+    {
+      "name": "Known Malicious IPs",
+      "status": "high",
+      "condition": "known_malicious_ips >= 1"
+    }
+  ],
+  "tags": [
+    "rule_id:quirkyloader_correlation",
+    "severity:high"
+  ]
+}

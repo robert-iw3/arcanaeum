@@ -1,0 +1,26 @@
+rule unauthorized_computer_account_creation {
+  meta:
+    author = "RW"
+    description = "Detects the creation of computer accounts by unauthorized users (Event Code 4741)."
+    severity = "MEDIUM"
+
+  events:
+    $e.metadata.event_type = "NETWORK_SERVICE_ACCOUNT_CREATE" // Chronicle UDM event type for account creation
+    $e.metadata.event_code = 4741 // Windows Security Event Code 4741
+
+    // Exclude computer accounts (ending in $) creating other accounts
+    not $e.principal.user.userid = /.*\$?/
+
+    // You'll need to create a reference list named "authorized_computer_creators"
+    // and add authorized usernames to it in Chronicle.
+    not $e.principal.user.userid in %authorized_computer_creators
+
+  outcome:
+    $event_time = $e.metadata.event_timestamp.epoch_seconds
+    $domain_controller = $e.principal.hostname // UDM field for hostname
+    $creating_user = $e.principal.user.userid // UDM field for user ID
+    $new_computer_account = $e.target.user.userid // UDM field for the target user (new account)
+
+  condition:
+    $e
+}

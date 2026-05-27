@@ -1,0 +1,35 @@
+title: AWS IAM Access Key Creation
+id: 45b7b5b2-7034-4e92-be27-b0e4ec42d14c
+status: experimental
+description: >-
+  Detects the creation of a new AWS IAM access key for a user.
+  Attackers may create access keys for existing users to establish persistence within an AWS environment, as seen with tools like AWSDoor.
+author: RW
+date: 2025-09-21
+tags:
+  - attack.persistence
+  - attack.t1136.003
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    # Corresponds to the API call to create a new access key
+    eventName: 'CreateAccessKey'
+    eventSource: 'iam.amazonaws.com'
+    # Ensure the API call was successful and the key is active
+    errorCode:
+    responseElements.accessKey.status: 'Active'
+  condition: selection
+fields:
+  - userIdentity.arn
+  - userIdentity.principalId
+  - requestParameters.userName
+  - responseElements.accessKey.accessKeyId
+  - sourceIPAddress
+falsepositives:
+  # Legitimate key creation by administrators for new users or for service account setup.
+  # Automated processes (like CI/CD pipelines) may create or rotate access keys.
+  # Consider filtering events from known administrative or automation principals if this is a common activity in your environment.
+  # In environments where AWS SSO is enforced, any access key creation for a human user is highly suspicious.
+level: medium

@@ -1,0 +1,29 @@
+title: Suspicious AWS OrganizationAccountAccessRole Assumption
+id: e5d735f5-6a9e-4ea4-b217-ad4c0d283b80
+status: experimental
+description: >-
+  Detects the assumption of the default 'OrganizationAccountAccessRole'. This role is created by AWS Organizations in member accounts and, by default, grants full administrative access from the management account. An attacker who has compromised the management account can use this role to pivot to and compromise any member account within the organization.
+references:
+  - https://hackingthe.cloud/aws/general-knowledge/aws_organizations_defaults/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.t1078.004
+  - attack.t1098
+  - attack.lateral_movement
+logsource:
+  service: cloudtrail
+  product: aws
+detection:
+  selection:
+    # Detects the AssumeRole event from the Security Token Service (STS)
+    eventSource: 'sts.amazonaws.com'
+    eventName: 'AssumeRole'
+    # The role being assumed is the default role created by AWS Organizations in member accounts
+    requestParameters.roleArn|endswith: '/OrganizationAccountAccessRole'
+  condition: selection
+falsepositives:
+  # This activity is expected from the AWS Organizations management account for legitimate administrative purposes.
+  # Consider filtering for source identities that are NOT the management account or from unexpected IP addresses.
+  - Legitimate assumption of the role by administrators or services operating from the management account.
+level: medium

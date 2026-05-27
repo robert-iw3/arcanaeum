@@ -1,0 +1,45 @@
+title: AWS IAM Policy with NotAction or NotResource
+id: cd2f5a21-6e2c-4d95-9b25-15e743ad9b67
+status: experimental
+description: >-
+  Detects the creation or modification of an AWS IAM policy that uses 'NotAction' or 'NotResource' with an 'Allow' effect.
+  This is a technique for privilege escalation that can grant broad, unintended permissions and is used by tools like AWSDoor.
+author: RW
+date: 2025-09-21
+tags:
+  - attack.privilege_escalation
+  - attack.t1098
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection_base:
+    # Events for creating or modifying IAM policies
+    eventName:
+      - 'CreatePolicy'
+      - 'CreatePolicyVersion'
+      - 'PutGroupPolicy'
+      - 'PutRolePolicy'
+      - 'PutUserPolicy'
+    eventSource: 'iam.amazonaws.com'
+    errorCode:
+  selection_policy:
+    # Detects the combination of "Allow" with "NotAction" or "NotResource" in the policy document
+    requestParameters.policyDocument|contains:
+      - '"NotAction"'
+      - '"NotResource"'
+  selection_allow:
+    requestParameters.policyDocument|contains: '"Effect":"Allow"'
+  condition: selection_base and selection_allow and selection_policy
+fields:
+  - userIdentity.arn
+  - userIdentity.principalId
+  - requestParameters.policyName
+  - requestParameters.roleName
+  - requestParameters.userName
+  - requestParameters.groupName
+  - requestParameters.policyDocument
+  - sourceIPAddress
+falsepositives:
+  - Legitimate, though rare and risky, use of NotAction/NotResource with an Allow effect by administrators for specific use cases. All findings should be reviewed as this is a high-risk configuration.
+level: high

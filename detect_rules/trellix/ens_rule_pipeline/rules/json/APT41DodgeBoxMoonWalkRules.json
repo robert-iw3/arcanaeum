@@ -1,0 +1,89 @@
+[
+  {
+    "type": "expert",
+    "name": "Detect APT41 DodgeBox DLL Sideloading",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"taskhost.exe\" -v \"taskhostw.exe\" -v \"SandboxieWUAU.exe\" }\n   }\n   Target {\n      Match MODULE {\n         Include OBJECT_NAME { -v \"sbiedll.dll\" }\n         Exclude OBJECT_NAME { -v \"C:\\\\Windows\\\\System32\\\\sbiedll.dll\" -v \"C:\\\\Windows\\\\SysWOW64\\\\sbiedll.dll\" }\n         Include -access \"LOAD\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects sideloading of malicious sbiedll.dll (DodgeBox loader) by Sandboxie-signed taskhost.exe/taskhostw.exe from non-system paths. Key TTP from 2024-2025 APT41 campaigns (Zscaler attribution). Excludes legitimate system locations to reduce FPs; tune for any custom Sandboxie usage."
+  },
+  {
+    "type": "expert",
+    "name": "Detect APT41 DodgeBox CFG Bypass Attempt",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match MODULE {\n         Include OBJECT_NAME { -v \"ntdll.dll\" -v \"msvcrt.dll\" }\n         Include -access \"PROTECT\"\n         Include -protection \"PAGE_EXECUTE_READWRITE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects memory protection changes on ntdll.dll/msvcrt.dll to PAGE_EXECUTE_READWRITE, used by DodgeBox (APT41) for Control Flow Guard (CFG) bypass and evasion. Tune exclusions for legitimate processes that modify these protections."
+  },
+  {
+    "type": "expert",
+    "name": "Detect APT41 DodgeBox DLL Hollowing Staging",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match FILE {\n         Include OBJECT_NAME { -v \"C:\\\\Windows\\\\Microsoft.NET\\\\assembly\\\\GAC_MSIL\\\\System.Data.Trace\\\\v4.0_4.0.0.0__\\\\**\\\\*.dll\" }\n         Include -access \"CREATE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects creation of suspicious DLLs in the System.Data.Trace GAC_MSIL path, indicative of DodgeBox DLL hollowing staging (APT41 evasion technique). Specific path-based; tune for rare legitimate .NET framework activity."
+  },
+  {
+    "type": "firewall",
+    "name": "Detect APT41 MoonWalk Google Drive C2 Activity",
+    "application": "**",
+    "direction": "out",
+    "protocol": "TCP",
+    "port": "443",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Reports outbound HTTPS (port 443) traffic potentially to Google Drive APIs (www.googleapis.com) used by MoonWalk backdoor for C2 (custom encrypted protocol). APT41 blends with legitimate traffic; use Web Control for domain/user-agent filtering and tuning."
+  },
+  {
+    "type": "firewall",
+    "name": "Detect Google Drive C2 by Non-Standard Process",
+    "application": "**",
+    "direction": "out",
+    "protocol": "TCP",
+    "port": "443",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects port 443 outbound connections to Google Drive domains from non-browser/non-official-sync processes. Strong indicator of MoonWalk C2 abuse by APT41. Tune exclusions for known legitimate cloud tools."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Windows Fibers Abuse for Evasion",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n      Exclude OBJECT_NAME { -v \"chrome.exe\" -v \"firefox.exe\" -v \"msedge.exe\" -v \"iexplore.exe\" -v \"opera.exe\" -v \"brave.exe\" -v \"sqlservr.exe\" -v \"javaw.exe\" }\n   }\n   Target {\n      Match API {\n         Include OBJECT_NAME { -v \"CreateFiber\" -v \"ConvertThreadToFiber\" }\n         Include -access \"CALL\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects calls to CreateFiber/ConvertThreadToFiber from unusual processes — innovative evasion used by MoonWalk backdoor (APT41). Excludes common browsers/servers; assumes ENS API call logging. Tune exclusions for environment-specific apps."
+  },
+  {
+    "type": "expert",
+    "name": "Detect APT41 DodgeBox MoonWalk and StealthVector Hashes",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match PROCESS {\n         Include -hash \"0d068b6d0523f069d1ada59c12891c4a\" -hash \"b3067f382d70705d4c8f6977a7d7bee4\" -hash \"d72f202c1d684c9a19f075290a60920f\" -hash \"294cc02db5a122e3a1bc4f07997956da\" -hash \"393065ef9754e3f39b24b2d1051eab61\" -hash \"bcac2cbda36019776d7861f12d9b59c4\" -hash \"f062183da590aba5e911d2392bc29181\" -hash \"4141c4b827ff67c180096ff5f2cc1474\" -hash \"bc85062de0f70afd44bb072b0b71a8cc\" -hash \"72070b165d1f11bd4d009a81bf28a3e5\" -hash \"f0953ed4a679b987a2da955788737602\"\n         Include -access \"CREATE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects process/file creation matching known SHA256 hashes of APT41 DodgeBox loader, MoonWalk backdoor, and related StealthVector variants (from Zscaler 2024-2025 reports). High-fidelity; integrate EDR for full hash validation if possible."
+  },
+  {
+    "type": "expert",
+    "name": "Detect MoonWalk Mutex Creation",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match SYNCHRONIZATION {\n         Include OBJECT_NAME { -v \"Global\\\\ctXjvsAxpzyqElmk\" }\n         Include -access \"CREATE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects creation of Global\\ctXjvsAxpzyqElmk mutex, reported as associated with MoonWalk backdoor (APT41). Mutex-based detection; may be variant-specific — verify in environment and tune if needed."
+  },
+  {
+    "type": "expert",
+    "name": "Detect MoonWalk File System Artifacts",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match FILE {\n         Include OBJECT_NAME { -v \"C:\\\\Windows\\\\Microsoft.NET\\\\assembly\\\\GAC_MSIL\\\\System.Data.Trace\" -v \"C:\\\\ProgramData\\\\**\" }\n         Include -access \"CREATE\"\n         Include -file_name_length 32\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects creation in System.Data.Trace GAC path or 32-char filename files in C:\\ProgramData — artifacts from MoonWalk staging/DLL hollowing (APT41). Approximate length check; tune for legitimate long-named files."
+  }
+]

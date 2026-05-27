@@ -1,0 +1,94 @@
+rule combined_process_injection_techniques {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects multiple process injection techniques, including classic remote thread creation, process hollowing via anomalous memory allocation, and unsigned DLL injection. This rule correlates events where a process manipulates a remote process's memory and execution flow. Note: Thread Execution Hijacking is not included in this combined rule due to requiring a different correlation key (Thread ID), which is incompatible with a single YARA-L match block."
+    tags = "WINDOWS, DEFENSE_EVASION, PRIVILEGE_ESCALATION, PROCESS_INJECTION, PROCESS_HOLLOWING, DLL_INJECTION"
+    tactic = "TA0005, TA0004"
+    technique = "T1055, T1055.001, T1055.012"
+    false_positives = "Legitimate software such as debuggers, security products, installers, or anti-cheat software may exhibit similar behaviors. Use the %process_injection_allowlist reference list to filter known-good processes."
+
+  events:
+    // Event: Memory Allocation (for Classic Injection)
+    $alloc.metadata.event_type = "PROCESS_API_CALL"
+    $alloc.metadata.product_event_type = "RemoteVirtualAlloc"
+    $alloc.principal.process.pid = $initiating_pid
+    $alloc.target.process.pid = $target_pid
+    $alloc.principal.hostname = $hostname
+    $alloc.principal.process.file.full_path not in %process_injection_allowlist
+
+    // Event: Memory Write (for Classic and DLL Injection)
+    $write.metadata.event_type = "PROCESS_API_CALL"
+    $write.metadata.product_event_type = "RemoteWriteProcessMemory"
+    $write.principal.process.pid = $initiating_pid
+    $write.target.process.pid = $target_pid
+    $write.principal.hostname = $hostname
+    $write.principal.process.file.full_path not in %process_injection_allowlist
+
+    // Event: Remote Thread Creation (for Classic Injection)
+    $thread.metadata.event_type = "PROCESS_API_CALL"
+    $thread.metadata.product_event_type = "CreateRemoteThread"
+    $thread.principal.process.pid = $initiating_pid
+    $thread.target.process.pid = $target_pid
+    $thread.principal.hostname = $hostname
+    $thread.principal.process.file.full_path not in %process_injection_allowlist
+
+    // Event: Process Hollowing (Anomalous Memory Allocation)
+    $hollow.metadata.event_type = "PROCESS_API_CALL"
+    $hollow.metadata.product_event_type = "RemoteVirtualAllocApiCall"
+    $hollow.principal.process.pid = $initiating_pid
+    $hollow.target.process.pid = $target_pid
+    $hollow.principal.hostname = $hostname
+    $hollow.target.process.memory_region.type = "MEM_IMAGE"
+    any $prot in $hollow.target.process.memory_region.protection: re.regex($prot, `PAGE_EXECUTE`)
+    $hollow.principal.process.file.full_path not in %process_injection_allowlist
+
+    // Event: Unsigned DLL Load (for DLL Injection)
+    $load_unsigned.metadata.event_type = "MODULE_LOAD"
+    $load_unsigned.target.process.pid = $target_pid
+    $load_unsigned.principal.hostname = $hostname
+    $load_unsigned.target.module.is_signed = false
+
+    // Filter out self-injection, which is less suspicious for these techniques
+    $initiating_pid != $target_pid
+
+  match:
+    $hostname, $initiating_pid, $target_pid over 10m
+
+  outcome:
+    // Use if-conditions to determine which technique was detected for alert clarity
+    $technique_name = if($alloc and $write and $thread, "Classic Process Injection (T1055)",
+                      if($hollow, "Process Hollowing (T1055.012)",
+                      if($write and $load_unsigned, "Unsigned DLL Injection (T1055.001)", "Unknown Injection Technique")))
+
+    // Higher risk score for Process Hollowing as it's a very high-fidelity indicator
+    $risk_score = if($technique_name = "Process Hollowing (T1055.012)", 90, 75)
+
+    // Collect common context for investigation
+    $principal_hostname = array_distinct($hostname)
+    $principal_process_pid = array_distinct($initiating_pid)
+    $principal_process_path = array_distinct(coalesce($alloc.principal.process.file.full_path, $write.principal.process.file.full_path, $hollow.principal.process.file.full_path))
+    $principal_process_cmdline = array_distinct(coalesce($alloc.principal.process.command_line, $write.principal.process.command_line, $hollow.principal.process.command_line))
+
+    $target_process_pid = array_distinct($target_pid)
+    $target_process_path = array_distinct(coalesce($alloc.target.process.file.full_path, $write.target.process.file.full_path, $hollow.target.process.file.full_path, $load_unsigned.target.process.file.full_path))
+    $target_process_cmdline = array_distinct(coalesce($alloc.target.process.command_line, $write.target.process.command_line, $hollow.target.process.command_line, $load_unsigned.target.process.command_line))
+
+    // Collect technique-specific context
+    $unsigned_dll_path = array_distinct($load_unsigned.target.module.file.full_path)
+    $hollow_mem_protection = array_distinct($hollow.target.process.memory_region.protection)
+
+  condition:
+    // The rule triggers if any of the three injection patterns are met
+    (
+      // Pattern 1: Classic Injection Sequence (Alloc -> Write -> Create Thread)
+      $alloc and $write and $thread
+    ) or (
+      // Pattern 2: Process Hollowing (Single high-fidelity event)
+      $hollow
+    ) or (
+      // Pattern 3: Unsigned DLL Injection Sequence (Write -> Load Unsigned Module)
+      $write and $load_unsigned and
+      $load_unsigned.metadata.event_timestamp.seconds > $write.metadata.event_timestamp.seconds
+    )
+}

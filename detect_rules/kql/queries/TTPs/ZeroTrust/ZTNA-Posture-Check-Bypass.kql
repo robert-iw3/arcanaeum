@@ -1,0 +1,46 @@
+// ZTNA Posture Check Status Change from Non-Compliant to Compliant
+// author: RW
+// description: Detects when a device's ZTNA posture check status rapidly changes from non-compliant to compliant.
+//              This could indicate a posture check bypass, potentially through client-side manipulation like API
+//              hooking or hardware ID spoofing, allowing a non-compliant device to gain access.
+// creationDate 2025-08-11
+// tags
+// - attack.defense_evasion
+// - attack.t1562.001
+
+// Set the timeframe for the detection.
+let timeframe = 1d;
+// Set the threshold for a "rapid" status change. A short window is key to detecting bypasses over legitimate remediation.
+let rapid_change_threshold = 5m;
+// Define the ZTNA posture check log table. This is a placeholder; replace with your actual table name (e.g., ZscalerZPA, Netskope, CommonSecurityLog).
+let ztna_posture_logs = "ZTNA_Posture_Checks_CL";
+table(ztna_posture_logs)
+| where TimeGenerated > ago(timeframe)
+// Adjust field names (DeviceName, ComplianceStatus, Reason) as per your log schema.
+| where isnotempty(DeviceName) and ComplianceStatus in ("Compliant", "Non-Compliant")
+// Order events by device and time to compare consecutive checks.
+| order by DeviceName asc, TimeGenerated asc
+// Use serialize to process events for each device in order.
+| serialize
+    // Capture the previous status and time for comparison.
+    PrevStatus = prev(ComplianceStatus),
+    PrevTime = prev(TimeGenerated),
+    PrevReason = prev(Reason)
+    by DeviceName
+// Look for the specific transition from Non-Compliant to Compliant.
+| where PrevStatus == "Non-Compliant" and ComplianceStatus == "Compliant"
+// Calculate the time difference between the two states.
+| extend TimeDelta = TimeGenerated - PrevTime
+// Alert only if the change happened within the defined rapid change threshold.
+| where TimeDelta < rapid_change_threshold
+// Potential False Positives: Very fast, automated remediation actions could trigger this alert.
+// If this occurs, you may need to increase the 'rapid_change_threshold' or exclude specific remediation-related reasons if available in the logs.
+| project
+    StartTime = PrevTime,
+    EndTime = TimeGenerated,
+    DeviceName,
+    UserPrincipalName,
+    TimeDelta,
+    PreviousStatus = PrevStatus,
+    PreviousReasonForNonCompliance = PrevReason,
+    CurrentStatus = ComplianceStatus

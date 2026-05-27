@@ -1,0 +1,38 @@
+let timeframe = 1d;
+// Define a list of legitimate administrator accounts and groups that perform GPO changes.
+// This list should be customized for your environment to reduce potential false positives.
+let known_gpo_admins = dynamic([
+    "Administrator",
+    "SYSTEM"
+    // Example: "CONTOSO\\gpo_admin_user", "gpo_service_account"
+]);
+SecurityEvent
+| where TimeGenerated > ago(timeframe)
+// Event ID 5136 indicates a directory service object was modified. This is logged on Domain Controllers.
+| where EventID == 5136
+// Filter for modifications to gPCFileSysPath or gPLink attributes.
+// gPCFileSysPath modification can redirect clients to a malicious SMB share (C2).
+// gPLink modification can poison an OU with a malicious GPO.
+| where AttributeLDAPDisplayName in ("gPCFileSysPath", "gPLink")
+| extend SubjectUserName = tostring(SubjectUserName)
+// Exclude changes made by computer accounts (ending in '$') and known administrators.
+| where not(SubjectUserName endswith "$") and SubjectUserName !in (known_gpo_admins)
+// The 'ObjectClass' attribute helps confirm the type of object being modified.
+// gPCFileSysPath is an attribute of a groupPolicyContainer object.
+// gPLink is an attribute of an organizationalUnit object.
+| where ObjectClass in ("groupPolicyContainer", "organizationalUnit")
+| project
+    TimeGenerated,
+    Computer,
+    Activity,
+    SubjectUserName,
+    SubjectUserSid,
+    ObjectDN,
+    ObjectClass,
+    AttributeLDAPDisplayName,
+    AttributeValue,
+    OldAttributeValue = tostring(parse_xml(EventData).EventData.Data[1]['#text'])
+| extend
+    timestamp = TimeGenerated,
+    AccountCustomEntity = SubjectUserName,
+    HostCustomEntity = Computer

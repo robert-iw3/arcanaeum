@@ -1,0 +1,52 @@
+rule Suspicious_AmsiDll_Load_Detection {
+  meta:
+    author = "RW"
+    description = "Detects suspicious amsi.dll loads from non-standard paths or with invalid/non-Microsoft signatures, potentially indicating an AMSI bypass or defense evasion technique."
+    severity = "CRITICAL"
+
+  events:
+    $e.metadata.event_type = "MODULE_LOAD" // UDM event type for image load events (Sysmon Event ID 7).
+    $e.metadata.vendor_name = "Microsoft"
+    $e.metadata.product_name = "Sysmon"
+    $e.metadata.event_code = 7 // Sysmon Event ID 7.
+
+    $e.target.process.file.file_name = "amsi.dll" // Image_Loads.file_name="amsi.dll"
+
+    // Focus on processes that are common targets for this bypass.
+    $e.principal.process.file.file_name in ("powershell.exe", "pwsh.exe", "cscript.exe", "wscript.exe", "rundll32.exe", "regsvr32.exe")
+
+    // Extract the folder path from the full file path.
+    re.regex($e.target.process.file.full_path, `(?<folder_path>.*)\\\\[^\\\\]+$`)
+
+    // Core detection logic: find either a non-standard path OR an invalid signature.
+    (
+        // Condition 1: The DLL is loaded from a path other than the legitimate system directories.
+        // `isnotnull(folder_path)` is implicitly handled if the regex extracts `folder_path`.
+        (lower($folder_path) != "c:\\windows\\system32" and lower($folder_path) != "c:\\windows\\syswow64")
+        or
+        // Condition 2: The DLL is not signed, or it is signed by someone other than Microsoft.
+        // `is_signed=0` maps to checking if the signature information is absent or invalid.
+        // `is_signed=1` and `signer NOT LIKE "%Microsoft Windows%"` maps to checking signature status and signer.
+        (not $e.target.process.file.file_signature.status = "VALID" or $e.target.process.file.file_signature.signer = /.*Microsoft Windows.*/ nocase)
+    )
+
+    // FP Tuning: Exclude known legitimate tools if necessary.
+    // Use a Chronicle Reference List named `amsi_load_whitelist` for process full paths or file names.
+    // Example: not $e.principal.process.file.file_name = "LegitSecurityTool.exe" nocase
+    // Example: not $e.principal.process.file.full_path in %amsi_load_whitelist
+
+  outcome:
+    $timestamp = $e.metadata.event_timestamp.epoch_seconds // _time
+    $host = $e.principal.hostname // dest
+    $user = $e.principal.user.userid // user
+    $process_name = $e.principal.process.file.file_name // process_name
+    $process_command_line = $e.principal.process.command_line // process
+    $loaded_dll = $e.target.process.file.file_name // file_name
+    $folder_path = $folder_path // extracted folder_path
+    $sha1 = $e.target.process.file.sha1 // file_hash
+    $signer = $e.target.process.file.file_signature.signer // signer
+    $is_signed = $e.target.process.file.file_signature.status = "VALID" // is_signed
+
+  condition:
+    $e and $folder_path != "" // Ensure folder path was extracted and conditions are met
+}

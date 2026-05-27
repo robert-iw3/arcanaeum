@@ -1,0 +1,47 @@
+// Name: Unauthorized CIP Service Requests
+// Author: RW
+// Date: 2025-08-17
+// Description: Detects reconnaissance and fuzzing activity targeting Industrial Control Systems (ICS).
+// The rule identifies Common Industrial Protocol (CIP) "Get All Attributes" (0x01) and "Get Attribute List" (0x03) service requests
+// originating from sources not on an allowlist of known management or engineering hosts.
+// References: https://github.com/ICSVillage
+// False Positive Sensitivity: Medium
+// Tags: ICS, CIP, EtherNet/IP, Reconnaissance, TTPs
+
+let TimeFrame = 1h;
+// This allowlist is critical for reducing false positives.
+// Populate this list with the IP addresses of legitimate engineering workstations, HMIs, or asset management systems that are authorized to perform discovery-like activities on the OT network.
+let KnownManagementHosts = dynamic([
+    "192.168.1.10", // Placeholder for Engineering Workstation 1
+    "10.0.5.25"     // Placeholder for Asset Management Server
+]);
+
+// This rule requires a table with parsed CIP/EtherNet/IP data from an OT security monitoring tool like Defender for IoT or Zeek.
+// Please replace 'OTNetworkEvents' with your actual table name.
+// Field names like 'CipService' are placeholders for parsed protocol fields.
+OTNetworkEvents
+| where TimeGenerated > ago(TimeFrame)
+// Filter for EtherNet/IP explicit messaging port and the specific CIP services used for reconnaissance.
+// Service codes can be represented as hex or integer depending on the data source.
+| where DestinationPort == 44818 and CipService in ("1", "0x01", "3", "0x03")
+// Exclude traffic from known, authorized hosts to focus on unexpected activity.
+| where SourceIp !in (KnownManagementHosts)
+// Summarize the activity to provide a concise alert.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    RequestCount = count(),
+    TargetedDevices = make_set(DestinationIp, 10),
+    ServicesUsed = make_set(CipService)
+    by SourceIp
+// Potential False Positives:
+// - A new, unlisted engineering workstation or a temporary contractor machine performing legitimate work.
+// - Misconfigured asset inventory tools.
+// - Regular maintenance and tuning of the 'KnownManagementHosts' allowlist is essential for accuracy.
+| project
+    StartTime,
+    EndTime,
+    SourceIp,
+    RequestCount,
+    TargetedDevices,
+    ServicesUsed

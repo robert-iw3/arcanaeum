@@ -1,0 +1,62 @@
+rule scattered_spider_activity_chain {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects a chain of activities associated with the Scattered Spider threat group. This rule correlates multiple TTPs including MFA fatigue attacks, followed by suspicious remote access tool usage, data exfiltration, or signs of ransomware."
+    reference = "https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-320a"
+    tags = "CRIME, SCATTERED_SPIDER, UNC3944, MFA_FATIGUE, RANSOMWARE, EXFILTRATION"
+    tactic = "TA0001, TA0003, TA0005, TA0010, TA0040"
+    technique = "T1621, T1219, T1567, T1567.002, T1486"
+    false_positives = "Legitimate administrator activity could trigger parts of this rule. A user legitimately failing MFA multiple times before a successful login, followed by remote tool usage for support, could cause a false positive. Thresholds and tool lists should be tuned."
+
+  events:
+    // Event: Multiple failed or denied MFA attempts for a single user, indicative of MFA fatigue.
+    $mfa_spam.metadata.event_type = "USER_LOGIN"
+    $mfa_spam.security_result.action in ("BLOCK", "DENY")
+    // The specific category for MFA events can vary by log source (e.g., Okta, Azure, Duo).
+    // Adjust this field based on your environment's logging standards for MFA.
+    $mfa_spam.security_result.category = "MFA"
+    $user = $mfa_spam.principal.user.userid
+
+    // Event: A subsequent successful MFA login for the same user.
+    $mfa_success.metadata.event_type = "USER_LOGIN"
+    $mfa_success.security_result.action = "ALLOW"
+    $mfa_success.security_result.category = "MFA"
+    $mfa_success.principal.user.userid = $user
+    $hostname = $mfa_success.principal.hostname
+
+    // Event: Execution of a remote access tool commonly used by Scattered Spider.
+    $remote_tool.metadata.event_type = "PROCESS_LAUNCH"
+    $remote_tool.principal.hostname = $hostname
+    // This list is based on the CISA advisory and should be customized based on tools that are unauthorized in your environment.
+    re.regex($remote_tool.target.process.file.name, `(?i)^(anydesk|teamviewer|ngrok|teleport|tsh|splashtop|fleetdeck|level|pulseway|screenconnect|tactical\.rmm)\.exe$`)
+
+    // Event: Large data upload to common cloud storage providers used for exfiltration.
+    $exfil.metadata.event_type = "NETWORK_FLOW"
+    $exfil.principal.hostname = $hostname
+    // The threshold (here, 50MB) is a starting point and should be tuned for your environment's baseline.
+    $exfil.network.sent_bytes > 50000000
+    // This regex targets MEGA.NZ or common S3 bucket URLs mentioned in the advisory.
+    $exfil.target.domain.name endswith "mega.nz" or re.regex($exfil.target.domain.name, `\.s3\.[a-z0-9-]+\.amazonaws\.com$`)
+
+    // Event: Potential ransomware activity, such as creation of a ransom note.
+    $ransomware.metadata.event_type = "FILE_CREATION"
+    $ransomware.principal.hostname = $hostname
+    // This pattern looks for files associated with DragonForce ransomware or generic ransom notes.
+    // This should be updated with more specific IOCs for DragonForce when available.
+    re.regex($ransomware.target.file.path, `(?i)(\\read_me_to_decrypt\.txt|\\.dragonforce)$`)
+
+  match:
+    // Correlate events by user and hostname over a 48-hour window.
+    $user, $hostname over 48h
+
+  condition:
+    // The core of the detection is an MFA fatigue attack...
+    #mfa_spam > 10 and $mfa_success
+    // ...followed by at least one post-compromise activity.
+    and (
+      $remote_tool or $exfil or $ransomware
+    )
+    // Ensure the successful login happens after the spam attempts.
+    and $mfa_success.metadata.event_timestamp > any $mfa_spam.metadata.event_timestamp
+}

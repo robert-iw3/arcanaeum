@@ -1,0 +1,63 @@
+// Name: FUD Loader Execution Attempt
+// Description: Detects a process performing multiple checks for virtualization environments, analysis tools, or system configurations
+// (like language settings). This behavior is common in FUD (Fully Undetectable) loaders and other malware attempting to evade automated
+// analysis or target specific regions.
+// Author: RW
+// Date: 2025-08-18
+// Mitre TTPs: T1497, T1027
+
+// Define suspicious indicators for evasion and anti-analysis checks
+let suspicious_registry_keys = dynamic([
+    "\\SOFTWARE\\Oracle\\VirtualBox",
+    "\\SOFTWARE\\VMware, Inc.\\VMware Tools",
+    "\\SYSTEM\\CurrentControlSet\\Services\\VBox",
+    "\\SYSTEM\\CurrentControlSet\\Services\\VMware",
+    "\\HARDWARE\\DEVICEMAP\\Scsi",
+    "\\HARDWARE\\Description\\System",
+    "\\Keyboard Layout\\Preload",
+    "\\Control Panel\\International"
+]);
+let suspicious_commands = dynamic([
+    "wmic computersystem get model",
+    "wmic computersystem get manufacturer",
+    "wmic bios get serialnumber",
+    "wmic cpu get numberofcores",
+    "systeminfo",
+    "tasklist"
+]);
+
+// Union process and registry events to find related activities
+union DeviceProcessEvents, DeviceRegistryEvents
+| where TimeGenerated > ago(1h)
+// Filter for events that match our suspicious indicators
+| where
+    (TableName == "DeviceProcessEvents" and ProcessCommandLine has_any (suspicious_commands)) or
+    (TableName == "DeviceRegistryEvents" and RegistryKey has_any (suspicious_registry_keys))
+// Normalize fields for aggregation
+| extend
+    ProcessId = case(TableName == "DeviceProcessEvents", ProcessId, InitiatingProcessId),
+    ProcessName = case(TableName == "DeviceProcessEvents", FileName, InitiatingProcessFileName),
+    Action = case(TableName == "DeviceProcessEvents", ProcessCommandLine, RegistryKey)
+| where isnotempty(ProcessId) and ProcessId != 0
+// FP Filtering: Exclude known legitimate processes that may perform these checks.
+// This list may need to be expanded based on your environment's baseline activity.
+| where ProcessName !in ("vboxservice.exe", "vmtoolsd.exe", "msinfo32.exe", "TiWorker.exe", "svchost.exe", "powershell.exe", "WmiPrvSE.exe")
+// Aggregate by process to find multiple evasion checks from a single source within a 5-minute window
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    Actions=make_set(Action),
+    ActionTypes=make_set(TableName)
+    by DeviceId, DeviceName, ProcessId, ProcessName, bin(TimeGenerated, 5m)
+// Alert threshold: Trigger if a process performs at least 2 distinct checks.
+// This threshold can be increased for higher fidelity (e.g., >= 3) or to include a check for multiple action types (`array_length(ActionTypes) > 1`).
+| where array_length(Actions) >= 2
+| project
+    StartTime,
+    EndTime,
+    DeviceName,
+    ProcessName,
+    ProcessId,
+    ActionCount = array_length(Actions),
+    Actions,
+    ActionTypes

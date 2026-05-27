@@ -1,0 +1,63 @@
+title: DPRK IT Worker and Cybercriminal Activity Patterns
+id: 49542ca3-4841-473e-b7f1-c891dc4da1fd
+status: experimental
+description: >-
+  This rule detects atomic indicators related to activity patterns associated with North Korean (DPRK) IT workers and cybercriminal groups, as detailed in the DTEX "Exposing DPRK's Cyber Syndicate" report.
+  For high fidelity, these atomic events should be correlated in a SIEM to identify the specific malicious patterns:
+  1.  **Potential Source Code Exfiltration**: An event from `scm_process` followed by an event from `cloud_upload` for the same user/host within 30 minutes. The confidence is higher if the upload is large (e.g., >1MB).
+  2.  **Anomalous Webmail Access**: Multiple events from `webmail_access` for the same user/host, accessing different providers within a 1-hour window.
+  3.  **Remote Access Tool Usage**: Events from `remote_img` or `remote_cli` can be standalone indicators but are often noisy without context. They are more significant when observed on non-administrator endpoints or outside of business hours.
+author: RW
+date: 2025-08-21
+references:
+  - https://dtexsystems.com/resources/i3-threat-advisory-inside-the-dprk/
+tags:
+  - attack.command_and_control
+  - attack.exfiltration
+  - attack.defense_evasion
+  - attack.collection
+  - attack.t1219
+  - attack.t1071.001
+  - attack.t1537
+  - attack.t1048.003
+logsource:
+  category:
+    - process_creation
+    - proxy
+detection:
+    # Pattern 1: Remote Access Tool Usage
+  remote_img:
+    Image|endswith:
+      - 'anydesk.exe'
+      - 'teamviewer.exe'
+      - 'vncviewer.exe'
+      - 'logmein.exe'
+      - 'mstsc.exe'
+  remote_cli:
+    CommandLine|contains: 'remotedesktop.google.com'
+    # Pattern 2: Source Code Exfiltration Indicators
+  scm_process:
+    Image|endswith:
+      - 'git.exe'
+      - 'svn.exe'
+      - 'gh.exe'
+  cloud_upload:
+    c-uri|contains:
+      - 'dropbox.com'
+      - 'mega.nz'
+      - 'drive.google.com'
+      - 'onedrive.live.com'
+    # Pattern 3: Anomalous Webmail Access Indicators
+  webmail_access:
+    c-uri|contains:
+      - 'mail.google.com'
+      - 'outlook.live.com'
+      - 'protonmail.com'
+      - 'yahoo.com'
+  condition: remote_img or remote_cli or scm_process or cloud_upload or webmail_access
+falsepositives:
+  - This is a broad rule designed to surface events for further correlation. Without the correlation logic described in the description, it will generate a high number of false positives.
+  - Legitimate use of remote access tools by administrators or remote employees.
+  - Normal developer activity using Git or other source code management tools.
+  - Legitimate use of personal cloud storage or webmail services, if permitted by corporate policy.
+level: medium

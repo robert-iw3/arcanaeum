@@ -1,0 +1,38 @@
+title: AWS Untrusted Lambda Layer Added
+id: 960fa288-19b4-453f-8b8f-c872ac26b53e
+status: experimental
+description: Detects the modification of a Lambda function to include a layer from an untrusted or external AWS account. This could indicate a supply chain attack or the addition of a malicious Lambda extension, such as LambdaSpy, to intercept data or persist in the environment.
+references:
+  - https://www.clearvector.com/blog/lambda-spy/
+  - https://www.zestsecurity.io/resources/content/how-malicious-aws-lambda-layers-can-compromise-your-serverless-environment
+  - https://stratus-red-team.cloud/attack-techniques/AWS/aws.persistence.lambda-layer-extension/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.persistence
+  - attack.supply_chain_compromise
+  - attack.t1505.005
+  - cloud
+  - aws
+  - aws.lambda
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    # Detects successful updates to a Lambda function's configuration that involve layers
+    eventSource: 'lambda.amazonaws.com'
+    eventName: 'UpdateFunctionConfiguration'
+    responseElements.layers|exists: true
+    errorCode:
+  filter_trusted_accounts:
+    # This filter should be customized with the AWS account IDs of your organization and any trusted third-party vendors.
+    # Layers from these accounts will be considered legitimate and excluded from the detection.
+    responseElements.layers.arn|contains:
+      - 'arn:aws:lambda:*:111111111111:layer:' # Placeholder for your primary AWS account ID
+      - 'arn:aws:lambda:*:222222222222:layer:' # Placeholder for other trusted AWS account IDs
+      - 'arn:aws:lambda:*:464622532012:layer:' # Example: Datadog's public account ID
+  condition: selection and not filter_trusted_accounts
+falsepositives:
+  - Legitimate use of third-party Lambda layers from trusted vendors or partners. You must populate the 'filter_trusted_accounts' selection with all known and trusted AWS account IDs that provide layers to your environment to reduce false positives.
+level: medium

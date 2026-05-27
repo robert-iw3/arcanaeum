@@ -1,0 +1,17 @@
+replicaCount: 1
+image:
+  web:
+    repository: pcapan-web
+    tag: latest
+    pullPolicy: IfNotPresent
+  analyzer:
+    repository: pcapan
+    tag: latest
+    pullPolicy: IfNotPresent
+service:
+  type: ClusterIP
+  port: 443
+persistence:
+  storageClass: ""
+  size: 1Gi
+jwtSecret: secret

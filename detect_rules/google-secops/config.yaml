@@ -1,0 +1,7 @@
+---
+chronicle_api_url: "https://<your_chronicle_instance>.backstory.chronicle.security/v2"
+credentials_file: "./service-account.json"
+auth_scope: "https://www.googleapis.com/auth/chronicle-backstory"
+rules_dir: "./rules"
+max_workers: 5
+log_level: "INFO"

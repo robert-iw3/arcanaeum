@@ -1,0 +1,42 @@
+// Name: WinReg Transport Fallback Policy Modified
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects modifications to the 'TransportFallbackPolicy' registry key for the Remote Registry client.
+//              An attacker can modify this key to enable a transport protocol fallback (e.g., from SMB to TCP), which
+//              can downgrade the authentication level and facilitate NTLM relay attacks.
+// Tactic: Defense Evasion
+// Technique: T1112 (Modify Registry)
+// False Positive Sensitivity: Low. This registry key is not commonly modified during normal operations.
+// Any change should be considered suspicious and investigated.
+// Data Source: Microsoft 365 Defender (DeviceRegistryEvents)
+
+let timeframe = 1d;
+let target_key = @"\Microsoft\RemoteRegistryClient\TransportFallbackPolicy";
+// The specific value that enables TCP fallback.
+let target_value_name = "WinregTcpFallback";
+// A value of "1" enables the fallback.
+let target_value_data = "1";
+
+DeviceRegistryEvents
+| where TimeGenerated > ago(timeframe)
+// Look for the creation or modification of the specific registry value.
+| where ActionType == "RegistryValueSet"
+// The key path is highly specific to this attack technique.
+| where RegistryKey endswith target_key
+// The value name and data indicate the explicit enabling of the vulnerable fallback behavior.
+| where RegistryValueName =~ target_value_name and RegistryValueData =~ target_value_data
+| project
+    TimeGenerated,
+    DeviceName,
+    DeviceId,
+    InitiatingProcessAccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessId,
+    RegistryKey,
+    RegistryValueName,
+    PreviousRegistryValueData,
+    NewRegistryValueData = RegistryValueData
+| extend
+    AccountCustomEntity = InitiatingProcessAccountName,
+    HostCustomEntity = DeviceName

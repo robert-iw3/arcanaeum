@@ -1,0 +1,79 @@
+rule cl_cri_1040_storm_2603_project_ak47_activity {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects a combination of TTPs associated with the CL-CRI-1040 (Storm-2603) threat actor. This includes C2 communication patterns, ransomware artifacts from AK47/X2ANYLOCK, specific DLL side-loading techniques, and the execution of known hacking tools."
+    reference = "https://unit42.paloaltonetworks.com/ak47-activity-linked-to-sharepoint-vulnerabilities/"
+    tags = "CL-CRI-1040, STORM-2603, AK47, X2ANYLOCK, RANSOMWARE, SHAREPOINT"
+    tactic = "TA0011, TA0007, TA0005, TA0002, TA0040"
+    technique = "T1071.004, T1071.001, T1574.002, T1059, T1486"
+    false_positives = "Legitimate use of tools like PsExec or curl could match individual event conditions. The rule's requirement for at least two distinct suspicious activities to occur on the same host significantly reduces the likelihood of false positives."
+
+  events:
+    // Detects DNS C2 communication associated with the AK47C2 dnsclient.
+    $dns_c2.metadata.event_type = "NETWORK_DNS"
+    $dns_c2.principal.hostname = $hostname
+    $dns_c2.network.dns.questions.name = /update\.updatemicfosoft\.com$/ nocase
+
+    // Detects HTTP C2 communication potentially associated with the AK47C2 httpclient.
+    $http_c2.metadata.event_type = "NETWORK_HTTP"
+    $http_c2.principal.hostname = $hostname
+    $http_c2.network.http.method = "POST"
+    // The report mentions curl is used by the httpclient. This could be a source of FPs.
+    // Consider adding more specific logic if available, e.g., specific URL paths or body content patterns.
+    $http_c2.network.http.user_agent = /curl/ nocase
+
+    // Detects the creation of AK47/X2ANYLOCK ransom notes.
+    $ransom_note.metadata.event_type = "FILE_CREATION"
+    $ransom_note.principal.hostname = $hostname
+    re.regex($ransom_note.target.file.full_path, `(?i)\\How to decrypt my data\.(txt|log)$`)
+
+    // Detects file renaming activity consistent with AK47/X2ANYLOCK ransomware.
+    $ransom_rename.metadata.event_type = "FILE_RENAME"
+    $ransom_rename.principal.hostname = $hostname
+    re.regex($ransom_rename.target.file.full_path, `\.x2anylock$`)
+
+    // Detects specific DLL Sideloading techniques used by the actor.
+    $sideload.metadata.event_type = "MODULE_LOAD"
+    $sideload.principal.hostname = $hostname
+    (
+      re.regex($sideload.principal.process.file.full_path, `\\7z\.exe$`) and
+      re.regex($sideload.target.module.file.full_path, `\\7z\.dll$`)
+    ) or (
+      re.regex($sideload.principal.process.file.full_path, `\\clink_x86\.exe$`) and
+      re.regex($sideload.target.module.file.full_path, `\\clink_dll_x86\.dll$`)
+    )
+
+    // Detects execution of hacking tools found in the actor's arsenal.
+    $tool_exec.metadata.event_type = "PROCESS_LAUNCH"
+    $tool_exec.principal.hostname = $hostname
+    // PsExec usage can be legitimate. Correlating with other indicators reduces false positives.
+    re.regex($tool_exec.target.process.file.full_path, `\\(nxc\.exe|SharpHostInfo\.x64\.exe|masscan.*\.exe|sd\.exe|PsExec64\.exe|PsExec\.exe)$`)
+
+  match:
+    $hostname over 8h
+
+  outcome:
+    // Risk score is elevated due to the correlation of multiple suspicious activities.
+    $risk_score = 75
+    $principal_hostname = $hostname
+    $dns_c2_domains = array_distinct($dns_c2.network.dns.questions.name)
+    $http_c2_user_agents = array_distinct($http_c2.network.http.user_agent)
+    $http_c2_urls = array_distinct($http_c2.network.http.url)
+    $ransom_notes_created = array_distinct($ransom_note.target.file.full_path)
+    $ransom_files_renamed = array_distinct($ransom_rename.target.file.full_path)
+    $sideloading_processes = array_distinct($sideload.principal.process.file.full_path)
+    $sideloading_modules = array_distinct($sideload.target.module.file.full_path)
+    $tools_executed = array_distinct($tool_exec.target.process.command_line)
+
+  condition:
+    // Detects if at least two different types of suspicious activities associated with CL-CRI-1040 are observed on the same host.
+    (
+      (1 if #dns_c2 > 0 else 0) +
+      (1 if #http_c2 > 0 else 0) +
+      (1 if #ransom_note > 0 else 0) +
+      (1 if #ransom_rename > 0 else 0) +
+      (1 if #sideload > 0 else 0) +
+      (1 if #tool_exec > 0 else 0)
+    ) >= 2
+}

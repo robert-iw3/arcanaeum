@@ -1,0 +1,100 @@
+rule water_curse_actor_activity {
+  meta:
+    author = "RW"
+    date = "2025-08-23"
+    description = "Detects multiple Tactics, Techniques, and Procedures (TTPs) associated with the Water Curse threat actor. Water Curse leverages compromised GitHub repositories to distribute multi-stage malware, targeting developers, cybersecurity professionals, and gamers. This rule detects various stages of the attack chain, from initial execution to defense evasion, persistence, and C2 communication."
+    reference = "https://www.trendmicro.com/en_us/research/25/f/water-curse.html"
+    tactic = "TA0002, TA0003, TA0004, TA0005, TA0007, TA0009, TA0011"
+    technique = "T1195.002, T1129, T1562.001, T1548.002, T1053.005, T1560, T1071"
+    tags = "threat_actor.water_curse, attack.supply_chain, attack.execution, attack.defense_evasion, attack.privilege_escalation, attack.persistence, attack.collection, attack.command_and_control"
+    false_positives = "Legitimate administrative or development activity can trigger some of these detections in isolation. For example, creating scheduled tasks or using 7-Zip from non-standard locations. The strength of this rule comes from the correlation of these distinct behaviors. Tuning may be required in specific environments."
+
+  events:
+    // This rule combines multiple TTPs into a single detection using OR logic.
+    // Each block corresponds to a specific behavior observed in the Water Curse campaign.
+
+    // TTP 1: Initial execution via malicious Visual Studio project file (.csproj)
+    (
+      $e.metadata.event_type = "PROCESS_CREATION" and
+      re.regex($e.principal.process.file.full_path, `\\MSBuild\.exe$`) and
+      re.regex($e.target.process.file.full_path, `\\cmd\.exe$`) and
+      re.regex($e.target.process.command_line, `\.exec\.cmd`) and
+      re.regex($e.target.process.command_line, `\\Temp\\MSBuildTemp\\`)
+    ) or
+
+    // TTP 2: Defense Evasion via PowerShell
+    (
+      $e.metadata.event_type = "PROCESS_CREATION" and
+      re.regex($e.target.process.file.full_path, `\\powershell\.exe$`) and
+      (
+        // Disabling Defender for the entire C: drive
+        re.regex($e.target.process.command_line, `Set-MpPreference.*-ExclusionPath.*C:\\`) nocase or
+        // Deleting all volume shadow copies
+        re.regex($e.target.process.command_line, `vssadmin.*delete.*shadows.*\/all`) nocase or
+        // Disabling System Restore via registry
+        re.regex($e.target.process.command_line, `Set-ItemProperty.*HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows NT\\SystemRestore.*DisableSR`) nocase
+      )
+    ) or
+
+    // TTP 3: UAC Bypass via ms-settings protocol handler hijack
+    (
+      $e.metadata.event_type = "REGISTRY_MODIFICATION" and
+      re.regex($e.target.registry.key, `\\Software\\Classes\\ms-settings\\shell\\open\\command$`) and
+      ($e.target.registry.value_name = "(Default)" or $e.target.registry.value_name = "DelegateExecute")
+    ) or
+
+    // TTP 4: Persistence via unusually configured Scheduled Task
+    (
+      $e.metadata.event_type = "PROCESS_CREATION" and
+      re.regex($e.target.process.file.full_path, `\\schtasks\.exe$`) and
+      re.regex($e.target.process.command_line, `\/create`) nocase and
+      (
+        // Unusually long duration parameter
+        re.regex($e.target.process.command_line, `\/du 9999:59`) nocase or
+        // Specific task name and path used for persistence
+        (
+          re.regex($e.target.process.command_line, `\/tn "BitLocker Encrypt All Drives"`) nocase and
+          re.regex($e.target.process.command_line, `\\OneDriveCloud\\taskhostw\.exe`)
+        )
+      )
+    ) or
+
+    // TTP 5: Data Staging and Reconnaissance
+    (
+      $e.metadata.event_type = "PROCESS_CREATION" and
+      (
+        // 7-Zip running from a non-standard path to extract password-protected files
+        // Tuning: This path could be legitimate in some environments. Consider adding process ancestry checks.
+        ($e.target.process.file.full_path = `C:\ProgramData\sevenZip\7z.exe` and re.regex($e.target.process.command_line, ` -p`)) or
+        // Masqueraded NVIDIA Control Panel executable performing reconnaissance
+        (
+          re.regex($e.principal.process.file.full_path, `\\Microsoft\\Vault\\UserRoamingTiles\\NVIDIAContainer\\NVIDIA Control Panel\.exe$`) and
+          re.regex($e.target.process.file.full_path, `(\\|\\/)curl\.exe$|(\\|\\/)wmic\.exe$|(\\|\\/)tasklist\.exe$`)
+        )
+      )
+    ) or
+
+    // TTP 6: Malicious File Artifacts Creation
+    (
+      $e.metadata.event_type = "FILE_CREATION" and
+      (
+        re.regex($e.target.file.full_path, `\\.vs-script\\(antiDebug|disabledefender)\.ps1$`) or
+        re.regex($e.target.file.full_path, `\\AppData\\Local\\Temp\\[^\\]+\\SearchFilter\.exe$`) or
+        re.regex($e.target.file.full_path, `\\Microsoft\\Vault\\UserRoamingTiles\\NVIDIAContainer\\NVIDIA Control Panel\.exe$`)
+      )
+    ) or
+
+    // TTP 7: C2 and Exfiltration Network Activity
+    (
+      $e.metadata.event_type = "NETWORK_CONNECTION" and
+      (
+        $e.network.hostname in ("store-eu-par-2.gofile.io", "api.telegram.org", "popcorn-soft.glitch.me", "pastejustit.com", "pastesio.com") or
+        $e.network.ip = "46.101.236.176" or
+        // RegAsm.exe making network connections is highly anomalous
+        re.regex($e.principal.process.file.full_path, `\\RegAsm\.exe$`)
+      )
+    )
+
+  condition:
+    $e
+}

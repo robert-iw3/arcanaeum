@@ -1,0 +1,38 @@
+name: Suricata Rule Transformation Pipeline
+on:
+  push:
+    paths:
+      - 'custom/*.rules'
+jobs:
+  transform-rules:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml
+      - name: Run rule transformation
+        run: python parse_suricata_rules.py
+        continue-on-error: false
+      - name: Validate transformed rules
+        run: |
+          if command -v suricata; then
+            suricata -T -c transformed_rules/suricata_datasets.yaml -S transformed_rules/*.rules
+          else
+            echo "Suricata not installed, skipping rule validation"
+          fi
+      - name: Commit transformed rules
+        run: |
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+          git add transformed_rules/*
+          git diff --quiet && git diff --staged --quiet || git commit -m "Update transformed Suricata rules"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

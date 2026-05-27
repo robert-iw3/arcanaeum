@@ -1,0 +1,53 @@
+// Name: LOLBin Writes to Uncommon HKCU Key
+// Author: RW
+// Date: 2025-08-08
+// Description: Detects suspicious registry write activity by LOLBins to uncommon or unusual HKCU keys, highlighting
+//              anomalous or rare modifications that could indicate malicious behavior. This is achieved by baselining
+//              common registry writes and alerting on deviations.
+// MITRE ATT&CK: T1112 (Modify Registry)
+
+let lookback = 30d; // Time window for baselining and detection.
+let common_key_threshold = 100; // The number of top keys to consider 'common'.
+let lolbins = dynamic(["powershell.exe", "pwsh.exe", "powershell_ise.exe", "reg.exe", "wscript.exe", "cscript.exe", "mshta.exe", "rundll32.exe"]);
+
+// Function to normalize user SIDs in registry key paths to reduce noise from different user profiles.
+let NormalizeSid = (key:string) {
+    replace_regex(key, @"S-1-5-[0-9-]+(?:-[0-9]+)*", "<SID>")
+};
+
+// Step 1: Establish a baseline of commonly written-to normalized HKCU keys across the environment.
+let common_keys = (
+    DeviceRegistryEvents
+    | where Timestamp > ago(lookback)
+    | where ActionType == "RegistryValueSet"
+    | where RegistryKey has "HKEY_CURRENT_USER"
+    | extend NormalizedKey = NormalizeSid(RegistryKey)
+    | summarize count() by NormalizedKey
+    | top common_key_threshold by count_
+    | project NormalizedKey
+);
+
+// Step 2: Find writes by LOLBins to HKCU keys that are not in the common baseline.
+DeviceRegistryEvents
+| where Timestamp > ago(lookback)
+| where ActionType == "RegistryValueSet"
+| where RegistryKey has "HKEY_CURRENT_USER"
+| where InitiatingProcessFileName in~ (lolbins)
+| where isnotempty(RegistryValueData)
+| extend NormalizedKey = NormalizeSid(RegistryKey)
+// Use a left-anti join to find keys written by LOLBins that are NOT in the common key set.
+| join kind=leftanti (
+    common_keys
+) on NormalizedKey
+// Potential for False Positives: New software installations or updates might create new, legitimate registry keys that appear uncommon.
+// Consider tuning the 'common_key_threshold' or adding exclusions for known software installers.
+// Example: | where not (InitiatingProcessCommandLine contains 'SomeBenignInstaller')
+| project
+    Timestamp,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RegistryKey,
+    NormalizedKey,
+    RegistryValueName,
+    RegistryValueData

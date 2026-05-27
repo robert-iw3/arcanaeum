@@ -1,0 +1,127 @@
+// Name: AV Killer and MedusaLocker Activity via ThrottleStop BYOVD
+// Description: This query combines multiple detection logics to identify activity associated with an AV Killer tool that abuses
+//              the vulnerable ThrottleStop driver (CVE-2025-7771). It detects known malicious hashes, suspicious driver loading,
+//              service creation for the vulnerable driver, and the termination of multiple security products, which are key TTPs of this threat.
+// Author: RW
+// Date: 2025-08-08
+// Tactic: Privilege Escalation, Defense Evasion, Impact, Discovery
+// Technique: T1543.003, T1562.001, T1562.006, T1486, T1489, T1057
+// False Positive Sensitivity: Medium
+// Comments: This is a composite rule that unions several distinct detection patterns. Each pattern has its own false positive considerations,
+//           which are noted in the logic. Review the 'DetectionName' field to understand which specific logic triggered an alert.
+//           Tuning of the 'knownGood...' allowlists may be required.
+
+// -- Start of common variables --
+// List of known malicious SHA1 hashes for the AV Killer and associated MedusaLocker variants.
+let ioc_sha1_hashes = dynamic([
+    "82ed942a52cdcf120a8919730e00ba37619661a3", "f02daf614109f39babdcb6f8841dd6981e929d70", "c0979ec20b87084317d1bfa50405f7149c3b5c5f",
+    "eff7919d5de737d9a64f7528e86e3666051a49aa", "0a15be464a603b1eebc61744dc60510ce169e135", "d5a050c73346f01fc9ad767d345ed36c221baac2",
+    "987834891cea821bcd3ce1f6d3e549282d38b8d3", "86a2a93a31e0151888c52dbbc8e33a7a3f4357db", "dcaed7526cda644a23da542d01017d48d97c9533"
+]);
+// List of security product process names targeted by the AV Killer.
+let av_processes = dynamic([
+    "MsMpEng.exe", "MsMpSvc.exe", "MSASCui.exe", "MSASCuiL.exe", "SecurityHealthService.exe", "SecurityHealthSystray.exe", "AvastSvc.exe",
+    "AvLaunch.exe", "aswToolsSvc.exe", "afwServ.exe", "wsc_proxy.exe", "AVGSvc.exe", "AVGUI.exe", "avgsvca.exe", "avgToolsSvc.exe",
+    "bdservicehost.exe", "bdagent.exe", "bdredline.exe", "epsecurityservice.exe", "epupdateservice.exe", "CSFalconContainer.exe",
+    "CSFalconService.exe", "ekrn.exe", "egui.exe", "avp.exe", "avpui.exe", "klnagent.exe", "mfevtps.exe", "mfemms.exe", "mfeepmp.exe",
+    "ccSvcHst.exe", "smc.exe", "SymCorpUI.exe", "sepWscSvc64.exe", "SentinelAgent.exe", "SentinelServiceHost.exe", "SentinelStaticEngine.exe",
+    "SophosHealth.exe", "SophosFS.exe", "hmpalert.exe", "SEDService.exe"
+]);
+// Allowlist for legitimate processes that may terminate other processes. Tune as needed.
+let knownGoodTerminators = dynamic(["svchost.exe", "services.exe", "msiexec.exe", "setup.exe", "uninstaller.exe", "taskmgr.exe"]);
+// -- End of common variables --
+
+// -- Detection Logic 1: Known Malicious Hashes --
+let hash_hits =
+    union DeviceProcessEvents, DeviceFileEvents, DeviceImageLoadEvents
+    | where SHA1 in (ioc_sha1_hashes)
+    | project
+        TimeGenerated,
+        DeviceName,
+        AccountName = InitiatingProcessAccountName,
+        DetectionName = "AV Killer Known Hash",
+        Tactic = "Defense Evasion, Impact",
+        Technique = "T1562.001, T1486",
+        FileName,
+        ProcessCommandLine = coalesce(ProcessCommandLine, ""),
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        AdditionalInfo = pack("SHA1", SHA1, "ActionType", ActionType, "FolderPath", FolderPath);
+
+// -- Detection Logic 2: BYOVD via ThrottleStop Service Creation --
+let service_creation_hits =
+    DeviceProcessEvents
+    | where FileName in~ ("sc.exe", "powershell.exe")
+    | where (ProcessCommandLine has_all ("type=", "kernel") and (ProcessCommandLine has "create" or ProcessCommandLine has "New-Service"))
+      and ProcessCommandLine has_any ("ThrottleStop.sys", "ThrottleBlood.sys")
+    | project
+        TimeGenerated,
+        DeviceName,
+        AccountName,
+        DetectionName = "BYOVD via ThrottleStop Service Creation",
+        Tactic = "Privilege Escalation, Defense Evasion",
+        Technique = "T1543.003, T1562.001",
+        FileName,
+        ProcessCommandLine,
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        AdditionalInfo = pack("Details", "Service creation command for vulnerable driver detected.");
+
+// -- Detection Logic 3: Suspicious Loading of Vulnerable ThrottleStop Driver --
+let driver_load_hits =
+    DeviceImageLoadEvents
+    | where FileName in~ ("ThrottleStop.sys", "ThrottleBlood.sys")
+    | where not(FolderPath has_any (@"C:\Program Files\", @"C:\Program Files (x86)\"))
+    | project
+        TimeGenerated,
+        DeviceName,
+        AccountName = InitiatingProcessAccountName,
+        DetectionName = "Suspicious Loading of Vulnerable ThrottleStop Driver",
+        Tactic = "Defense Evasion, Privilege Escalation",
+        Technique = "T1562.001, T1543.003",
+        FileName,
+        ProcessCommandLine = "",
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        AdditionalInfo = pack("FolderPath", FolderPath, "SHA1", SHA1);
+
+// -- Detection Logic 4: Multiple Security Processes Terminated --
+let av_termination_hits =
+    DeviceProcessEvents
+    | where ActionType == "ProcessTerminated" and FileName in (av_processes)
+    | where not(InitiatingProcessFileName in~ (knownGoodTerminators))
+    | summarize
+        StartTime = min(TimeGenerated),
+        TerminatedProcesses = make_set(FileName),
+        TerminatedProcessCount = dcount(FileName),
+        TerminatingProcessFileName = take_any(InitiatingProcessFileName),
+        TerminatingProcessCommandLine = take_any(InitiatingProcessCommandLine)
+        by DeviceName, AccountName, bin(TimeGenerated, 5m)
+    | where TerminatedProcessCount > 1
+    | project
+        TimeGenerated = StartTime,
+        DeviceName,
+        AccountName,
+        DetectionName = "Multiple Security Processes Terminated",
+        Tactic = "Defense Evasion",
+        Technique = "T1489",
+        FileName = TerminatingProcessFileName,
+        ProcessCommandLine = TerminatingProcessCommandLine,
+        InitiatingProcessFileName = "",
+        InitiatingProcessCommandLine = "",
+        AdditionalInfo = pack("TerminatedProcesses", TerminatedProcesses, "TerminatedProcessCount", TerminatedProcessCount);
+
+// -- Union all detection results --
+union hash_hits, service_creation_hits, driver_load_hits, av_termination_hits
+| project-reorder
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    DetectionName,
+    Tactic,
+    Technique,
+    FileName,
+    ProcessCommandLine,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    AdditionalInfo

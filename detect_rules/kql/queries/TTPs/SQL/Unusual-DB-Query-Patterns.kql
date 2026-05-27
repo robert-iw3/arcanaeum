@@ -1,0 +1,50 @@
+// Name: Unusual Database Query Pattern (SQLi Reconnaissance)
+// Author: RW
+// Date: 2025-08-23
+
+// Define a list of sensitive database schema/metadata tables often targeted during SQLi reconnaissance.
+let sensitive_schema_patterns = dynamic([
+    "information_schema",
+    "sys.objects",
+    "sys.tables",
+    "sys.columns",
+    "sys.databases",
+    "pg_catalog",
+    "pg_tables",
+    "v$session",
+    "all_tables",
+    "user_tables",
+    "sqlite_master"
+]);
+
+// Define the time window for the search. Reconnaissance may be slow, so a longer lookback is useful.
+let lookback = 1d;
+
+// Search Azure SQL security audit logs for query events.
+AzureDiagnostics
+| where TimeGenerated > ago(lookback)
+| where Category == "SQLSecurityAuditEvents" and action_id_s == "BCM" // BCM = Batch Completed
+| where isnotempty(statement_s)
+// Normalize the query statement for matching.
+| extend QueryStatement = tolower(statement_s)
+// Core detection logic: Look for queries that reference the sensitive schema tables.
+| where QueryStatement has_any (sensitive_schema_patterns)
+// FP Tuning:
+// - Legitimate database administration, monitoring tools, or ORMs might query these tables.
+// - Exclude known administrative users or application service principals that perform these actions.
+//   Example: | where principal_name_s !in ("db_admin_user", "monitoring_app")
+// - Exclude queries from trusted IP addresses.
+//   Example: | where client_ip_s !in ("192.168.1.100")
+// Extract the specific pattern that was matched for easier analysis.
+| extend MatchedPattern = extract(strcat("(",tostring(sensitive_schema_patterns),")"), 1, QueryStatement)
+// Extract and normalize key fields for investigation.
+| project
+    Timestamp = TimeGenerated,
+    ClientIP = client_ip_s,
+    DatabaseUser = principal_name_s,
+    ServerName = LogicalServerName_s,
+    DatabaseName = database_name_s,
+    ApplicationName = application_name_s,
+    SQLQuery = statement_s,
+    MatchedPattern
+| where isnotempty(ClientIP) and ClientIP != "127.0.0.1"

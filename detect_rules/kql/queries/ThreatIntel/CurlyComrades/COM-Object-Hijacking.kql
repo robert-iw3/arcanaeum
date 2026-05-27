@@ -1,0 +1,27 @@
+// Name: Curly COMrades COM Hijacking for Persistence
+// Author: RW
+// Date: 2025-08-13
+// Description: Detects COM hijacking of specific CLSIDs related to .NET NGEN tasks.
+// This is a novel persistence technique used by the Curly COMrades group to execute their MucorAgent malware.
+// False Positives: Medium. While highly specific to the actor's TTP, legitimate software installers or repair
+// utilities could theoretically modify these registry keys.
+// Investigate the initiating process and the file path in the CodeBase value.
+// MITRE ATT&CK: T1546.015
+
+// Define the specific CLSIDs associated with NGEN tasks that are targeted by the actor
+let targetClsids = dynamic([
+    "{de434264-8fe9-4c0b-a83b-89ebeebff78e}", // .NET Framework NGEN v4.0.30319 Critical
+    "{613fba38-a3df-4ab8-9674-5604984a299a}"  // NGenTaskLauncher.CriticalTaskHandler64
+]);
+DeviceRegistryEvents
+// Filter for registry modification events
+| where ActionType in ("RegistryValueSet", "RegistryKeyCreated")
+// The actor modifies the InprocServer32 subkey to point to their malicious DLL
+| where RegistryKey has_all (@"\SOFTWARE\Classes\CLSID\", @"\InprocServer32")
+// Check if the registry key contains one of the targeted CLSIDs
+| where RegistryKey has_any (targetClsids)
+// A key indicator is the modification of the CodeBase value to point to a malicious DLL.
+// The actor was observed using paths under C:\ProgramData\ for their malware.
+| where RegistryValueName =~ "CodeBase" and RegistryValueData has @"c:\programdata\"
+| extend Tactic = "Persistence", Technique = "T1546.015", Activity = "COM Hijacking via NGEN Task CLSID", SuspiciousEntity = RegistryValueData
+| project-reorder TimeGenerated, DeviceName, Tactic, Technique, Activity, SuspiciousEntity, RegistryKey, RegistryValueName, RegistryValueData, InitiatingProcessCommandLine

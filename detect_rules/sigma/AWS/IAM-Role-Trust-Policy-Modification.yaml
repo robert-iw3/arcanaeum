@@ -1,0 +1,36 @@
+title: AWS IAM Role Trust Policy Modified
+id: 5655364e-ec53-4c25-b7d4-595e357d8fbe
+status: experimental
+description: >-
+  Detects the modification of an IAM role's trust policy.
+  Attackers can modify trust policies to allow their own external AWS accounts or roles to assume the role,
+  thereby establishing persistence in the compromised environment.
+  This technique is used by tools like AWSDoor.
+author: RW
+date: 2025-09-21
+tags:
+  - attack.persistence
+  - attack.t1136.001
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    # Detects the API call to modify a role's trust relationship policy
+    eventName: 'UpdateAssumeRolePolicy'
+    eventSource: 'iam.amazonaws.com'
+    # Ensure the API call was successful
+    errorCode:
+  condition: selection
+fields:
+  - userIdentity.arn
+  - userIdentity.principalId
+  - requestParameters.roleName
+  - requestParameters.policyDocument
+  - sourceIPAddress
+falsepositives:
+  # Legitimate modifications of role trust policies by administrators for cross-account access.
+  # Automated infrastructure deployments (e.g., Terraform, CloudFormation) may modify trust policies.
+  # Setup of third-party integrations that require role assumption.
+  # To reduce noise, it is highly recommended to baseline the trusted external AWS account IDs and alert when a new, untrusted account ID is added to a trust policy.
+level: medium

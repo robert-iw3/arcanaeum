@@ -1,0 +1,62 @@
+rule dns_tunneling_indicators {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects potential DNS tunneling activity by identifying DNS queries with unusually long domain names, a high number of subdomains, high entropy, or queries for record types commonly abused for data transfer (e.g., TXT, NULL)."
+    tags = "DNS, EXFILTRATION, C2, TUNNELING"
+    tactic = "TA0011, TA0010"
+    technique = "T1071.004"
+    false_positives = "Content Delivery Networks (CDNs) or other services that use long, algorithmically generated domain names. Legitimate use of TXT records for domain verification (e.g., SPF, DKIM, Google/Microsoft verification)."
+    severity = "MEDIUM"
+
+  events:
+    $dns.metadata.event_type = "NETWORK_DNS"
+    $dns.principal.ip = $ip
+    $domain_name = $dns.network.dns.question.name
+
+    // Capture lexical features for analysis
+    $first_label = re.capture($domain_name, `^([^.]+)`)
+    $domain_length = strings.length($domain_name)
+    $label_count = strings.count($domain_name, ".") + 1
+    $first_label_entropy = math.entropy($first_label)
+
+    // Define thresholds for suspicious characteristics
+    $domain_length_threshold = 100
+    $label_count_threshold = 8
+    $entropy_threshold = 3.5
+
+    // Check for suspicious query types (TXT, NULL)
+    $is_suspicious_type = ($dns.network.dns.question.type = "TYPE_TXT" or $dns.network.dns.question.type = "TYPE_NULL")
+
+    // Filter out common benign TXT records to reduce false positives
+    $is_benign_txt = re.regex($domain_name, `(?i)^(_dmarc\.|_domainkey\.|google-site-verification=|ms=|v=spf1|_acme-challenge\.)`)
+
+    // Main detection logic: trigger if any indicator is met
+    (
+      $domain_length > $domain_length_threshold or
+      $label_count > $label_count_threshold or
+      $first_label_entropy > $entropy_threshold or
+      ($is_suspicious_type and not $is_benign_txt)
+    )
+
+  match:
+    // Group by source IP over a 10 minute window
+    $ip over 10m
+
+  outcome:
+    $risk_score = 40
+    $principal_ip = array_distinct($dns.principal.ip)
+    $principal_hostname = array_distinct($dns.principal.hostname)
+    $event_count = count_distinct($dns.metadata.id)
+    $suspicious_domains = array_distinct($dns.network.dns.question.name)
+    $query_types = array_distinct($dns.network.dns.question.type)
+    $process_command_line = array_distinct($dns.principal.process.command_line)
+    $process_path = array_distinct($dns.principal.process.file.full_path)
+    $max_domain_length = max($domain_length)
+    $max_label_count = max($label_count)
+    $max_entropy = max($first_label_entropy)
+
+  condition:
+    // Require at least 3 suspicious events from the same source to reduce noise
+    #dns > 2
+}

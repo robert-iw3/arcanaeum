@@ -1,0 +1,39 @@
+// Name: Potential DNS Tunneling via Virtual Network Interface Creation
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects the creation of a virtual network interface (TUN/TAP). Adversaries create these interfaces to
+//              encapsulate and tunnel protocols like DNS, aiming to bypass network security controls and exfiltrate
+//              data or establish C2 channels. This activity is a key prerequisite for tools like Iodine, which explicitly
+//              tunnel traffic over DNS through a TUN interface.
+// False Positive Sensitivity: Medium
+
+// --- Query Tuning ---
+// Define tools known to create or manage TUN/TAP interfaces.
+let tunneling_tools = dynamic(["ip", "tunctl", "openvpn", "iodine"]);
+// Allowlist for legitimate processes or scripts that are known to create TUN/TAP interfaces in your environment
+// (e.g., corporate VPN clients, container orchestration tools).
+let process_allowlist = dynamic(["corporate_vpn_installer.exe", "docker-proxy"]);
+
+DeviceProcessEvents
+| where TimeGenerated > ago(1h)
+| where InitiatingProcessFileName !in (process_allowlist) and ProcessFileName !in (process_allowlist)
+// Core detection logic looking for commands that create TUN/TAP interfaces.
+| where
+    // Detects usage of 'ip' command to create a tuntap interface. e.g., "ip tuntap add dev tun0 mode tun"
+    (ProcessFileName in~ ("ip", "ip.exe") and ProcessCommandLine has "tuntap" and ProcessCommandLine has "add") or
+    // Detects tools that inherently create or manage these interfaces.
+    (ProcessFileName in~ (tunneling_tools))
+// Potential for false positives:
+// - Legitimate VPN software not included in the allowlist.
+// - System administrators performing manual network configuration.
+// - Containerization software like Docker or Kubernetes.
+// - Investigate the parent process and user context to determine legitimacy.
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    ProcessFileName,
+    ProcessCommandLine,
+    ParentProcessFileName

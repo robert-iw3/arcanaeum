@@ -1,0 +1,53 @@
+rule AD_CS_Mismatched_Requester_SAN_Identity {
+  meta:
+    author = "RW"
+    description = "Detects potential AD CS abuse (ESC1/ESC6) where the certificate requester's identity does not match the identity specified in the Subject Alternative Name (SAN)."
+    severity = "CRITICAL"
+
+  events:
+    $e.metadata.event_type = "CERTIFICATE_REQUEST" // UDM event type related to certificate requests.
+    $e.metadata.event_code = 4886 // Windows Security Event ID for certificate request received.
+
+    // Ensure the event specifically indicates "The certificate has been issued" and has SAN attributes.
+    // UDM doesn't have a direct "issued" status for 4886, as 4886 is "received", not "issued".
+    // 4887 is "issued". If the intent is specifically for *issued* certs,
+    // you might consider `$e.metadata.event_code = 4887` instead, or a separate rule.
+    // The presence of "san:" in CertificateAttributes (UDM's principal.x509_certificate.san.other_name)
+    // implicitly covers "The certificate has been issued" in this context for ESC1/ESC6.
+    $e.principal.x509_certificate.san.other_name = /.*san:.*/ nocase
+
+    // Extract the UPN from the SAN in the CertificateAttributes (principal.x509_certificate.san.other_name).
+    re.regex($e.principal.x509_certificate.san.other_name, `san:.*?upn=(?<san_upn>[^&\s]+)`)
+
+    // Normalize the RequesterName and the SAN UPN for comparison.
+    // RequesterName maps to $e.principal.user.userid in UDM.
+    // Split and replace logic applied in outcome section.
+
+    // Filter out potential false positives: known requesters or templates.
+    // Example: Use a Chronicle Reference List for known benign requesters.
+    not $e.principal.user.userid in %known_legitimate_requesters
+
+    // Example: Exclude specific certificate templates if known to be benign for this scenario.
+    // Assuming CertificateTemplate maps to $e.principal.x509_certificate.template_name
+    not $e.principal.x509_certificate.template_name in ("KnownGoodTemplate1", "KnownGoodTemplate2")
+
+  outcome:
+    $event_time = $e.metadata.event_timestamp.epoch_seconds // _time
+    $host = $e.principal.hostname // host
+    $requester_name_raw = $e.principal.user.userid // RequesterName
+    $san_upn_raw = $san_upn // san_upn extracted by regex
+    $certificate_template = $e.principal.x509_certificate.template_name // CertificateTemplate
+
+    // Normalize requester_principal (from RequesterName)
+    $requester_principal = lower(re.replace($requester_name_raw, `^.*\\`, "")) // Remove domain prefix
+    $requester_principal = lower(re.replace($requester_principal, `@.*`, "")) // Remove domain suffix
+
+    // Normalize san_principal (from san_upn)
+    $san_principal = lower(re.replace($san_upn_raw, `@.*`, "")) // Remove domain suffix
+
+    // Compare normalized principals. This is the core detection logic.
+    $mismatched_principals = ($requester_principal != $san_principal)
+
+  condition:
+    $e and $mismatched_principals and $san_upn_raw != "" // Ensure SAN UPN was extracted and is not empty.
+}

@@ -1,0 +1,51 @@
+// Name: Mimikatz Command-Line Execution
+// Author: RW
+// Date: 2025-08-08
+// Description: Detects the execution of processes with command-line arguments characteristic of Mimikatz.
+//              This tool is widely used by threat actors for credential dumping and lateral movement.
+//              The intel suggests this may be injected into legitimate processes.
+// False Positive Sensitivity: Medium
+// Tactics: Credential Access
+// Techniques: T1055, T1003
+
+let mimikatz_keywords = dynamic([
+    "mimikatz",
+    "DumpCreds",
+    "sekurlsa::",
+    "lsadump::",
+    "kerberos::",
+    "privilege::",
+    "token::",
+    "crypto::",
+    "dpapi::",
+    "process::",
+    "vault::",
+    "::aadcookie",
+    "::detours",
+    "::memssp",
+    "::mflt",
+    "::ncroutemon",
+    "::ngcsign",
+    "::printnightmare",
+    "::skeleton",
+    "::preshutdown",
+    "::mstsc",
+    "::multirdp",
+    "rpc::"
+]);
+DeviceProcessEvents
+// Looks for a wide range of command-line arguments associated with Mimikatz modules and commands
+| where ProcessCommandLine has_any (mimikatz_keywords)
+// FP Tuning: Legitimate red team or security testing activities will trigger this rule.
+// If necessary, exclude authorized testing hosts or user accounts.
+// For example: where DeviceName !in ("redteam-host-01")
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    ProcessCommandLine,
+    InitiatingProcessCommandLine,
+    InitiatingProcessFileName,
+    ReportId,
+    ProcessId,
+    InitiatingProcessId

@@ -1,0 +1,29 @@
+// Name: Secret Blizzard AiTM via Captive Portal Redirect
+// Author: RW
+// Date: 2025-07-31
+// Description: Detects the download of an executable file shortly after a Windows captive portal redirect event. This TTP was used by the Secret Blizzard group to deliver malware via an Adversary-in-the-Middle (AiTM) position.
+// False Positives: Medium. Legitimate captive portals (e.g., on guest Wi-Fi networks) may require users to download a client or software. Tuning may be required to exclude legitimate software or network locations.
+// References: https://www.microsoft.com/en-us/security/blog/2025/07/31/frozen-in-transit-secret-blizzards-aitm-campaign-against-diplomats/
+let TimeFrame = 2m;
+// Find network events indicating a Windows captive portal check. This is a legitimate OS function.
+let CaptiveRedirectEvents = DeviceNetworkEvents
+| where RemoteUrl has "msftconnecttest.com/redirect"
+| project DeviceId, RedirectTimestamp = Timestamp, ReportId, RemoteUrl;
+// Find executable file downloads. The threat actor delivered an .exe file.
+let FileDownloadEvents = DeviceFileEvents
+| where ActionType == "FileDownloaded" and FileName endswith ".exe"
+| project DeviceId, DownloadTimestamp = Timestamp, FileName, FolderPath, SHA256, InitiatingProcessCommandLine;
+// Join redirect events with subsequent file downloads on the same device.
+CaptiveRedirectEvents
+| join kind=inner (FileDownloadEvents) on DeviceId
+// The core of the detection is correlating the redirect with a download within a short timeframe.
+| where DownloadTimestamp between (RedirectTimestamp .. (RedirectTimestamp + TimeFrame))
+| project
+    Timestamp = DownloadTimestamp,
+    DeviceId,
+    FileName,
+    FolderPath,
+    SHA256,
+    InitiatingProcessCommandLine,
+    RedirectTimestamp,
+    RedirectUrl = RemoteUrl

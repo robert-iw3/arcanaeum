@@ -1,0 +1,40 @@
+rule gcp_default_service_account_used_externally {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects the use of a default Google Cloud service account (Compute Engine or App Engine) from an IP address outside of the known Google Cloud IP space. This could indicate that the service account credentials have been compromised and are being used by an external attacker."
+    false_positives = "Legitimate use of default service accounts from authorized external tools, third-party integrations, or developers working from non-GCP locations. Tuning may be required to allowlist trusted external IP ranges."
+    tags = "GCP, CREDENTIAL_ACCESS, IAM"
+    tactic = "TA0006"
+    technique = "T1552.005"
+
+  events:
+    // Catches any GCP audit log event.
+    $e.metadata.event_type = "GCP_AUDIT_LOG"
+
+    // Check if the principal is a default Compute Engine or App Engine service account.
+    (
+      re.regex($e.principal.user.email_addr, `-compute@developer\.gserviceaccount\.com$`) or
+      re.regex($e.principal.user.email_addr, `@appspot\.gserviceaccount\.com$`)
+    )
+
+    // Exclude activity originating from within Google Cloud Compute Engine.
+    not re.regex($e.principal.user_agent, `GCE`, `nocase`)
+
+    // Ensure the source IP is not a known Google Cloud IP.
+    // A reference list (%gcp_ip_ranges) should be maintained with Google's public IP blocks.
+    not net.ip_in_range_cidr($e.principal.ip, %gcp_ip_ranges)
+
+  outcome:
+    // A medium risk score is assigned, as this is a strong indicator of compromise.
+    $risk_score = 60
+    $principal_ip = array_distinct($e.principal.ip)
+    $principal_user = $e.principal.user.email_addr
+    $principal_user_agent = $e.principal.user_agent
+    $project_id = $e.resource.project.name
+    $product_event_type = $e.metadata.product_event_type
+    $service_name = $e.metadata.product_name
+
+  condition:
+    $e
+}

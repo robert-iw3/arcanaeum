@@ -1,0 +1,76 @@
+{
+  "data": {
+    "type": "signal_correlation",
+    "attributes": {
+      "name": "Static Tundra Group Activity",
+      "enabled": true,
+      "cases": [
+        {
+          "name": "Static Tundra C2 IP Detected",
+          "status": "high",
+          "query": "source:(paloalto OR opsec OR cisco_asa OR stream) (@network.source.ip:(185.141.24.222 OR 185.82.202.34 OR 185.141.24.28 OR 185.82.200.181) OR @network.destination.ip:(185.141.24.222 OR 185.82.202.34 OR 185.141.24.28 OR 185.82.200.181))"
+        },
+        {
+          "name": "Potential Inbound TFTP for Config Exfil",
+          "status": "medium",
+          "query": "source:(paloalto OR opsec OR cisco_asa OR stream) @network.transport:udp @network.destination.port:69"
+        },
+        {
+          "name": "GRE Tunnel Established for Traffic Collection",
+          "status": "medium",
+          "query": "source:(paloalto OR opsec OR cisco_asa OR stream) @network.protocol:gre"
+        },
+        {
+          "name": "Local TFTP Server Enabled for Config Exfil",
+          "status": "high",
+          "query": "source:(cisco_ios OR syslog) @message:*tftp-server\\ nvram:startup-config*"
+        },
+        {
+          "name": "Config Exfil via TFTP Redirect",
+          "status": "high",
+          "query": "source:(cisco_ios OR syslog) @message:*redirect\\ tftp://*"
+        },
+        {
+          "name": "Config Exfil via FTP",
+          "status": "high",
+          "query": "source:(cisco_ios OR syslog) @message:*copy\\ running-config\\ ftp://*"
+        },
+        {
+          "name": "ACL Modification Detected",
+          "status": "medium",
+          "query": "source:(cisco_ios OR syslog) @message:*access-list\\ *"
+        },
+        {
+          "name": "TACACS+ Config Modification Detected",
+          "status": "medium",
+          "query": "source:(cisco_ios OR syslog) @message:*tacacs-server\\ *"
+        }
+      ],
+      "group_by_fields": ["@host", "@user.name", "@network.source.ip", "@network.destination.ip"],
+      "distinct_fields": ["case_id"],
+      "correlation": {
+        "expression": "distinct_count >= 1",
+        "timeframe": "1h"
+      },
+      "message": "Potential Static Tundra activity detected: {distinct_count} technique(s) on host {@host} by user {@user.name}. Techniques: {case_names}. Source: {@network.source.ip}, Destination: {@network.destination.ip}, Command: {@command}",
+      "severity": "high",
+      "tags": [
+        "security:attack",
+        "tactic:TA0001",
+        "tactic:TA0003",
+        "tactic:TA0005",
+        "tactic:TA0009",
+        "tactic:TA0010",
+        "technique:T1190",
+        "technique:T1078",
+        "technique:T1098.002",
+        "technique:T1562.007",
+        "technique:T1020",
+        "technique:T1048"
+      ],
+      "options": {
+        "evaluation_window": "1h"
+      }
+    }
+  }
+}

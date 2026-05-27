@@ -1,0 +1,25 @@
+# Chrony configuration for Kubernetes hardening
+# Use secure NTP servers
+server 0.pool.ntp.org iburst
+server 1.pool.ntp.org iburst
+server 2.pool.ntp.org iburst
+server 3.pool.ntp.org iburst
+
+# Allow only local time queries
+allow 127.0.0.1
+
+# Deny all other access
+deny all
+
+# Enable logging
+logdir /var/log/chrony
+log measurements statistics tracking
+
+# Set maximum clock error
+maxupdateskew 100.0
+
+# Enable hardware timestamping if available
+hwtimestamp *
+
+# Restrict configuration changes
+cmdport 0

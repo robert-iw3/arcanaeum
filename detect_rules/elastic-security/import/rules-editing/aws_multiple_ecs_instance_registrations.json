@@ -1,0 +1,59 @@
+{
+  "rule_id": "aws_multiple_ecs_instance_registrations",
+  "name": "AWS Multiple ECS Container Instance Registrations From Same Source",
+  "description": "Detects a surge in ECS container instance registration activity from a single IP address. This could indicate a misconfigured script or a malicious actor launching multiple instances for persistence or resource abuse.",
+  "severity": "medium",
+  "enabled": true,
+  "language": "esql",
+  "query": "from logs-aws.cloudtrail-* | where event.action == 'RegisterContainerInstance' | stats count = COUNT(*), distinct_user_agents = COUNT(DISTINCT user_agent.original), user_agents = ARRAY_AGG(user_agent.original) BY DATE_TRUNC('day', @timestamp), source.ip, aws.cloudtrail.userIdentity.arn, aws.cloudtrail.awsRegion | where count > 1 | keep source.ip, aws.cloudtrail.userIdentity.arn, aws.cloudtrail.awsRegion, count, distinct_user_agents, user_agents",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0003",
+        "name": "Persistence",
+        "reference": "https://attack.mitre.org/tactics/TA0003/"
+      },
+      "technique": [
+        {
+          "id": "T1543.003",
+          "name": "Windows Service",
+          "reference": "https://attack.mitre.org/techniques/T1543/003/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0002",
+        "name": "Execution",
+        "reference": "https://attack.mitre.org/tactics/TA0002/"
+      },
+      "technique": [
+        {
+          "id": "T1059",
+          "name": "Command and Scripting Interpreter",
+          "reference": "https://attack.mitre.org/techniques/T1059/"
+        }
+      ]
+    }
+  ],
+  "interval": "24h",
+  "from": "now-24h",
+  "max_signals": 100,
+  "risk_score": 50,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [],
+  "tags": [
+    "AWS",
+    "CloudTrail",
+    "ECS"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "source.ip, aws.cloudtrail.userIdentity.arn"
+}

@@ -1,0 +1,190 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "Static Code Analyzer API",
+    "description": "API for managing static code analysis results, including vulnerabilities and CVE matches.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5000",
+      "description": "Local development server"
+    }
+  ],
+  "paths": {
+    "/results": {
+      "get": {
+        "summary": "Retrieve scan results",
+        "description": "Fetches the latest scan results and summary. Returns empty defaults if no results exist.",
+        "responses": {
+          "200": {
+            "description": "Successful response with results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Results"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string" },
+                    "code": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Submit scan results",
+        "description": "Posts new scan results for storage and validation. Requires JWT authentication.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Results"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Results saved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string" },
+                    "code": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or missing JWT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string" },
+                    "code": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string" },
+                    "code": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "Results": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "function": { "type": "string", "minLength": 1 },
+                "description": { "type": "string", "minLength": 1 },
+                "category": { "type": "string", "enum": ["security", "system", "file"] },
+                "severity": { "type": "string", "enum": ["Low", "Medium", "High", "Critical"] },
+                "owasp_category": { "type": "string" },
+                "file": { "type": "string", "minLength": 1 },
+                "line": { "type": "integer", "minimum": 1 },
+                "language": { "type": "string", "minLength": 1 },
+                "timestamp": { "type": "string", "format": "date-time" },
+                "scan_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" }
+              },
+              "required": ["function", "description", "category", "severity", "file", "line", "language", "timestamp", "scan_id"]
+            }
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "total_files": { "type": "integer", "minimum": 0 },
+              "files_scanned": { "type": "integer", "minimum": 0 },
+              "vulnerabilities": { "type": "integer", "minimum": 0 },
+              "scan_start": { "type": "string", "format": "date-time" },
+              "scan_end": { "type": "string", "format": "date-time" },
+              "by_category": { "type": "object" },
+              "by_language": { "type": "object" },
+              "by_severity": { "type": "object" },
+              "by_owasp": { "type": "object" },
+              "cve_matches": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "dependency": { "type": "string" },
+                    "version": { "type": "string" },
+                    "cve_id": { "type": "string" },
+                    "file": { "type": "string" }
+                  },
+                  "required": ["dependency", "version", "cve_id", "file"]
+                }
+              },
+              "scan_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" }
+            },
+            "required": ["total_files", "files_scanned", "vulnerabilities", "scan_id"]
+          }
+        },
+        "required": ["results", "summary"]
+      }
+    }
+  }
+}

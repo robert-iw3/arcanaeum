@@ -1,0 +1,68 @@
+// Name: Malicious Activity by Software Package Manager (Protestware)
+// Author: RW
+// Date: 2025-08-20
+// Description: Detects when a software package manager or development tool spawns a suspicious child process for reconnaissance or execution.
+// This behavior can indicate a compromised software package or "protestware" executing a malicious payload, as seen in the node-ipc incident.
+// Tactic: Execution
+// Technique: T1195 - Supply Chain Compromise
+// False Positive Sensitivity: Medium
+
+// Define a list of processes associated with software package management and development.
+// These are often trusted and could be abused in a supply chain attack.
+let package_managers_and_dev_tools = dynamic([
+    "npm.cmd",
+    "npx.cmd",
+    "node.exe",
+    "python.exe",
+    "pip.exe",
+    "pip3.exe",
+    "gem.bat",
+    "ruby.exe",
+    "nuget.exe",
+    "dotnet.exe",
+    "cargo.exe",
+    "go.exe"
+]);
+
+// Define suspicious child processes often used for reconnaissance or establishing a foothold.
+let suspicious_child_processes = dynamic([
+    "powershell.exe",
+    "pwsh.exe",
+    "cmd.exe",
+    "wscript.exe",
+    "cscript.exe",
+    "rundll32.exe",
+    "whoami.exe",
+    "hostname.exe",
+    "ipconfig.exe",
+    "nltest.exe",
+    "systeminfo.exe",
+    "quser.exe",
+    "qwinsta.exe",
+    "net.exe",
+    "netstat.exe",
+    "curl.exe",
+    "wget.exe"
+]);
+
+DeviceProcessEvents
+// Look for process creation events.
+| where ActionType == "ProcessCreated"
+// The parent process is a package manager or development tool.
+| where InitiatingProcessFileName in~ (package_managers_and_dev_tools)
+// The child process is a suspicious utility.
+| where FileName in~ (suspicious_child_processes)
+// Potential for False Positives: Some packages use post-install scripts that may legitimately run commands.
+// However, spawning reconnaissance tools is highly anomalous.
+// Exclude known legitimate scripts for your environment.
+// For example: | where not (InitiatingProcessCommandLine contains "install-my-legit-tool.js" and ProcessCommandLine contains "net.exe start")
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    ParentProcessName = InitiatingProcessFileName,
+    ParentProcessCommandLine = InitiatingProcessCommandLine,
+    ChildProcessName = FileName,
+    ChildProcessCommandLine = ProcessCommandLine,
+    ReportId,
+    DeviceId

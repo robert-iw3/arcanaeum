@@ -1,0 +1,48 @@
+rule unusual_network_share_enumeration_by_browser {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects a browser process enumerating or reading an unusually high number of files from a network share. This behavior is a strong indicator of the FileJacking technique, where a malicious website uses browser APIs to exfiltrate data from mapped drives."
+    false_positives = "Legitimate web applications that interact heavily with network shares (e.g., web-based file explorers, some SharePoint integrations) could trigger this alert. Tuning the file access threshold or excluding trusted applications may be necessary."
+    tactic = "TA0009, TA0002"
+    technique = "T1083, T1119, T1059"
+    tags = "BROWSER, FILEJACKING, COLLECTION, NETWORK_SHARE, WINDOWS"
+
+  events:
+    // Event for a file being opened, which can indicate a read operation.
+    $file.metadata.event_type = "FILE_OPEN"
+
+    // Filter for activity initiated by common web browsers.
+    $file.principal.process.file.name in ("msedge.exe", "chrome.exe", "firefox.exe", "brave.exe", "opera.exe")
+
+    // Core logic: Focus on access to network shares, identified by UNC paths.
+    re.regex($file.target.file.full_path, `^\\\\.*`)
+
+    // Define match variables for correlation.
+    $file.principal.hostname = $hostname
+    $file.principal.user.userid = $user
+    $file.principal.process.pid = $pid
+    $file.principal.process.file.name = $process_name
+
+  match:
+    // Group events by host, user, and the specific browser process over a 10 minute window.
+    $hostname, $user, $pid, $process_name over 10m
+
+  outcome:
+    // Tunable threshold for the number of unique files accessed from a network share.
+    $file_access_threshold = 50
+    $unique_file_count = count_distinct($file.target.file.full_path)
+    $risk_score = if($unique_file_count > 200, 75, 55)
+
+    // Populate outcome fields for alert context.
+    $principal_hostname = $hostname
+    $principal_user_userid = $user
+    $principal_process_pid = $pid
+    $principal_process_name = $process_name
+    $principal_process_command_line = array_distinct($file.principal.process.command_line)
+    $accessed_files = array_distinct($file.target.file.full_path)
+
+  condition:
+    // Trigger an alert if the number of unique files accessed exceeds the defined threshold.
+    $unique_file_count > $file_access_threshold
+}

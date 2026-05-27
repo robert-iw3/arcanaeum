@@ -1,0 +1,63 @@
+# Use ARG to set the Python version
+ARG PYTHON_VERSION=3.10.4
+FROM ubuntu:20.04
+
+SHELL ["/bin/bash", "-i", "-c"]
+
+# Define maintainer information
+LABEL maintainer="ozabramovs@gmail.com"
+
+# Define the PyInstaller version and necessary environment variables
+ARG PYINSTALLER_VERSION=6.11.1
+ENV PYPI_URL=https://pypi.python.org/
+ENV PYPI_INDEX_URL=https://pypi.python.org/simple
+ENV PYTHONUNBUFFERED=1
+
+# Install dependencies required for cross-building
+# (Install both build-essential tools and libraries for multiple architectures)
+ARG DEBIAN_FRONTEND=noninteractive
+ENV TZ=Europe/London
+RUN dpkg --add-architecture amd64 && apt-get update && apt-get install -y \
+    build-essential \
+    gcc \
+    libc6-dev \
+    libssl-dev \
+    libffi-dev \
+    wget \
+    libc6-i386:amd64 \
+    lib32z1:amd64 \
+    lib32ncurses6:amd64 \
+    lib32stdc++6:amd64 \
+    python3-tk \
+    python-tk \
+    python3-pip \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libice6 \
+    libqt5core5a \
+    libqt5gui5 \
+    libqt5widgets5 \
+    qemu-user-static \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install PyInstaller
+RUN pip install --no-cache-dir pyinstaller==$PYINSTALLER_VERSION
+
+# Install the necessary dynamic linker for x86_64 (adjust as needed)
+RUN apt-get update && apt-get install -y \
+    libc6:amd64 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the entrypoint script
+COPY entrypoint-linux.sh /entrypoint.sh
+
+# Set execute permissions for the entrypoint
+RUN chmod +x /entrypoint.sh
+
+# Set the working directory and mount the volume
+VOLUME /src/
+WORKDIR /src/
+
+# Set the entrypoint
+ENTRYPOINT ["/entrypoint.sh"]

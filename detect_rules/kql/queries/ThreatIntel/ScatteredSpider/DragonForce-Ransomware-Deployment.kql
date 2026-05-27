@@ -1,0 +1,30 @@
+// title: DragonForce Ransomware ESXi Kill Process
+// description: Detects the use of the 'esxcli vm process kill' command on a VMware ESXi host. This command forcibly terminates a running virtual machine and is a common precursor technique used by ransomware, such as DragonForce deployed by Scattered Spider, to unlock and encrypt virtual machine disk files (VMDKs).
+// author: RW
+// date: 2025-07-31
+// references:
+//   - https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-320a
+// tags:
+//   - attack.t1486
+//   - group.scattered_spider
+
+DeviceProcessEvents
+| where TimeGenerated > ago(1d)
+// --_comment: Filter for events on VMware ESXi hosts. This may need to be adjusted based on your environment's naming convention or specific OSPlatform field for ESXi.
+| where DeviceName has "esxi" or OSPlatform == "VMware ESXi"
+// --_comment: Look for the execution of the 'esxcli' command, the primary management tool for ESXi.
+| where FileName =~ "esxcli"
+// --_comment: Specifically hunt for the 'vm process kill' subcommand, which is used to forcibly stop virtual machines before encryption.
+| where ProcessCommandLine has "vm process kill"
+// --_comment: Tuning: This command can be used by administrators for troubleshooting, but its use is infrequent. Widespread use or execution by an unauthorized account is highly suspicious. Consider creating an allowlist of authorized VMware administrator accounts or correlating this activity with other suspicious behaviors.
+| project-reorder
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    FileName,
+    ProcessCommandLine,
+    FolderPath,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    MD5,
+    SHA256

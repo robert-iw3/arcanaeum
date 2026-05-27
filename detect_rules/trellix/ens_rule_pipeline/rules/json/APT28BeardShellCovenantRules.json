@@ -1,0 +1,68 @@
+[
+  {
+    "type": "expert",
+    "name": "Detect APT28 Malicious Document Dropping Files",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"winword.exe\" }\n   }\n   Target {\n      Match FILE {\n         Include OBJECT_NAME { -v \"C:\\\\Users\\\\**\\\\AppData\\\\Roaming\\\\Microsoft\\\\Protect\\\\ctec.dll\" -v \"C:\\\\Users\\\\**\\\\AppData\\\\Local\\\\windows.png\" }\n         Include -access \"CREATE,WRITE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects winword.exe creating ctec.dll (decryption loader) or windows.png (stego shellcode) in user AppData paths. Part of 2025 APT28 spear-phishing via Signal delivering Covenant/BeardShell. Tune for any legitimate file creation in these locations."
+  },
+  {
+    "type": "expert",
+    "name": "Detect APT28 COM Hijacking via Registry",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"reg.exe\" -v \"powershell.exe\" }\n   }\n   Target {\n      Match REGISTRY {\n         Include OBJECT_NAME { -v \"HKEY_CURRENT_USER\\\\Software\\\\Classes\\\\CLSID\\\\{2227A280-3AEA-1069-A2DE-08002B30309D}\\\\InProcServer32\" -v \"HKEY_CURRENT_USER\\\\Software\\\\Classes\\\\CLSID\\\\{2DEA658F-54C1-4227-AF9B-260AB5FC3543}\\\\InProcServer32\" }\n         Include -access \"WRITE,CREATE\"\n         Include -value_data \"*ctec.dll*\"\n         Include -value_data \"*PlaySndSrv.dll*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects reg.exe/powershell.exe writing malicious DLLs (ctec.dll / PlaySndSrv.dll) to specific CLSID\\InProcServer32 keys for COM hijacking persistence. Highly specific IOC from 2025 APT28 campaigns; very low false-positive risk."
+  },
+  {
+    "type": "expert",
+    "name": "Detect APT28 SystemSoundsService Scheduled Task",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"schtasks.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*Microsoft\\\\Windows\\\\Multimedia\\\\SystemSoundsService*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects schtasks.exe creating/modifying the SystemSoundsService task (mimics legitimate Windows Multimedia task). Used by APT28 for persistence in 2025 campaigns. Tune for any legitimate scheduled task changes in this path."
+  },
+  {
+    "type": "firewall",
+    "name": "Detect APT28 C2 via Icedrive and Koofr",
+    "application": "**",
+    "direction": "out",
+    "protocol": "TCP",
+    "port": "80,443",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Reports outbound HTTP/HTTPS to ports commonly used for APT28 cloud C2 (api.icedrive.net for BeardShell; app.koofr.net for Covenant Grunt staging). 2025 campaigns heavily abuse these legitimate services. Use Web Control for domain-specific blocking/tuning; exclude known cloud usage."
+  },
+  {
+    "type": "expert",
+    "name": "Detect APT28 PowerShell ChaCha20-Poly1305 Decryption",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"powershell.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "Medium",
+    "enabled": true,
+    "description": "Broad proxy detection for powershell.exe process creation. APT28's BeardShell uses ChaCha20-Poly1305 to decrypt payloads/scripts from cloud C2. ENS cannot detect specific crypto ops; use as trigger for correlation with network or file activity."
+  },
+  {
+    "type": "expert",
+    "name": "Detect SLIMAGENT Screenshot Artifacts",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match FILE {\n         Include OBJECT_NAME { -v \"C:\\\\Users\\\\**\\\\AppData\\\\Local\\\\Temp\\\\Desktop_*.svc\" }\n         Include -access \"CREATE,WRITE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "Medium",
+    "enabled": true,
+    "description": "Detects creation/write of Desktop_<date_time>.svc files in %TEMP% — encrypted screenshot/keylog/clipboard artifacts from SLIMAGENT (APT28 spyware observed 2024-2025). Specific pattern; tune if legitimate .svc files exist in TEMP."
+  },
+  {
+    "type": "expert",
+    "name": "Detect BEARDSHELL and COVENANT Malware Files",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match FILE {\n         Include OBJECT_NAME { -v \"C:\\\\**\\\\ksmqsyck.dx4.exe\" -v \"C:\\\\**\\\\PlaySndSrv.dll\" -v \"C:\\\\**\\\\sample-03.wav\" -v \"C:\\\\**\\\\BeardShell.dll\" }\n         Include -access \"CREATE,EXECUTE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects creation/execution of known APT28 2025 malware artifacts: Covenant Grunt (ksmqsyck.dx4.exe), PlaySndSrv.dll loader, sample-03.wav (shellcode container), BeardShell.dll. Path-based IOC; complement with EDR hash detection for higher fidelity."
+  }
+]

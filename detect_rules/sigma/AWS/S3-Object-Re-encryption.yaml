@@ -1,0 +1,32 @@
+title: AWS S3 Object Re-encryption with Attacker-Controlled Key
+description: >-
+  Detects when an S3 object is uploaded or copied using server-side encryption with either a KMS key (SSE-KMS) or a customer-provided key (SSE-C).
+  This is a key tactic used in S3 ransomware attacks where an attacker re-encrypts objects with a key they control, rendering the data inaccessible to the owner.
+references:
+  - https://rhinosecuritylabs.com/aws/s3-ransomware-part-2-prevention-and-defense/
+  - https://www.halcyon.ai/blog/abusing-aws-native-services-ransomware-encrypting-s3-buckets-with-sse-c
+  - https://www.varonis.com/blog/ransomware-in-aws-s3
+author: RW
+date: 2025-08-19
+tags:
+  - attack.impact
+  - attack.t1486
+logsource:
+  product: aws
+  service: s3
+detection:
+  selection_putobject:
+    # Detects the action of uploading or copying an object
+    eventName: 'PutObject'
+  selection_sse_kms:
+    # Detects the use of Server-Side Encryption with AWS KMS
+    requestParameters.x-amz-server-side-encryption-aws-kms-key-id: '*'
+  selection_sse_c:
+    # Detects the use of Server-Side Encryption with Customer-Provided Keys
+    requestParameters.x-amz-server-side-encryption-customer-algorithm: '*'
+  condition: selection_putobject and (selection_sse_kms or selection_sse_c)
+falsepositives:
+  - Legitimate applications may use SSE-KMS or SSE-C to encrypt data in S3 as part of normal operations.
+  - To reduce false positives, it is highly recommended to filter out known and approved KMS key ARNs used in your environment.
+  - For example: `... and not requestParameters.x-amz-server-side-encryption-aws-kms-key-id: 'arn:aws:kms:us-east-1:123456789012:key/your-legit-key-id'`
+level: medium

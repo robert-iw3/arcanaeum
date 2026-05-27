@@ -1,0 +1,89 @@
+{
+  "rule_id": "aws_suspicious_ssh_key_injection",
+  "name": "AWS Suspicious SSH Key Injection",
+  "description": "Detects the injection of SSH public keys into EC2 instances via SendSSHPublicKey or SendSerialConsoleSSHPublicKey from unknown or non-trusted roles. This can be used by an attacker to gain backdoor access to instances.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "from logs-aws.cloudtrail-* | where event.action in ('SendSSHPublicKey', 'SendSerialConsoleSSHPublicKey') and error.code is null and source.ip != '10.0.0.0/8' and not (aws.cloudtrail.user_identity.arn like '%arn:aws:iam::123456789012:role/known-admin-role%') | stats count = COUNT(*), dest_instance_id = ARRAY_AGG(aws.cloudtrail.request_parameters.instanceId), dest_os_user = ARRAY_AGG(aws.cloudtrail.request_parameters.instanceOSUser) BY @timestamp, event.action, aws.cloudtrail.aws_region, source.ip, aws.cloudtrail.user_identity.arn | keep @timestamp, aws.cloudtrail.user_identity.arn, source.ip, aws.cloudtrail.aws_region, event.action, dest_instance_id, dest_os_user, count",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0003",
+        "name": "Persistence",
+        "reference": "https://attack.mitre.org/tactics/TA0003/"
+      },
+      "technique": [
+        {
+          "id": "T1098",
+          "name": "Account Manipulation",
+          "reference": "https://attack.mitre.org/techniques/T1098/"
+        },
+        {
+          "id": "T1098.001",
+          "name": "Additional Cloud Credentials",
+          "reference": "https://attack.mitre.org/techniques/T1098/001/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0008",
+        "name": "Lateral Movement",
+        "reference": "https://attack.mitre.org/tactics/TA0008/"
+      },
+      "technique": [
+        {
+          "id": "T1021",
+          "name": "Remote Services",
+          "reference": "https://attack.mitre.org/techniques/T1021/"
+        },
+        {
+          "id": "T1021.004",
+          "name": "SSH",
+          "reference": "https://attack.mitre.org/techniques/T1021/004/"
+        }
+      ]
+    }
+  ],
+  "interval": "10m",
+  "from": "now-10m",
+  "max_signals": 100,
+  "risk_score": 90,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://docs.aws.amazon.com/ec2-instance-connect/latest/APIReference/API_SendSSHPublicKey.html",
+    "https://stratus-red-team.cloud/attack-techniques/AWS/aws.lateral-movement.ec2-instance-connect/"
+  ],
+  "tags": [
+    "AWS",
+    "CloudTrail",
+    "EC2",
+    "SSH",
+    "Persistence"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "exemptions": [
+    {
+      "name": "known_admin_roles_exemption",
+      "description": "Exempts known administrative roles from the SSH key injection rule.",
+      "conditions": [
+        {
+          "field": "aws.cloudtrail.userIdentity.arn",
+          "operator": "included",
+          "type": "list",
+          "list_id": "known_admin_roles"
+        }
+      ],
+      "enabled": true
+    }
+  ],
+  "custom_query_fields": [],
+  "event_group": "aws.cloudtrail.user_identity.arn, event.action, source.ip"
+}

@@ -1,0 +1,36 @@
+# pipeline-config.yaml
+---
+sentinelone:
+  api_url: "https://your-company.s1.systems/api/v2.0"   # ← your real SentinelOne API base URL
+  # api_token: "YOUR_API_TOKEN_HERE"                    # ← OPTIONAL: better to use env var for security
+  sites:                                                # ← list all sites you want queries to run against
+    - "1727154229628829519"
+    - "9876543210987654321"
+    # Add as many as needed
+
+parsing:
+  markdown_files:                                       # ← explicit list of files to process
+    - "CVE-2025-14847_mongobleed_leak.md"
+    - "serpentine_cloudflare_tunnels.md"
+    - "UKC-1230_Comburglar.md"
+    - "esxi_vm_escape.md"
+    # You can add more here...
+
+  # Alternative: process ALL .md files in these directories (except readme.md)
+  # directories:
+  #   - "threat_intel_2025"
+  #   - "hunts/active"
+
+output:
+  json_directory: "./generated_queries"                 # Where to put the resulting .json files
+  time_range:                                           # Default time window for queries
+    from: "2025-01-01T00:00:00.000Z"
+    to:   "2026-01-11T23:59:59.999Z"                    # Current date context
+  limit: 1000
+  query_type: "events"
+  is_live: true
+
+# Optional: logging / behavior
+logging:
+  verbose: true
+  cleanup_after_run: false                              # Whether to delete generated JSONs after upload

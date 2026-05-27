@@ -1,0 +1,29 @@
+stages:
+  - generate
+  - upload
+
+generate:
+  stage: generate
+  image: python:3.12-slim
+  script:
+    - pip install crowdstrike-falconpy pyyaml
+    - python pipeline.py --generate
+  artifacts:
+    paths:
+      - ./import/
+    expire_in: 1 day
+  only:
+    - main
+
+upload:
+  stage: upload
+  image: python:3.12-slim
+  script:
+    - pip install crowdstrike-falconpy pyyaml
+    - python pipeline.py --upload --rulegroup_id $RULEGROUP_ID
+  variables:
+    FALCON_CLIENT_ID: $FALCON_CLIENT_ID
+    FALCON_CLIENT_SECRET: $FALCON_CLIENT_SECRET
+  when: manual
+  only:
+    - main

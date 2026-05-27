@@ -1,0 +1,86 @@
+rule dirtybulk_multi_stage_infection_chain {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects a multi-stage DIRTYBULK infection chain involving initial access from a USB, defense evasion, persistence, and C2 communications. This rule correlates multiple TTPs associated with the DIRTYBULK campaign."
+    false_positives = "Legitimate administrative activity may overlap with individual patterns. The correlation of multiple stages significantly reduces the likelihood of false positives."
+    tactic = "TA0001, TA0002, TA0003, TA0005, TA0011"
+    technique = "T1204.002, T1562.001, T1053.005, T1543.003, T1102"
+    tags = "CRIMEWARE, COINMINER, DIRTYBULK, PUMPBENCH, USB"
+
+  events:
+    // Event 1: Initial Access & Execution via DLL Side-loading
+    // Detects the execution of printui.exe from the suspicious "Windows " directory.
+    $initial_access.metadata.event_type = "PROCESS_LAUNCH"
+    $initial_access.principal.hostname = $hostname
+    re.regex($initial_access.target.process.file.full_path, `\\Windows\s\\System32\\printui\.exe$`) nocase
+
+    // Event 2: Defense Evasion
+    // Detects PowerShell being used to add exclusions to Windows Defender for the malware's directories.
+    $defense_evasion.metadata.event_type = "PROCESS_LAUNCH"
+    $defense_evasion.principal.hostname = $hostname
+    re.regex($defense_evasion.target.process.file.full_path, `\\powershell\.exe$`) nocase
+    re.regex($defense_evasion.target.process.command_line, `Add-MpPreference\s+-ExclusionPath`) nocase
+    re.regex($defense_evasion.target.process.command_line, `("|\')C:\\Windows\s?\\System32("|\')`) nocase
+
+    // Event 3: Persistence via Scheduled Task
+    // Detects the creation of a scheduled task to run on logon with high privileges, a technique used by HIGHREPS.
+    $persistence_schtask.metadata.event_type = "PROCESS_LAUNCH"
+    $persistence_schtask.principal.hostname = $hostname
+    re.regex($persistence_schtask.target.process.file.full_path, `\\schtasks\.exe$`) nocase
+    re.regex($persistence_schtask.target.process.command_line, `\s/create\s`) nocase
+    re.regex($persistence_schtask.target.process.command_line, `\s/sc\s+onlogon\s`) nocase
+    re.regex($persistence_schtask.target.process.command_line, `\s/rl\s+highest\s`) nocase
+
+    // Event 4: Persistence via Windows Service
+    // Detects service creation pointing to svchost.exe with DcomLaunch or a ServiceDll registry modification.
+    $persistence_service.metadata.event_type = "PROCESS_LAUNCH"
+    $persistence_service.principal.hostname = $hostname
+    (
+      (
+        re.regex($persistence_service.target.process.file.full_path, `\\sc\.exe$`) nocase
+        and re.regex($persistence_service.target.process.command_line, `\screate\s`) nocase
+        and re.regex($persistence_service.target.process.command_line, `binPath=.*svchost\.exe\s-k\sDcomLaunch`) nocase
+      ) or (
+        re.regex($persistence_service.target.process.file.full_path, `\\reg\.exe$`) nocase
+        and re.regex($persistence_service.target.process.command_line, `\\services\\.*\\Parameters`) nocase
+        and re.regex($persistence_service.target.process.command_line, `\s/v\s+ServiceDll\s`) nocase
+      )
+    )
+
+    // Event 5: C2 Communication
+    // Detects svchost.exe (DcomLaunch) making an outbound connection to port 5432 (PostgreSQL), characteristic of PUMPBENCH.
+    $c2_comms.metadata.event_type = "NETWORK_CONNECTION"
+    $c2_comms.principal.hostname = $hostname
+    re.regex($c2_comms.principal.process.file.full_path, `\\svchost\.exe$`) nocase
+    re.regex($c2_comms.principal.process.command_line, `DcomLaunch`) nocase
+    $c2_comms.target.port = 5432
+    // Filter for external IPs to reduce potential noise from legitimate internal PostgreSQL servers.
+    not net.ip_in_range_cidr($c2_comms.target.ip, "10.0.0.0/8")
+    not net.ip_in_range_cidr($c2_comms.target.ip, "172.16.0.0/12")
+    not net.ip_in_range_cidr($c2_comms.target.ip, "192.168.0.0/16")
+    not net.ip_in_range_cidr($c2_comms.target.ip, "127.0.0.0/8")
+
+  match:
+    $hostname over 24h
+
+  outcome:
+    // A higher risk score is assigned due to the correlation of multiple malicious activities.
+    $risk_score = 75
+    $principal_hostname = $hostname
+    $initial_access_cmds = array_distinct($initial_access.target.process.command_line)
+    $defense_evasion_cmds = array_distinct($defense_evasion.target.process.command_line)
+    $persistence_schtask_cmds = array_distinct($persistence_schtask.target.process.command_line)
+    $persistence_service_cmds = array_distinct($persistence_service.target.process.command_line)
+    $c2_dest_ips = array_distinct($c2_comms.target.ip)
+    $c2_process_cmds = array_distinct($c2_comms.principal.process.command_line)
+
+  condition:
+    // The condition requires the specific initial access vector plus at least one other stage of the attack.
+    $initial_access and (
+      $defense_evasion or
+      $persistence_schtask or
+      $persistence_service or
+      $c2_comms
+    )
+}

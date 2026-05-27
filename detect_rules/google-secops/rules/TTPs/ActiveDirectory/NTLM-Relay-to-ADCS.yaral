@@ -1,0 +1,34 @@
+rule NTLM_Relay_to_AD_CS_Detection {
+  meta:
+    author = "RW"
+    description = "Detects potential NTLM relay attacks against AD CS (ESC8/ESC11) by identifying successful NTLM authentications (Event ID 4776) from machine accounts to known AD CS servers."
+    severity = "CRITICAL"
+
+  events:
+    $e.metadata.event_type = "USER_LOGIN" // Windows Event ID 4776 maps to USER_LOGIN or a similar authentication event.
+    $e.metadata.event_code = 4776 // Windows Security Event ID for NTLM credential validation.
+    $e.extensions.auth.status = "0x0" // Successful authentication.
+    $e.principal.user.userid = /.*\$?/ // Account_Name LIKE "%$" (Machine account ending with $).
+
+    // Identify AD CS servers using a Chronicle Reference List.
+    $e.principal.hostname in %adcs_servers_hostnames
+
+    // Exclude authentications where the machine account belongs to the AD CS server itself.
+    // Compare uppercase Account_Name (principal.user.userid) with uppercase Source_Workstation (principal.hostname) + "$"
+    // YARA-L comparison is case-sensitive by default, so explicit conversion to uppercase is needed if the data is mixed-case.
+    strings.to_upper($e.principal.user.userid) != strings.to_upper($e.principal.hostname) + "$"
+
+    // FP Tuning: Exclude legitimate services using NTLM. Use a Chronicle Reference List.
+    // Example: not $e.principal.user.userid in %whitelisted_ntlm_adcs_accounts
+
+  outcome:
+    $event_time = $e.metadata.event_timestamp.epoch_seconds // `_time`.
+    $target_host = $e.target.hostname // `host` (the DC validating credentials).
+    $account_name = $e.principal.user.userid // `Account_Name`.
+    $source_workstation = $e.principal.hostname // `Source_Workstation`.
+    $client_ip = $e.principal.ip // `Ip_Address`.
+    $count = 1
+
+  condition:
+    $e
+}

@@ -1,0 +1,55 @@
+// Name: High Entropy Executable Performing Process Injection
+// Author: RW
+// Date: 2025-08-02
+// Description: Detects executable files with high entropy, characteristic of being packed or encrypted,
+//              that subsequently perform process injection activities. This pattern is a strong indicator
+//              of malicious loaders attempting to evade static analysis by hiding their true payload.
+// Tactic: Defense Evasion
+// Technique: T1027
+// False Positive Sensitivity: Medium. Legitimate software, especially installers or applications with DRM,
+//                                     may use packers and exhibit high entropy. The correlation with process
+//                                     injection significantly reduces false positives, but tuning may be
+//                                     required to exclude known good packed applications.
+// for linux|ELF: https://github.com/robert-iw3/SecOps/tree/main/sys-monitoring/entropyscan
+
+// Define the entropy threshold. A value > 7.0 (out of 8.0) is typically considered high.
+let EntropyThreshold = 7.2;
+// Define the time window to correlate the file's existence with the injection activity.
+let TimeFrame = 1d;
+
+// Part 1: Identify processes that performed injection.
+// This CTE gathers events related to common process injection techniques.
+let InjectionEvents =
+    DeviceEvents
+    | where Timestamp > ago(TimeFrame)
+    | where ActionType in ("CreateRemoteThreadApiCall", "QueueApcThreadApiCall", "RemoteVirtualAllocApiCall")
+    | where isnotempty(InitiatingProcessSHA1)
+    | summarize
+        InjectionTimestamp = min(Timestamp),
+        InjectionTypes = make_set(ActionType),
+        Targets = make_set(strcat(FileName, " (", RemoteProcessId, ")"))
+        by DeviceId, DeviceName, InitiatingProcessSHA1, InitiatingProcessFileName, InitiatingProcessCommandLine;
+
+// Part 2: Find file entropy information for the injecting processes.
+// This query joins the injection activity with file inventory data to check the entropy.
+// NOTE: This query relies on a field 'FileEntropy' being available in the DeviceFileCertificateInfo table or a similar data source.
+// If this field is not available, this detection is not possible as written.
+InjectionEvents
+| join kind=inner (
+    DeviceFileCertificateInfo
+    | where isnotempty(FileEntropy)
+    | summarize arg_max(Timestamp, *) by SHA1
+) on $left.InitiatingProcessSHA1 == $right.SHA1
+// The core detection logic: filter for processes with high entropy that performed injection.
+| where FileEntropy > EntropyThreshold
+// Further tuning: Exclude known legitimate software that uses packers and might perform injection-like behavior.
+// | where InitiatingProcessFileName !in ("legit_packed_app.exe", "some_installer.exe")
+| project
+    InjectionTimestamp,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessSHA1,
+    FileEntropy,
+    InjectionTypes,
+    Targets

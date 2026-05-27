@@ -1,0 +1,73 @@
+// Rule Title: GPO Modified for Privilege Assignment
+// Author: RW
+// Date: 2025-08-12
+//
+// References:
+// - https://www.synacktiv.com/publications/gpoddity-exploiting-active-directory-gpos-through-ntlm-relaying-and-more
+// - https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-gpac/4dc17448-3336-4ae4-9570-33359b1f4242 (Security CSE)
+// - https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-gppc/26a24583-8315-47b8-b2ff-f88c01ab0e1e (Local Users and Groups CSE)
+//
+// MITRE ATT&CK: T1484.001 - Group Policy Modification, T1098 - Account Manipulation
+//
+// Description:
+// Detects when a Group Policy Object (GPO) is modified to include Client-Side Extensions (CSEs) for managing local group memberships or user rights assignments.
+// While this can be a legitimate administrative action, attackers can abuse this capability to escalate privileges by adding accounts to sensitive local groups (e.g., Administrators) or granting powerful user rights.
+// This alert serves as an early warning to investigate the specific changes made within the GPO.
+//
+// False Positives:
+// Legitimate administrative activity where a GPO is configured to manage local security settings for the first time.
+// It is crucial to customize the 'known_gpo_admins' list to exclude routine administrative accounts and reduce noise.
+//
+// Triage Steps:
+// 1. Identify the user who made the change ('SubjectUserName'). Is this an authorized administrator for GPOs?
+// 2. Identify the GPO that was modified ('ObjectDN'). What is its purpose and what systems does it apply to?
+// 3. Manually inspect the GPO's corresponding files on the SYSVOL share.
+//    - For group membership changes, check: \\<domain>\SYSVOL\<domain>\Policies\<GPO_GUID>\Machine\Preferences\Groups\Groups.xml
+//    - For user rights changes, check: \\<domain>\SYSVOL\<domain>\Policies\<GPO_GUID>\Machine\Microsoft\Windows NT\SecEdit\GptTmpl.inf
+// 4. Look for suspicious modifications, such as adding non-standard users to the local Administrators group or granting high-impact privileges like SeDebugPrivilege.
+
+let timeframe = 1d;
+// Define a list of legitimate administrator accounts that perform GPO changes.
+// This list should be customized for your environment to reduce potential false positives.
+let known_gpo_admins = dynamic([
+    "Administrator",
+    "SYSTEM"
+    // Example: "CONTOSO\\gpo_admin_user", "gpo_service_account"
+]);
+// Define the GUIDs for the relevant Client-Side Extensions (CSEs).
+let PrivAssignmentCSEs = dynamic([
+    "{827D319E-6EAC-11D2-A4EA-00C04F79F83A}", // Security CSE (User Rights, Restricted Groups)
+    "{17D8960F-8550-4c99-842A-693041CEE45A}"  // Local Users and Groups CSE
+]);
+SecurityEvent
+| where TimeGenerated > ago(timeframe)
+// Event ID 5136 indicates a directory service object was modified.
+| where EventID == 5136
+// Focus on GPO objects.
+| where ObjectClass == "groupPolicyContainer"
+// Focus on the attributes that list the enabled Client-Side Extensions.
+| where AttributeLDAPDisplayName in ("gPCMachineExtensionNames", "gPCUserExtensionNames")
+| extend OldAttributeValue = tostring(parse_xml(EventData).EventData.Data[1]['#text'])
+| mv-expand cse_guid = PrivAssignmentCSEs to typeof(string)
+// Alert only when a privilege assignment CSE is newly added.
+| where AttributeValue has cse_guid and not(OldAttributeValue has cse_guid)
+| extend SubjectUserName = tostring(SubjectUserName)
+// Exclude changes made by computer accounts (ending in '$') and known administrators.
+| where not(SubjectUserName endswith "$" or SubjectUserName in (known_gpo_admins))
+| summarize
+    make_set(cse_guid),
+    arg_max(TimeGenerated, *)
+    by Computer, SubjectUserName, ObjectDN, AttributeLDAPDisplayName
+| project
+    TimeGenerated,
+    Computer,
+    SubjectUserName,
+    ObjectDN,
+    AttributeLDAPDisplayName,
+    AddedCSEs = set_cse_guid,
+    NewValue = AttributeValue,
+    OldValue = OldAttributeValue
+| extend
+    timestamp = TimeGenerated,
+    AccountCustomEntity = SubjectUserName,
+    HostCustomEntity = Computer

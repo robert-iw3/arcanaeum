@@ -1,0 +1,94 @@
+rule apt37_rustonotto_chinotto_fadestealer {
+  meta:
+    author = "RW"
+    date = "2025-09-08"
+    description = "Detects various Tactics, Techniques, and Procedures (TTPs) associated with the APT37 threat actor, including the use of Rustonotto, Chinotto, and FadeStealer malware. This rule identifies specific file hashes, file paths, process command lines, registry modifications for persistence, and C2 communication patterns."
+    reference = "https://www.zscaler.com/blogs/security-research/apt37-targets-windows-rust-backdoor-and-python-loader"
+    tactic = "TA0002, TA0003, TA0005, TA0007, TA0010, TA0011"
+    technique = "T1204.002, T1560.001, T1053.005, T1218.005, T1547.001, T1071.001, T1132.001, T1041"
+    false_positives = "The C2 communication pattern looking for 'U=' and 'R=' or '_file=' in a URL might be generic and could trigger on legitimate applications. Further tuning by destination IP, domain, or associated process may be required."
+
+  events:
+    // This rule combines multiple event types to detect a range of APT37 activities.
+    $e.principal.hostname = $hostname
+    $e.principal.user.userid = $userid
+
+    (
+      // Event 1: Hash-based detection for known malicious files
+      (
+        $e.metadata.event_type = "FILE_CREATION" or
+        $e.metadata.event_type = "PROCESS_LAUNCH"
+      ) and
+      $e.target.file.md5 in (
+        "b9900bef33c6cc9911a5cd7eeda8e093", "7967156e138a66f3ee1bfce81836d8d0",
+        "77a70e87429c4e552649235a9a2cf11a", "04b5e068e6f0079c2c205a42df8a3a84",
+        "d2b34b8bfafd6b17b1cf931bb3fdd3db", "3d6b999d65c775c1d27c8efa615ee520",
+        "89986806a298ffd6367cf43f36136311", "4caa44930e5587a0c9914bda9d240acc"
+      )
+    ) or (
+      // Event 2: FadeStealer and other malicious file artifacts
+      $e.metadata.event_type = "FILE_CREATION" and
+      (
+        // Specific malicious files dropped in ProgramData
+        (
+          re.regex($e.target.file.full_path, `C:\\ProgramData`) and
+          $e.target.file.name in (
+            "3HNoWZd.exe", "wonder.cab", "tele_update.exe", "tele.conf",
+            "tele.dat", "Password.chm", "1.html"
+          )
+        ) or
+        // FadeStealer staging directories
+        re.regex($e.target.file.full_path, `\\VSTelems_Fade\\(NgenPdbk|NgenPdbc|NgenPdbm|VSTelems_FadeOut|VSTelems_FadeIn)\\`) or
+        // FadeStealer RAR archive naming patterns
+        re.regex($e.target.file.name, `(watch_|usb_|data_).+\.rar$`)
+      )
+    ) or (
+      // Event 3: Suspicious process executions
+      $e.metadata.event_type = "PROCESS_LAUNCH" and
+      (
+        // Scheduled task creation for persistence
+        re.regex($e.target.process.command_line, `schtasks.* /create .*MicrosoftUpdate.*3HNoWZd\.exe`) nocase or
+        // Mshta proxy execution of remote HTA
+        ($e.target.process.file.name = "mshta.exe" and re.regex($e.target.process.command_line, `http`) nocase) or
+        // Expansion of malicious CAB file
+        (
+          $e.principal.process.file.name = "cmd.exe" and
+          $e.target.process.file.name = "expand.exe" and
+          re.regex($e.target.process.command_line, `c:\\programdata\\wonder\.cab`) nocase
+        ) or
+        // Execution of FadeStealer loader from ProgramData
+        (
+          $e.target.process.file.name = "tele_update.exe" and
+          re.regex($e.target.process.full_path, `c:\\programdata\\`) nocase
+        )
+      )
+    ) or (
+      // Event 4: Registry modification for persistence via Run key
+      $e.metadata.event_type = "REGISTRY_MODIFICATION" and
+      re.regex($e.target.registry.key, `\\Software\\Microsoft\\Windows\\CurrentVersion\\Run$`) nocase and
+      $e.target.registry.value_name = "OnedriveStandaloneUpdater" nocase and
+      re.regex($e.target.registry.value_data.text, `mshta.*http`) nocase
+    ) or (
+      // Event 5: C2 communication pattern
+      $e.metadata.event_type = "NETWORK_CONNECTION" and
+      // FP Tuning: This C2 pattern might be generic. Consider adding filters for destination IP/domain.
+      re.regex($e.network.http.url, `U=`) and
+      (re.regex($e.network.http.url, `R=`) or re.regex($e.network.http.url, `_file=`))
+    )
+
+  outcome:
+    // Set a risk score for the detection.
+    $risk_score = 75
+    // Capture key fields for investigation.
+    $principal_hostname = $hostname
+    $principal_user_userid = $userid
+    $process_command_line = $e.target.process.command_line
+    $file_path = $e.target.file.full_path
+    $file_md5 = $e.target.file.md5
+    $registry_key = $e.target.registry.key
+    $registry_value = $e.target.registry.value_name
+    $remote_url = $e.network.http.url
+
+  condition:
+    $e
+}

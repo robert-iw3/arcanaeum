@@ -1,0 +1,37 @@
+//
+// Name: Storm-2603 Antivirus Terminator Usage
+//
+// Author: RW
+//
+// Date: 2025-07-31
+//
+// Description: Detects the installation of the "ServiceMouse" service, which is a component of a custom Antivirus Terminator tool used by Storm-2603. This tool leverages a vulnerable driver (ServiceMouse.sys) to terminate security processes.
+//
+// Tactic: Defense Evasion
+//
+// Technique: T1562.001 - Impair Defenses: Disable or Modify Tools
+//
+// False Positive Sensitivity: Medium
+//
+// Detection Comment Level: Medium
+//
+DeviceEvents
+// Look for the creation of the "ServiceMouse" service, a key component of the Antivirus Terminator tool.
+| where ActionType == "ServiceInstalled"
+    and ServiceName == "ServiceMouse"
+    and ServiceFileName has "ServiceMouse.sys"
+// FP Tuning: The combination of service name and driver file name is highly specific.
+// However, if false positives occur, you could add further constraints on the initiating process,
+// which is identified as "VMToolsEng.exe" in the threat report.
+// Example: | where InitiatingProcessFileName =~ "VMToolsEng.exe"
+| project
+    Timestamp,
+    DeviceName,
+    ActionType,
+    ServiceName,
+    ServiceFileName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessSHA256,
+    ReportId,
+    AdditionalFields

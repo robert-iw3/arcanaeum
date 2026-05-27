@@ -1,0 +1,30 @@
+// Name: Hidden Scheduled Task Creation via Registry Modification
+// Author: RW
+// Date: 2025-08-06
+// Tactic: Persistence, Defense Evasion
+// Technique: T1053.005, T1112
+// MITRE: https://attack.mitre.org/techniques/T1053/005/, https://attack.mitre.org/techniques/T1112/
+// Description:
+// Detects the deletion of the Security Descriptor (SD) registry value for a scheduled task.
+// As highlighted in the provided research, adversaries may remove this value to hide the task from the Task Scheduler GUI and other standard enumeration tools.
+// This is a defense evasion technique (T1112) used to conceal a persistence mechanism (T1053.005).
+
+DeviceRegistryEvents
+// Look for the deletion of a registry value.
+| where ActionType == "RegistryValueDeleted"
+// The SD value is what gets deleted to hide the task.
+| where RegistryValueName == "SD"
+// Focus on the registry path where scheduled task configurations are stored.
+| where RegistryKey has @"\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tree\"
+// False Positive Tuning: This is a high-fidelity indicator of malicious activity.
+// Legitimate processes should not typically perform this action.
+// Review the InitiatingProcessFileName for any unexpected system administration tools.
+| extend TaskName = extract(@"\\Tree\\(.*?)$", 1, RegistryKey)
+| project
+    TimeGenerated = Timestamp,
+    DeviceName,
+    TaskName,
+    InitiatingProcess = InitiatingProcessFileName,
+    CommandLine = InitiatingProcessCommandLine,
+    AccountName = InitiatingProcessAccountName,
+    RegistryKey

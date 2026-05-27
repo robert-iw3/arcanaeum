@@ -1,0 +1,146 @@
+title: MuddyWater Campaign - NetBird and VBScript Activity
+description: >-
+  Detects TTPs and IOCs associated with a MuddyWater campaign targeting CFOs.
+  The campaign involves multi-stage phishing, VBScript downloaders, and the abuse of legitimate tools like NetBird and OpenSSH for persistence.
+references:
+    - https://hunt.io/blog/apt-muddywater-deploys-multi-stage-phishing-to-target-cfos
+author: RW
+date: 2025-08-21
+tags:
+    - attack.g0069
+    - attack.t1566
+    - attack.t1071.001
+    - attack.t1204.002
+    - attack.t1059.005
+    - attack.t1136.001
+    - attack.t1564.002
+    - attack.t1218.007
+    - attack.t1572
+    - attack.t1053.005
+    - attack.t1021.001
+logsource:
+    # This rule combines multiple log sources. Individual selections are mapped to the relevant categories.
+    product: windows
+detection:
+    # IOC: Malicious Hashes
+    selection_hash:
+        logsource:
+            category: file_event # This can also be process_creation, image_load, etc.
+        Hashes|contains:
+            - 'md5=23dda825f91be93f5de415886f17ad4a' # F-144822.zip
+            - 'md5=5325de5231458543349152f0ea1cc3df' # F-144822.vbs
+            - 'md5=0aa883cd659ef9957fded2516b70c341' # cis.vbs
+            - 'md5=7ddc947ce8999c8a4a36ac170dcd7505' # CERT_LOCT_C3860_012025.vbs
+            - 'md5=2cddc7a31ea289e8c1e5469f094e975a' # ATTESTATION_LETPOLC3860_13891333.vbs
+            - 'md5=f359f20dbd4b1cb578d521052a1b0e9f' # VIN_SELECTION_C3860_102024.vbs
+    # IOC: C2 Network Connections
+    selection_net_ip:
+        logsource:
+            category: network_connection
+        DestinationIp:
+            - '192.3.95.152'
+            - '198.46.178.135'
+    selection_net_domain:
+        logsource:
+            category: network_connection
+        DestinationDnsDomain:
+            - 'googl-6c11f.firebaseapp.com'
+            - 'googl-6c11f.web.app'
+            - 'googl-165a0.web.app'
+            - 'cloud-ed980.firebaseapp.com'
+            - 'cloud-ed980.web.app'
+            - 'cloud-233f9.firebaseapp.com'
+            - 'cloud-233f9.web.app'
+            - 'my1cloudlive.com'
+            - 'my2cloudlive.com'
+            - 'web-16fe.app'
+            - 'my-sharepoint-inc.com'
+
+    # TTP: VBScript downloader creating a second stage payload
+    selection_vbs_download:
+        logsource:
+            category: file_creation
+        Image|endswith: # Process that created the file
+            - '\wscript.exe'
+            - '\cscript.exe'
+        TargetFilename|contains|all:
+            - 'C:\bin\'
+            - '.vbs'
+
+    # TTP: Creation of the specific hidden admin user
+    selection_user_add:
+        logsource:
+            category: process_creation
+        Image|endswith:
+            - '\net.exe'
+            - '\net1.exe'
+        CommandLine|contains|all:
+            - 'user'
+            - 'user'
+            - 'Bs@202122'
+            - '/add'
+    selection_admin_add:
+        logsource:
+            category: process_creation
+        Image|endswith:
+            - '\net.exe'
+            - '\net1.exe'
+        CommandLine|contains|all:
+            - 'localgroup'
+            - 'user'
+            - '/add'
+        CommandLine|contains: # Both English and French group names were observed
+            - 'Administrators'
+            - 'Administrateurs'
+
+    # TTP: Registry modification to hide the user account from the login screen
+    selection_reg_hide_user:
+        logsource:
+            category: registry_set
+        TargetObject|endswith: '\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList\user'
+
+    # TTP: Silent installation of NetBird or OpenSSH
+    selection_msi_install:
+        logsource:
+            category: process_creation
+        Image|endswith: '\msiexec.exe'
+        CommandLine|contains:
+            - 'netbird.msi'
+            - 'OpenSSH.msi'
+        CommandLine|contains:
+            - '/qn'
+            - '/quiet'
+            - '/norestart'
+
+    # TTP: NetBird execution with the specific setup key
+    selection_netbird_key:
+        logsource:
+            category: process_creation
+        Image|endswith: '\netbird.exe'
+        CommandLine|contains: 'E48E4A70-4CF4-4A77-946B-C8E50A60855A'
+
+    # TTP: Persistence via scheduled tasks for NetBird
+    selection_schtasks_netbird:
+        logsource:
+            category: process_creation
+        Image|endswith: '\schtasks.exe'
+        CommandLine|contains|all:
+            - '/create'
+            - 'net start netbird'
+        CommandLine|contains:
+            - 'Start Netbird'
+            - 'ForceNetbirdRestart'
+
+    # TTP: RDP being enabled via registry key modification
+    selection_rdp_enable:
+        logsource:
+            category: registry_set
+        TargetObject|endswith: '\SYSTEM\CurrentControlSet\Control\Terminal Server\fDenyTSConnections'
+        Details: '0'
+
+    condition: 1 of them
+
+falsepositives:
+    - Legitimate administrative activity may trigger some of the behavioral detections (user creation, RDP enablement, scheduled tasks, MSI installs). These may need to be tuned by filtering for specific parent processes or user accounts in your environment.
+    - Legitimate use of NetBird or OpenSSH in the environment. The detection for the specific setup key is high-fidelity.
+level: high

@@ -1,0 +1,81 @@
+// Name: MS-EFSRPC (PetitPotam) Coercion Attempt
+// Author: RW
+// Date: 2025-08-07
+// Tactic: Lateral Movement
+// Technique: T1210
+// False Positive Sensitivity: Medium
+// - This detection correlates a named pipe access event with a subsequent outbound network connection.
+// - Legitimate remote administration or monitoring tools might perform similar sequences of actions.
+// - It is important to populate the 'domain_controllers' list for high-fidelity alerting and the 'trusted_ips' list to exclude known scanners and management servers.
+//
+// Detection Comment Level: Medium
+
+let timeframe = 1h;
+let time_window = 2m; // Time window to correlate pipe access and outbound connection.
+
+// This list should be populated with the hostnames of your Domain Controllers.
+let domain_controllers = dynamic([
+    "dc01.corp.local",
+    "dc02.corp.local"
+]);
+
+// This list should be populated with trusted IPs of management servers, scanners, etc.
+let trusted_ips = dynamic([
+    "192.168.1.100", // Placeholder for a management server
+    "10.0.0.50"      // Placeholder for a vulnerability scanner
+]);
+
+// Find access events to named pipes commonly used in coercion attacks.
+let pipe_access = SecurityEvent
+| where TimeGenerated > ago(timeframe)
+| where EventID == 5145 // A network share object was checked for access.
+| extend ParsedEventData = parse_xml(EventData)
+| mv-apply d=ParsedEventData.EventData.Data on (
+    summarize props = make_bag(pack(tostring(d.['@Name']), d.['#text']))
+)
+| where props.ObjectType == "File" // Named pipes are accessed as files.
+| where tostring(props.ShareName) endswith "IPC$"
+// The key pipe for PetitPotam is 'efsrpc'. Others are included for broader coercion detection.
+| where tostring(props.RelativeTargetName) in ("efsrpc", "lsarpc", "lsass", "samr", "netlogon")
+| where tostring(props.IpAddress) !in (trusted_ips) and tostring(props.IpAddress) !in ("127.0.0.1", "::1")
+| project
+    PipeAccessTime = TimeGenerated,
+    CoercedMachine = Computer,
+    AttackerIP = tostring(props.IpAddress),
+    PipeName = tostring(props.RelativeTargetName);
+
+// Find subsequent outbound SMB connections from the coerced machine to the attacker.
+// This indicates the coerced authentication attempt.
+let outbound_connection = DeviceNetworkEvents
+| where TimeGenerated > ago(timeframe)
+| where ActionType == "ConnectionSuccess"
+| where RemotePort == 445 // SMB port, common for the relayed authentication.
+// lsass.exe is responsible for handling the authentication process.
+| where InitiatingProcessFileName =~ "lsass.exe"
+| where RemoteIP !in (trusted_ips)
+| project
+    ConnectionTime = TimeGenerated,
+    CoercedMachine = DeviceName,
+    AttackerIP = RemoteIP;
+
+// Join the two event types to find the full attack pattern.
+pipe_access
+| join kind=inner (
+    outbound_connection
+) on CoercedMachine, AttackerIP
+// The outbound connection must happen immediately after the pipe access.
+| where ConnectionTime between (PipeAccessTime .. (PipeAccessTime + time_window))
+// Prioritize alerts where the coerced machine is a Domain Controller.
+| extend IsDomainController = CoercedMachine in (domain_controllers)
+| sort by IsDomainController desc, PipeAccessTime desc
+| project
+    timestamp = PipeAccessTime,
+    CoercedMachine,
+    AttackerIP,
+    PipeName,
+    ConnectionTime,
+    IsDomainController
+| extend
+    Description = strcat("Potential PetitPotam coercion attempt detected. Attacker IP '", AttackerIP, "' accessed the '", PipeName, "' named pipe on '", CoercedMachine, "', which was immediately followed by an outbound SMB connection from the victim to the attacker. This pattern is indicative of an attempt to coerce authentication."),
+    HostCustomEntity = CoercedMachine,
+    IPCustomEntity = AttackerIP

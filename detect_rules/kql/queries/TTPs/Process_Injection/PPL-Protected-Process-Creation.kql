@@ -1,0 +1,25 @@
+// Name: Suspicious Protected Process Light (PPL) Creation
+// Author: RW
+// Date: 2025-08-23
+// Description: Detects the creation of processes with Protected Process Light (PPL) enabled that are not on a list of common legitimate PPL processes.
+// This technique can be used by adversaries to protect their malicious processes from being tampered with by security solutions.
+// False Positives: Legitimate third-party security products or other low-level utilities may use PPL.
+// Their executables should be added to the 'known_legit_ppl' list to tune out noise.
+// MITRE ATT&CK: T1055
+
+let known_legit_ppl = dynamic([
+  // This list contains common Windows and AV processes that run as PPL.
+  // It should be tuned for your environment to avoid false positives from third-party software.
+  "lsass.exe", "smss.exe", "wininit.exe", "services.exe", "MsMpEng.exe", "NisSrv.exe",
+  "SecurityHealthService.exe", "svchost.exe", "fontdrvhost.exe", "dwm.exe", "csrss.exe",
+  "atiesrxx.exe", "atieclxx.exe", "audiodg.exe", "sihost.exe", "taskhostw.exe", "RuntimeBroker.exe"
+]);
+DeviceProcessEvents
+// Filter for any process created with a PPL level.
+| where isnotempty(ProcessProtectionLevel) and ProcessProtectionLevel != "None"
+| where
+    // Detect processes running as PPL that are not on the allowlist.
+    FileName !in (known_legit_ppl)
+    // Also explicitly look for the PoC tool from the research creating any PPL process.
+    or InitiatingProcessFileName =~ "CreateProcessAsPPL.exe"
+| project-reorder TimeGenerated, DeviceName, FileName, ProcessProtectionLevel, InitiatingProcessFileName, ProcessCommandLine, InitiatingProcessCommandLine

@@ -1,0 +1,31 @@
+title: AWS Mass Resource Provisioning for Potential Cryptomining
+id: 83d47e1a-4fe0-4beb-938a-9adbe0b6c989
+status: experimental
+description: Detects a spike in resource provisioning API calls (ECS Clusters, EC2 Instances, etc.) by a single identity. This behavior is often associated with resource hijacking for cryptomining activities, where attackers rapidly deploy numerous resources, sometimes in unused regions, to evade detection.
+references:
+  - https://securitylabs.datadoghq.com/articles/tales-from-the-cloud-trenches-ecs-crypto-mining/#hands-on-keyboard-activity-begins
+author: RW
+date: 2025-08-19
+tags:
+  - attack.resource_hijacking
+  - attack.t1496
+logsource:
+  service: cloudtrail
+detection:
+  selection:
+    # Events related to provisioning of compute resources in EC2 and ECS
+    aws.cloudtrail.event_name:
+      - CreateCluster
+      - RegisterTaskDefinition
+      - CreateService
+      - RunInstances
+    aws.cloudtrail.error_code:
+  # The condition aggregates the count of the selected events by the user's ARN over a short timeframe.
+  # A high count indicates an unusual burst of activity, consistent with automated resource creation by an attacker.
+  condition: selection | count() by aws.cloudtrail.user_identity.arn > 10
+  timeframe: 15m
+falsepositives:
+  - Legitimate automation, such as infrastructure-as-code deployments (e.g., Terraform, CloudFormation) or CI/CD pipelines, may trigger this rule.
+  - Large-scale auto-scaling events or batch job processing could also lead to a high volume of these API calls.
+  - It is recommended to tune the threshold (e.g., > 10) based on your environment's baseline activity. Consider excluding known automation roles or service accounts.
+level: medium

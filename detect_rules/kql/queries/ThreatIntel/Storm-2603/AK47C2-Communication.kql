@@ -1,0 +1,55 @@
+//
+// Name: Storm-2603 AK47C2 C2 Communication
+//
+// Author: RW
+//
+// Date: 2025-07-31
+//
+// Description: Detects C2 communication patterns associated with the Storm-2603 AK47C2 framework, including specific DNS queries and HTTP POST requests to known malicious domains.
+//
+// Tactic: Command and Control
+//
+// Technique: T1071.001 - Application Layer Protocol: Web Protocols, T1071.004 - Application Layer Protocol: DNS
+//
+// False Positive Sensitivity: Medium
+//
+// Detection Comment Level: Medium
+//
+let c2Domains = dynamic([
+    "update.updatemicfosoft.com",
+    "microsfot.org"
+]);
+(
+// Detect DNS queries for the C2 domain, used by the AK47DNS backdoor.
+DeviceNetworkEvents
+| where ActionType contains "Dns" // Catches DnsQueryResponse, DnsQueryRequest, etc.
+    and RemoteUrl has_any (c2Domains)
+// The AK47DNS backdoor uses complex, structured subdomains for data exfiltration.
+// Example: <sessionID>.<computerName>.update.micfosoft.com
+| project
+    Timestamp,
+    ActivityType = "AK47DNS C2 Communication",
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RemoteUrl,
+    RemoteIP
+)
+| union (
+// Detect HTTP connections to the C2 domain, used by the AK47HTTP backdoor.
+DeviceNetworkEvents
+| where ActionType in ("NetworkConnectionSuccess", "ConnectionSuccess")
+    and RemoteUrl has_any (c2Domains)
+    and RemotePort == 80
+// The AK47HTTP backdoor sends POST requests to the C2 server's root path ("/").
+// This detection looks for any HTTP connection, as method and path may not be available in all log sources.
+// FP Tuning: If logs with HTTP method are available (e.g., UrlLogs), filter for POST requests for higher fidelity.
+| project
+    Timestamp,
+    ActivityType = "AK47HTTP C2 Communication",
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RemoteUrl,
+    RemoteIP
+)

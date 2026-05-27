@@ -1,0 +1,59 @@
+rule software_supply_chain_compromise_via_anomalous_upload {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects a potential software supply chain compromise where a user logs into a critical ground system from a non-corporate IP address and subsequently uploads a new executable or library file. This pattern could indicate an attacker with valid credentials planting malicious or vulnerable code, as seen in the CYSAT demo."
+    tags = "Space, Supply Chain, Initial Access, Ground System"
+    tactic = "TA0001"
+    technique = "T1195.002"
+    false_positives = "Legitimate remote work by developers from non-standard locations. Authorized emergency patches or updates performed off-network. The accuracy of the corporate IP range and critical systems lists is crucial for tuning."
+
+  events:
+    // Event 1: A successful user login to a critical system from an external IP.
+    $login.metadata.event_type = "USER_LOGIN"
+    $login.security_result.action = "ALLOW"
+    $login.principal.hostname = $hostname
+    $login.principal.user.userid = $user
+    $login.principal.ip = $ip
+
+    // Filter for critical ground systems. This list must be populated.
+    // Example: $login.principal.hostname in %critical_ground_systems
+    // For this rule, we will use a regex as a placeholder.
+    re.regex($login.principal.hostname, `gcs-portal|mission-planner|ground-station-vpn`) nocase
+
+    // Key condition: The login originates from outside known corporate networks.
+    // This reference list must be populated with your corporate CIDR ranges.
+    not net.ip_in_range_cidr($ip, %corporate_ip_ranges)
+
+    // Event 2: A new software file is created on the same system by the same user.
+    $upload.metadata.event_type = "FILE_CREATION"
+    $upload.principal.hostname = $hostname
+    $upload.principal.user.userid = $user
+
+    // Filter for sensitive directories where mission software or payloads are stored.
+    // This path should be customized for the target environment.
+    re.regex($upload.target.file.full_path, `(?i)(\/srv\/payloads\/|\/opt\/mission_software\/|C:\\MissionData\\Uploads\\)`)
+
+    // Filter for common executable, library, or script file types.
+    re.regex($upload.target.file.full_path, `\.(jar|so|dll|exe|py|bin)$`)
+
+  match:
+    // Correlate the events by user and hostname within a 15-minute window.
+    $hostname, $user over 15m
+
+  outcome:
+    // Set a risk score for the detection.
+    $risk_score = 65
+
+    // Consolidate key fields for the alert summary.
+    $principal_hostname = $hostname
+    $principal_user_userid = array_distinct($user)
+    $source_ip = array_distinct($ip)
+    $uploaded_file_path = array_distinct($upload.target.file.full_path)
+    $uploaded_file_sha256 = array_distinct($upload.target.file.sha256)
+    $event_count = count_distinct($upload.metadata.id)
+
+  condition:
+    // The detection triggers when both the external login and the file upload occur.
+    $login and $upload
+}

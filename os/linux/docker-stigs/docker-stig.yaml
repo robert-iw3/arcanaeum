@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: docker-stig
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: docker-stig
+  template:
+    metadata:
+      labels:
+        app: docker-stig
+    spec:
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        fsGroup: 0
+      containers:
+        - name: docker-stig
+          image: docker-stig:latest
+          command: ["/docker_stig.sh", "--json", "--verbose"]
+          securityContext:
+            capabilities:
+              add: ["SYS_ADMIN", "AUDIT_CONTROL"]
+          volumeMounts:
+            - name: docker-config
+              mountPath: /etc/docker
+            - name: systemd
+              mountPath: /lib/systemd/system
+            - name: docker-sock
+              mountPath: /run/containerd
+            - name: log-dir
+              mountPath: /var/log
+            - name: backup-dir
+              mountPath: /var/backups
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "500m"
+            limits:
+              memory: "512Mi"
+              cpu: "1"
+      volumes:
+        - name: docker-config
+          hostPath:
+            path: /etc/docker
+        - name: systemd
+          hostPath:
+            path: /lib/systemd/system
+        - name: docker-sock
+          hostPath:
+            path: /run/containerd
+        - name: log-dir
+          emptyDir: {}
+        - name: backup-dir
+          emptyDir: {}

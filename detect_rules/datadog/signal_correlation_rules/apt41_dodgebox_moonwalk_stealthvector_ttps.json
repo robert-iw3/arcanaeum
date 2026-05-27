@@ -1,0 +1,77 @@
+{
+  "data": {
+    "type": "signal_correlation",
+    "attributes": {
+      "name": "APT41 DodgeBox, MoonWalk, and StealthVector TTPs",
+      "enabled": true,
+      "cases": [
+        {
+          "name": "APT41 DodgeBox/MoonWalk DLL Sideloading",
+          "status": "high",
+          "query": "source:endpoint @process.name:(taskhost.exe OR taskhostw.exe OR SandboxieWUAU.exe) @file.name:sbiedll.dll -@file.path:(C:\\Windows\\System32\\* OR C:\\Windows\\SysWOW64\\*)"
+        },
+        {
+          "name": "APT41 DodgeBox CFG Bypass Attempt",
+          "status": "high",
+          "query": "source:endpoint @event.action:(memory_protection_changed OR virtual_protect) @module.path:(*\\ntdll.dll OR *\\msvcrt.dll) @memory.protection:(PAGE_EXECUTE_READWRITE OR 0x40)"
+        },
+        {
+          "name": "APT41 DodgeBox DLL Hollowing Staging",
+          "status": "high",
+          "query": "source:endpoint @event.action:created @file.path:C:\\Windows\\Microsoft.NET\\assembly\\GAC_MSIL\\System.Data.Trace\\v4.0_4.0.0.0__\\* @file.name:*.dll"
+        },
+        {
+          "name": "Google Drive C2 Activity",
+          "status": "high",
+          "query": "source:web @http.user_agent:curl/7.54.0 @url.domain:www.googleapis.com ((@http.method:PATCH @url.path:/upload/drive/v3/files/*) OR (@http.method:GET @url.path:/drive/v3/files))"
+        },
+        {
+          "name": "Google Drive C2 by Non-Standard Process",
+          "status": "high",
+          "query": "source:endpoint @event.type:(network_connection OR network_flow) @network.destination.host:(drive.google.com OR www.googleapis.com) -@process.name:(chrome.exe OR firefox.exe OR msedge.exe OR iexplore.exe OR opera.exe OR brave.exe OR GoogleDrive.exe OR GoogleDriveFS.exe OR googledrivesync.exe)"
+        },
+        {
+          "name": "Windows Fibers Abuse for Evasion",
+          "status": "high",
+          "query": "source:endpoint @event.action:(fiber_created OR thread_converted_to_fiber) -@process.name:(chrome.exe OR firefox.exe OR msedge.exe OR iexplore.exe OR opera.exe OR brave.exe OR sqlservr.exe OR javaw.exe)"
+        },
+        {
+          "name": "APT41 DodgeBox, MoonWalk, and StealthVector Hashes",
+          "status": "critical",
+          "query": "source:endpoint (@process.hash:(0d068b6d0523f069d1ada59c12891c4a OR b3067f382d70705d4c8f6977a7d7bee4 OR d72f202c1d684c9a19f075290a60920f OR 294cc02db5a122e3a1bc4f07997956da OR 393065ef9754e3f39b24b2d1051eab61 OR bcac2cbda36019776d7861f12d9b59c4 OR f062183da590aba5e911d2392bc29181 OR 4141c4b827ff67c180096ff5f2cc1474 OR bc85062de0f70afd44bb072b0b71a8cc OR 72070b165d1f11bd4d009a81bf28a3e5 OR f0953ed4a679b987a2da955788737602) OR @file.hash:(0d068b6d0523f069d1ada59c12891c4a OR b3067f382d70705d4c8f6977a7d7bee4 OR d72f202c1d684c9a19f075290a60920f OR 294cc02db5a122e3a1bc4f07997956da OR 393065ef9754e3f39b24b2d1051eab61 OR bcac2cbda36019776d7861f12d9b59c4 OR f062183da590aba5e911d2392bc29181 OR 4141c4b827ff67c180096ff5f2cc1474 OR bc85062de0f70afd44bb072b0b71a8cc OR 72070b165d1f11bd4d009a81bf28a3e5 OR f0953ed4a679b987a2da955788737602))"
+        },
+        {
+          "name": "MoonWalk Mutex Creation",
+          "status": "high",
+          "query": "source:change @object:Global\\ctXjvsAxpzyqElmk"
+        },
+        {
+          "name": "MoonWalk File System Artifacts",
+          "status": "high",
+          "query": "source:endpoint @file.path:(C:\\Windows\\Microsoft.NET\\assembly\\GAC_MSIL\\System.Data.Trace OR C:\\ProgramData\\*) len(@file.name):32"
+        }
+      ],
+      "group_by_fields": ["@host", "@user"],
+      "distinct_fields": ["case_id"],
+      "correlation": {
+        "expression": "distinct_count >= 2",
+        "timeframe": "1h"
+      },
+      "message": "APT41 DodgeBox, MoonWalk, and StealthVector TTPs: {distinct_count} distinct techniques detected on host {@host} by user {@user}. Techniques: {case_names}. Details: {@process.name OR @file.name OR @module.path OR @http.user_agent OR @network.destination.host OR @file.hash OR @object OR @file.path}. Timeframe: {first_activity} to {last_activity}",
+      "severity": "high",
+      "tags": [
+        "security:attack",
+        "tactic:TA0002",
+        "tactic:TA0005",
+        "tactic:TA0011",
+        "technique:T1574.001",
+        "technique:T1562.001",
+        "technique:T1071.001",
+        "technique:T1105"
+      ],
+      "options": {
+        "evaluation_window": "1h"
+      }
+    }
+  }
+}

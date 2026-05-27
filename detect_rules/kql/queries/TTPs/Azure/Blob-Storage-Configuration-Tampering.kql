@@ -1,0 +1,92 @@
+// Name: Azure Blob Storage Configuration Tampering
+// Author: RW
+// Date: 2025-10-26
+// Description: Detects attempts to tamper with Azure Blob Storage configurations to evade defenses. This includes loosening firewall rules, disabling diagnostic logging, or disabling Microsoft Defender for Storage. Such activities can be indicative of a threat actor attempting to hide their tracks or maintain access without being detected.
+// Tactics: Defense Evasion
+// Techniques: T1562.011, T1562.007
+// References: https://www.microsoft.com/en-us/security/blog/2025/10/20/inside-the-attack-chain-threat-activity-targeting-azure-blob-storage/
+// False Positive Sensitivity: Medium
+
+let timeframe = 1d;
+// Placeholder for trusted accounts (users, service principals) that perform legitimate configuration changes.
+// Legitimate administrative actions or Infrastructure-as-Code (IaC) deployments might trigger this rule.
+let Actor_Allowlist = dynamic([]);
+// Placeholder for trusted IP ranges (e.g., corporate network, CI/CD pipeline IPs).
+let IP_Allowlist = dynamic([]);
+
+// Part 1: Detect changes to Storage Account firewall rules that loosen security.
+let firewallChanges = AzureActivity
+| where TimeGenerated > ago(timeframe)
+| where OperationNameValue =~ "MICROSOFT.STORAGE/STORAGEACCOUNTS/WRITE"
+| where ActivityStatusValue == "Success"
+| extend requestbody = todynamic(Properties).requestbody
+| extend defaultAction = tostring(requestbody.properties.networkAcls.defaultAction)
+| extend ipRules = requestbody.properties.networkAcls.ipRules
+// Condition 1: Default action is changed to Allow (making it public).
+// Condition 2: A rule allowing all IPs ('0.0.0.0/0') is added.
+| where defaultAction =~ "Allow" or tostring(ipRules) has "0.0.0.0/0"
+| where not(Caller in (Actor_Allowlist)) and not(ipv4_is_in_any_range(CallerIpAddress, IP_Allowlist))
+| project
+    TimeGenerated,
+    TamperingType = "Storage Firewall Loosened",
+    Description = iff(defaultAction =~ "Allow", "Default network access was changed to 'Allow'.", "An IP rule allowing all traffic (0.0.0.0/0) was added."),
+    Caller,
+    CallerIpAddress,
+    OperationName = OperationNameValue,
+    ResourceId,
+    ResourceGroup,
+    SubscriptionId,
+    CorrelationId;
+
+// Part 2: Detect disabling of key diagnostic logging categories for storage.
+let loggingChanges = AzureActivity
+| where TimeGenerated > ago(timeframe)
+| where OperationNameValue =~ "MICROSOFT.INSIGHTS/DIAGNOSTICSETTINGS/WRITE"
+| where ActivityStatusValue == "Success"
+| where ResourceId has "/providers/Microsoft.Storage/storageAccounts/" // Ensure it's for a storage account.
+| extend requestbody = todynamic(Properties).requestbody
+| mv-expand todynamic(requestbody.properties.logs)
+| where requestbody_properties_logs.enabled == false
+// Focus on key storage log categories for blobs.
+| where requestbody_properties_logs.category in ("StorageRead", "StorageWrite", "StorageDelete")
+| where not(Caller in (Actor_Allowlist)) and not(ipv4_is_in_any_range(CallerIpAddress, IP_Allowlist))
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    DisabledCategories = make_set(requestbody_properties_logs.category)
+    by Caller, CallerIpAddress, OperationName = OperationNameValue, ResourceId, ResourceGroup, SubscriptionId, CorrelationId
+| project
+    TimeGenerated = StartTime,
+    TamperingType = "Storage Diagnostic Logging Disabled",
+    Description = strcat("Diagnostic logging was disabled for categories: ", tostring(DisabledCategories)),
+    Caller,
+    CallerIpAddress,
+    OperationName,
+    ResourceId,
+    ResourceGroup,
+    SubscriptionId,
+    CorrelationId;
+
+// Part 3: Detect disabling of Defender for Storage.
+let defenderChanges = AzureActivity
+| where TimeGenerated > ago(timeframe)
+| where OperationNameValue =~ "MICROSOFT.SECURITY/PRICINGS/WRITE"
+| where ActivityStatusValue == "Success"
+| extend requestbody = todynamic(Properties).requestbody
+// Check if the pricing tier for StorageAccounts is set to 'Free', which means it's disabled.
+| where requestbody.name == "StorageAccounts" and requestbody.properties.pricingTier == "Free"
+| where not(Caller in (Actor_Allowlist)) and not(ipv4_is_in_any_range(CallerIpAddress, IP_Allowlist))
+| project
+    TimeGenerated,
+    TamperingType = "Defender for Storage Disabled",
+    Description = "Microsoft Defender for Storage was disabled (pricing tier set to 'Free').",
+    Caller,
+    CallerIpAddress,
+    OperationName = OperationNameValue,
+    ResourceId,
+    ResourceGroup,
+    SubscriptionId,
+    CorrelationId;
+
+// Union all tampering events into a single view.
+union firewallChanges, loggingChanges, defenderChanges

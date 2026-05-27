@@ -1,0 +1,50 @@
+rule satellite_mission_impact_via_telemetry_anomaly {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects potential mission impact on a satellite by identifying critical telemetry values that fall outside predefined safe operational ranges or by detecting critical command execution failures. This is indicative of an attacker manipulating on-board values or disrupting mission functions, as demonstrated in the CYSAT analysis where attackers modified payload data and could have affected other core subsystems."
+    tags = "Space, Impact, Telemetry, SPARTA"
+    tactic = "TA0040"
+    technique = "T1491" // T1491 (Defacement/Modify Data) is a close proxy for modifying mission data.
+    false_positives = "Legitimate entry into safe mode, planned maneuvers, sensor calibration routines, or transient sensor errors can all generate values outside of normal thresholds. The thresholds in this rule are examples and MUST be tuned for the specific satellite's operational profile."
+
+  events:
+    // This rule requires custom satellite telemetry logs mapped to UDM.
+    // GENERIC_EVENT is used as a placeholder event type.
+    $telemetry.metadata.event_type = "GENERIC_EVENT"
+    $telemetry.principal.hostname = $satellite_identifier // The satellite is the principal asset.
+
+    // The sensor value must be ingested into a numeric UDM field for comparison.
+    // security_result.numeric_details is used here as an example.
+    // The sensor name is expected in a label. These fields MUST be mapped correctly during ingestion.
+    (
+      // Example 1: Electrical Power System (EPS) bus voltage is out of nominal range.
+      (
+        $telemetry.about.labels["sensor_id"] = "eps_bus_voltage" and
+        ($telemetry.security_result.numeric_details < 26 or $telemetry.security_result.numeric_details > 34)
+      ) or
+      // Example 2: Attitude Control System (ADCS) shows an excessive rotation rate.
+      (
+        $telemetry.about.labels["sensor_id"] = "adcs_gyro_rate_x" and
+        ($telemetry.security_result.numeric_details < -5 or $telemetry.security_result.numeric_details > 5)
+      ) or
+      // Example 3: A critical command sent to the satellite fails to execute.
+      (
+        $telemetry.metadata.product_event_type = "SATELLITE_COMMAND_STATUS" and
+        $telemetry.security_result.action = "BLOCK" and
+        re.regex($telemetry.about.labels["command_name"], `(?i)maneuver|payload_activate|set_mode`)
+      )
+    )
+
+  outcome:
+    // High risk score, as this indicates a direct impact on the satellite's mission or health.
+    $risk_score = 80
+    $principal_hostname = array_distinct($satellite_identifier)
+    $alert_reason = array_distinct($telemetry.about.labels["sensor_id"])
+    $alert_trigger_value = array_distinct($telemetry.security_result.numeric_details)
+    $failed_command_name = array_distinct($telemetry.about.labels["command_name"])
+    $event_count = count_distinct($telemetry.metadata.id)
+
+  condition:
+    $telemetry
+}

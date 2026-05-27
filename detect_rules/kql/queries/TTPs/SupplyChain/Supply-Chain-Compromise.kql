@@ -1,0 +1,62 @@
+// Name: Suspicious Child Process from Package Manager or Trusted Utility
+// Author: RW
+// Date: 2025-08-20
+// Description: Detects when a software package manager, a common development tool, or a known trusted utility spawns a suspicious command-line process.
+// This behavior can indicate a compromised software package or "protestware" executing a malicious payload, as seen in incidents like the SolarWinds
+// and node-ipc supply chain attacks.
+// Tactic: Execution
+// Technique: T1195 - Supply Chain Compromise
+// False Positive Sensitivity: Medium
+
+// Define a list of processes associated with software package management and development.
+// These are often trusted and could be abused in a supply chain attack.
+let trusted_parent_processes = dynamic([
+    "npm.cmd",
+    "npx.cmd",
+    "node.exe",
+    "python.exe",
+    "pip.exe",
+    "pip3.exe",
+    "gem.bat",
+    "ruby.exe",
+    "nuget.exe",
+    "dotnet.exe",
+    "cargo.exe",
+    "go.exe",
+    "SolarWinds.BusinessLayerHost.exe" // Specific example from SolarWinds incident
+]);
+
+// Define suspicious child processes often used for "living off the land" techniques.
+let suspicious_child_processes = dynamic([
+    "powershell.exe",
+    "pwsh.exe",
+    "cmd.exe",
+    "wscript.exe",
+    "cscript.exe",
+    "rundll32.exe",
+    "regsvr32.exe",
+    "bitsadmin.exe"
+]);
+
+DeviceProcessEvents
+// Look for process creation events.
+| where ActionType == "ProcessCreated"
+// The parent process is a package manager, development tool, or known supply chain target.
+| where InitiatingProcessFileName in~ (trusted_parent_processes)
+// The child process is a suspicious utility.
+| where FileName in~ (suspicious_child_processes)
+// Potential for False Positives: Developers may legitimately use these tools as part of build or test scripts.
+// To reduce noise, add environment-specific exclusions below for known legitimate parent-child process relationships and command lines.
+// For example: | where not (InitiatingProcessCommandLine has "run-dev-build.js" and ProcessCommandLine has "legit-command")
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    ParentProcessName = InitiatingProcessFileName,
+    ParentProcessCommandLine = InitiatingProcessCommandLine,
+    ChildProcessName = FileName,
+    ChildProcessCommandLine = ProcessCommandLine,
+    ParentProcessSigner = InitiatingProcessSigner,
+    ChildProcessSigner = Signer,
+    ReportId,
+    DeviceId

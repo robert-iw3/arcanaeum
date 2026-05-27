@@ -1,0 +1,61 @@
+title: Weak Authentication or Brute Force Attempt on ICS Asset
+status: experimental
+description: >-
+  Detects attempts to bypass or exploit weak authentication mechanisms in ICS/OT systems. This rule identifies two primary patterns:
+  1. Brute-force attacks, indicated by a high volume of failed login attempts from a single source.
+  2. Suspicious successful logins, such as those originating from untrusted networks or using common default usernames.
+  These activities are often precursors to initial access and privilege escalation in critical infrastructure environments.
+author: RW
+date: 2025-08-18
+tags:
+  - attack.initial_access
+  - attack.t0866
+  - attack.t0806
+  - ics
+logsource:
+  category: authentication
+  # comment: This rule is best suited for logs from sources like VPNs, firewalls, or application logs from HMIs and EWS that record authentication events.
+detection:
+  # comment: Catches any successful authentication event.
+  authentication_success:
+    event.category: 'authentication'
+    event.outcome: 'success'
+
+  # comment: Catches any failed authentication event.
+  authentication_failure:
+    event.category: 'authentication'
+    event.outcome: 'failure'
+
+  # comment: Identifies successful logins using common default or weak usernames.
+  default_user:
+    user.name:
+      - 'admin'
+      - 'administrator'
+      - 'root'
+      - 'user'
+      - 'operator'
+      - 'guest'
+      - 'factory'
+      - 'service'
+      - '1234'
+      - '0000'
+
+  # comment: This filter is critical for reducing false positives. Populate it with all trusted internal, corporate, and management network ranges.
+  filter_trusted_network:
+    source.ip:
+      - '10.0.0.0/8'
+      - '172.16.0.0/12'
+      - '192.168.0.0/16'
+      - '10.100.0.0/16' # Placeholder for a dedicated OT/management network
+
+  # comment: The condition has three parts:
+  # 1. A brute-force attempt from a single source IP.
+  # 2. A successful login from an untrusted (e.g., external) network.
+  # 3. A successful login using a known default username.
+  condition: (authentication_failure | count() by source.ip >= 15 over 10m) or (authentication_success and not filter_trusted_network) or (authentication_success and default_user)
+falsepositives:
+  - Legitimate, repeated login failures from a user who has forgotten their password (the threshold is intended to minimize this).
+  - Authorized administrative access from a new or unlisted network segment.
+  - Use of default accounts during initial device setup or by legacy automated systems.
+  - Benign network or vulnerability scanners.
+level: high

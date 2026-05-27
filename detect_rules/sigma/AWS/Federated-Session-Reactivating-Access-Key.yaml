@@ -1,0 +1,28 @@
+title: AWS Federated Session Reactivating Access Key
+id: 81e12042-2fd2-4477-8a6e-7d069bb07902
+status: experimental
+description: |
+  Detects an attempt to reactivate a disabled AWS access key using a federated user session. Adversaries can leverage a lingering federated session, created from a compromised IAM user, to reactivate the original user's access keys even after they have been disabled by incident responders. This allows the adversary to re-establish persistence in the environment.
+references:
+  - https://www.crowdstrike.com/en-us/blog/how-adversaries-persist-with-aws-user-federation/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.t1136
+  - attack.t1098.001
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    # Detects the reactivation of an access key
+    eventName: 'UpdateAccessKey'
+    eventSource: 'iam.amazonaws.com'
+    # The action was performed by a federated user
+    userIdentity.type: 'FederatedUser'
+    # The key status was set to 'Active'
+    requestParameters.status: 'Active'
+  condition: selection
+falsepositives:
+  - Legitimate administrative actions performed by a federated user from a custom identity broker or proxy application. It is important to baseline normal administrative activity performed by federated users in your environment.
+level: high

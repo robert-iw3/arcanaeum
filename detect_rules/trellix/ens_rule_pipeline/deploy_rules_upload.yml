@@ -1,0 +1,80 @@
+---
+- name: Deploy Trellix ENS Rules Uploader Container
+  hosts: all
+  vars:
+    container_runtime: "{{ container_runtime | default('docker') }}"
+    image_name: trellix-rules-uploader
+    container_name: trellix-rules-uploader
+    config_dir: /etc/trellix-rules-uploader
+    rules_dir: /etc/trellix-rules-uploader/rules
+    certs_dir: /etc/trellix-rules-uploader/certs
+  tasks:
+    - name: Install container runtime
+      package:
+        name: "{{ container_runtime }}"
+        state: present
+      become: yes
+
+    - name: Create config and rules directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ config_dir }}"
+        - "{{ rules_dir }}"
+        - "{{ certs_dir }}"
+      become: yes
+
+    - name: Copy config.json
+      copy:
+        src: config.json
+        dest: "{{ config_dir }}/config.json"
+        mode: '0644'
+      become: yes
+
+    - name: Copy rules directory
+      copy:
+        src: rules/
+        dest: "{{ rules_dir }}/"
+        mode: '0644'
+      become: yes
+
+    - name: Copy CA certificate (if provided)
+      copy:
+        src: "{{ ca_cert | default('epo_ca.pem') }}"
+        dest: "{{ certs_dir }}/epo_ca.pem"
+        mode: '0644'
+      when: ca_cert is defined
+      become: yes
+
+    - name: Remove existing container
+      command: "{{ container_runtime }} rm -f {{ container_name }}"
+      ignore_errors: yes
+      when: container_runtime in ['docker', 'podman']
+      become: yes
+
+    - name: Build container image
+      command: "{{ container_runtime }} build -t {{ image_name }} ."
+      args:
+        chdir: "{{ playbook_dir }}"
+      when: container_runtime in ['docker', 'podman']
+      become: yes
+
+    - name: Run container
+      command: >
+        {{ container_runtime }} run -d
+        --name {{ container_name }}
+        -v {{ config_dir }}/config.json:/app/config.json{% if container_runtime == 'podman' %}:Z{% endif %}
+        -v {{ rules_dir }}:/app/rules{% if container_runtime == 'podman' %}:Z{% endif %}
+        -v {{ certs_dir }}:/app/certs{% if container_runtime == 'podman' %}:Z{% endif %}
+        {{ image_name }}
+      when: container_runtime in ['docker', 'podman']
+      become: yes
+
+    - name: Ensure container is running
+      command: "{{ container_runtime }} ps -q -f name={{ container_name }}"
+      register: container_status
+      failed_when: container_status.stdout == ""
+      changed_when: false
+      become: yes

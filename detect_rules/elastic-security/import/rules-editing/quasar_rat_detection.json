@@ -1,0 +1,21 @@
+{
+  "type": "detection-engine.rule",
+  "id": "quasar-rat-detection",
+  "attributes": {
+    "risk_score": 90,
+    "enabled": true,
+    "name": "Quasar RAT IOC/TTP Detection",
+    "description": "Detects indicators of compromise (IOCs) and tactics, techniques, and procedures (TTPs) associated with the Quasar RAT, including known hashes, privileged scheduled tasks, system shutdown commands, FileZilla config access, startup persistence, MotW bypass, and network reconnaissance.",
+    "rule_id": "quasar_rat_ioc_ttp_detection",
+    "index": [
+      "logs-endpoint.events.*",
+      "logs-network.*"
+    ],
+    "language": "kuery",
+    "query": "(process.hash.sha256:\"7300535ef26158bdb916b717390fc36eb570473ed7805c18b101367c68af5\") OR (process.name:/schtasks.exe/ AND process.command_line:/\\/rl / AND process.command_line:/ highest /) OR (process.name:/shutdown.exe/ AND (process.command_line:/\\/s /t 0/ OR process.command_line:/\\/r /t 0/)) OR (file.path:/\\*\\\\FileZilla\\\\recentservers.xml/ OR file.path:/\\*\\\\FileZilla\\\\sitemanager.xml/ AND NOT process.name:(\"filezilla.exe\")) OR (file.path:/\\*\\\\Microsoft\\\\Windows\\\\Start Menu\\\\Programs\\\\Startup\\\\\\*.url/ AND event.action:\"creation\") OR (file.name:/\\*:Zone.Identifier/ AND event.action:\"deletion\") OR (dns.question.name:(\"*wtfismyip.com\" OR \"*checkip.*\" OR \"*ipecho.net\" OR \"*ipinfo.io\" OR \"*api.ipify.org\" OR \"*icanhazip.com\" OR \"*ip.anysrc.com\" OR \"*api.ip.sb\" OR \"ident.me\" OR \"www.myexternalip.com\" OR \"*zen.spamhaus.org\" OR \"*cbl.abuseat.org\" OR \"*b.barracudacentral.org\" OR \"*dnsbl-1.uceprotect.net\" OR \"*spam.dnsbl.sorbs.net\" OR \"*iplogger.org*\" OR \"*ip-api.com*\" OR \"*geoip.*\" OR \"*icanhazip.*\" OR \"*ipwho.is*\" OR \"*ifconfig.me*\" OR \"*myip.com*\" OR \"*ipstack.com*\" OR \"*myexternalip.com*\" OR \"*ip-api.io*\" OR \"*trackip.net*\" OR \"*ipgeolocation.io*\" OR \"*ipfind.io*\" OR \"*freegeoip.app*\" OR \"*ipv4bot.whatismyipaddress.com*\" OR \"*hacker-target.com/iptools*\"))",
+    "interval": "15m",
+    "severity": "critical",
+    "type": "query",
+    "version": "1"
+  }
+}

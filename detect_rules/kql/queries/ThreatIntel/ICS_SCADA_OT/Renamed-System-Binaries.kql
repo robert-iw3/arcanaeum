@@ -1,0 +1,50 @@
+// Name: Renamed System Binary Execution
+// Author: RW
+// Date: 2025-08-17
+// Adversaries may rename legitimate system utilities to execute them from non-standard paths.
+// This technique, often called Masquerading (T1036.003), can be used to bypass application control
+// solutions, such as AppLocker or GPOs, that are configured with path-based or name-based rules.
+// This query identifies when a process is launched with a filename that differs from its
+// internal "OriginalFileName" metadata, indicating it has been renamed.
+
+// Define a list of commonly abused system binaries
+let SystemBinaries = dynamic([
+    "cmd.exe",
+    "powershell.exe",
+    "pwsh.exe",
+    "cscript.exe",
+    "wscript.exe",
+    "mshta.exe",
+    "rundll32.exe",
+    "regsvr32.exe",
+    "bitsadmin.exe",
+    "certutil.exe",
+    "msiexec.exe"
+]);
+DeviceProcessEvents
+// Look for process creation events
+| where ActionType == "ProcessCreated"
+// The OriginalFileName from the PE header should be one of our target system binaries
+| where isnotempty(ProcessVersionInfoOriginalFileName) and ProcessVersionInfoOriginalFileName in~ (SystemBinaries)
+// The actual filename on disk must be different from the original name
+| where FileName != ProcessVersionInfoOriginalFileName
+// Exclude executions from legitimate system folders to reduce noise.
+// The WinSxS folder can contain legitimate copies with different names.
+| where FolderPath !startswith "C:\\Windows\\System32\\"
+    and FolderPath !startswith "C:\\Windows\\SysWOW64\\"
+    and FolderPath !startswith "C:\\Windows\\WinSxS\\"
+// FP Tuning: Some legitimate software installers or updaters may rename and drop copies of system tools.
+// If you see FPs from a specific application, consider excluding its installation directory or signing publisher.
+// For example: and FolderPath !startswith "C:\\Program Files\\SomeLegitApp\\"
+| summarize
+    make_set(ProcessCommandLine),
+    make_set(FolderPath),
+    make_set(FileName),
+    FirstSeen = min(TimeGenerated),
+    LastSeen = max(TimeGenerated)
+    by DeviceName, AccountName, InitiatingProcessFileName, InitiatingProcessCommandLine, ProcessVersionInfoOriginalFileName
+| extend
+    // For readability
+    RenamedFrom = ProcessVersionInfoOriginalFileName,
+    ExecutedAs = tostring(set_FileName[0]),
+    ExecutionPath = tostring(set_FolderPath[0])

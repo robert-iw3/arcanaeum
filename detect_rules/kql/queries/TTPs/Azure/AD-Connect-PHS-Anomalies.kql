@@ -1,0 +1,31 @@
+// Name: Azure AD Connect PHS Anomalies
+// Author: RW
+// Date: 2025-08-31
+// Description: Detects a high volume of password hash synchronization failures from an Azure AD Connect instance.
+// A large spike in failures can indicate a password spray attack against on-premises Active Directory, where an
+// attacker's attempts are synchronized and logged as failures in the cloud. It can also indicate configuration
+// issues or an attempt to manipulate the sync process.
+// MITRE ATT&CK: T1003.006 (OS Credential Dumping: DCSync), T1098 (Account Manipulation)
+// False Positive Sensitivity: Medium
+
+let failureThreshold = 100; // Define the threshold for the number of failures within the time window.
+let timeWindow = 30m; // Define the aggregation time window.
+
+AuditLogs
+| where Category == "PasswordHashSync" // Filter for Password Hash Sync events from Azure AD Connect.
+| where ResultType == "Error" // Focus on synchronization failures.
+// Potential for false positives: A large number of legitimate but incorrect password changes (e.g., after a company-wide password reset) can cause a temporary spike in failures.
+// Investigate the ResultDescription for common patterns. The threshold may need to be adjusted based on organization size and typical user activity.
+| summarize
+    FailureCount = count(),
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    SampleErrorMessages = make_set(ResultDescription, 5) // Collect up to 5 unique error messages for context.
+    by Actor = tostring(InitiatedBy.app.displayName), bin(TimeGenerated, timeWindow)
+| where FailureCount > failureThreshold // Alert when the number of failures exceeds the defined threshold.
+| project
+    StartTime,
+    EndTime,
+    Actor, // The AD Connect service account, typically 'On-Premises Directory Synchronization Service Account'.
+    FailureCount,
+    SampleErrorMessages

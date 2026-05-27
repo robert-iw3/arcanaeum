@@ -1,0 +1,45 @@
+rule lateral_movement_via_bus_segregation_bypass {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects potential lateral movement on a spacecraft or embedded system by identifying network communication between processes that should be segregated. For example, a payload application communicating directly with a critical bus service like an attitude control daemon. This behavior is indicative of an attacker exploiting a lack of bus segregation, as demonstrated in the CYSAT analysis, to move from a compromised application to core system functions."
+    tags = "Space, Lateral Movement, CAN Bus, SPARTA"
+    tactic = "TA0008"
+    // Note: No direct MITRE ATT&CK technique exists. This aligns with SPARTA framework's "Exploit Lack of Bus Segregation".
+    false_positives = "Legitimate, designed inter-process communication between subsystems. The process lists must be carefully tuned for the specific environment. Some systems may have a flat architecture by design where this communication is normal."
+
+  events:
+    // This rule models internal bus communication as a NETWORK_CONNECTION event.
+    // This may require custom logging if bus traffic is not captured as such.
+    $comm.metadata.event_type = "NETWORK_CONNECTION"
+
+    // The communication occurs on the same host (e.g., the spacecraft's onboard computer).
+    $comm.principal.hostname = $comm.target.hostname
+
+    // The source process is a payload, experiment, or non-critical application.
+    // This list MUST be customized based on the software architecture of the asset.
+    re.regex($comm.principal.process.file.full_path, `(?i)\/payload_handler|\/mission_app\/|\/experiment\/|\/java$`)
+
+    // The destination process is a critical bus or subsystem daemon.
+    // This list is also highly environment-specific and MUST be customized.
+    re.regex($comm.target.process.file.full_path, `(?i)\/adcs_daemon|\/eps_service|\/bus_controller|\/ttc_daemon`)
+
+    // An exclusion for known-good communication could be added here to reduce FPs.
+    // For example: not ($comm.principal.process.file.full_path = "/opt/mission_app/data_router" and $comm.target.process.file.full_path = "/sbin/ttc_daemon")
+
+  outcome:
+    // A high risk score, as this indicates a fundamental security boundary violation.
+    $risk_score = 75
+    $principal_hostname = array_distinct($comm.principal.hostname)
+    $source_process_path = array_distinct($comm.principal.process.file.full_path)
+    $source_process_cmdline = array_distinct($comm.principal.process.command_line)
+    $source_user = array_distinct($comm.principal.user.userid)
+    $destination_process_path = array_distinct($comm.target.process.file.full_path)
+    $destination_process_cmdline = array_distinct($comm.target.process.command_line)
+    $destination_ip = array_distinct($comm.target.ip)
+    $destination_port = array_distinct($comm.target.port)
+    $event_count = count_distinct($comm.metadata.id)
+
+  condition:
+    $comm
+}

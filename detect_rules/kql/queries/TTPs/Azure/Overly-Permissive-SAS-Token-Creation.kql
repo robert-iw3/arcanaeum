@@ -1,0 +1,53 @@
+// Name: Overly Permissive or Long-Lived Azure Storage SAS Token Created
+// Author: RW
+// Date: 2025-10-26
+// Description: Detects the creation of an Azure Storage Account SAS (Shared Access Signature) token that is either overly permissive (e.g., has write and delete permissions) or has a long expiration date. Threat actors can abuse such tokens to gain unauthorized access, exfiltrate data, or establish persistence.
+// Tactics: Persistence, Credential Access
+// Techniques: T1098.001, T1078.004
+// References: https://www.microsoft.com/en-us/security/blog/2025/10/20/inside-the-attack-chain-threat-activity-targeting-azure-blob-storage/
+// False Positive Sensitivity: Medium
+
+// Define the time window for the analysis.
+let timeframe = 1d;
+// Define the threshold for what is considered a long-lived token.
+// Tune this value based on your organization's policies. Legitimate services like backup may require longer durations.
+let longDurationThreshold = 24h;
+// Define known benign callers (User, Service Principal) or IP addresses that are expected to create such tokens.
+let Actor_Allowlist = dynamic([]);
+let IP_Allowlist = dynamic([]);
+
+AzureActivity
+| where TimeGenerated > ago(timeframe)
+// Filter for the specific operation that generates an account-level SAS token.
+| where OperationNameValue =~ "MICROSOFT.STORAGE/STORAGEACCOUNTS/LISTACCOUNTSAS/ACTION"
+| where ActivityStatusValue == "Success"
+// Parse the request body which contains the SAS parameters.
+| extend properties = todynamic(Properties)
+| extend requestbody = todynamic(properties.requestbody)
+| extend
+    signedPermission = tostring(requestbody.signedPermission),
+    signedExpiry = todatetime(requestbody.signedExpiry)
+// Exclude known benign callers before further processing.
+// This can reduce noise from approved automation or administrative tasks.
+| where not(Caller in (Actor_Allowlist)) and not(CallerIpAddress in (IP_Allowlist))
+// Calculate the validity duration of the SAS token.
+| extend tokenDuration = signedExpiry - TimeGenerated
+// Check for overly permissive rights (e.g., Write 'w' and Delete 'd').
+| extend hasHighPrivs = signedPermission has 'w' and signedPermission has 'd'
+// Alert if the token has high privileges OR a long expiry duration.
+| where hasHighPrivs or tokenDuration > longDurationThreshold
+| project
+    TimeGenerated,
+    OperationName,
+    Caller,
+    CallerIpAddress,
+    SubscriptionId,
+    ResourceGroup,
+    AccountName = tostring(split(ResourceId, '/')[-1]),
+    Permissions = signedPermission,
+    Expiry = signedExpiry,
+    Duration = tokenDuration,
+    IsLongLived = (tokenDuration > longDurationThreshold),
+    HasHighPrivs = hasHighPrivs,
+    CorrelationId,
+    ResourceId

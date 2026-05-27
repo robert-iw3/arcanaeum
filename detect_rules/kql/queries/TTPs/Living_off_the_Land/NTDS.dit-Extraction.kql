@@ -1,0 +1,27 @@
+// Name: NTDS.dit Extraction via Ntdsutil
+// Author: RW
+// Date: 2025-08-08
+// Description: Detects the use of ntdsutil.exe to create a copy of the NTDS.dit database. This is a well-known technique
+//              for credential dumping used by threat actors.
+// False Positive Sensitivity: Medium
+// Tactics: Credential Access
+// Techniques: T1003.003
+
+DeviceProcessEvents
+// Identifies the execution of ntdsutil.exe
+| where FileName =~ "ntdsutil.exe" or ProcessVersionInfoOriginalFileName =~ "ntdsutil.exe"
+// Looks for command-line arguments used to create an Install From Media (IFM) backup of Active Directory
+| where ProcessCommandLine has_all ("ifm", "create", "full") and (ProcessCommandLine has "ac i ntds" or ProcessCommandLine has "activate instance ntds")
+// FP Tuning: This is a legitimate administrative tool for Active Directory backup and recovery.
+// However, its use is infrequent and should typically only occur on Domain Controllers by authorized administrators.
+// Investigate the context of the execution, such as the parent process and user account.
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    ProcessCommandLine,
+    InitiatingProcessCommandLine,
+    InitiatingProcessFileName,
+    ReportId,
+    ProcessId,
+    InitiatingProcessId

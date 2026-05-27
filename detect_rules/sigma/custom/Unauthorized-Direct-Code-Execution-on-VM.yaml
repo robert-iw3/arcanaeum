@@ -1,0 +1,53 @@
+title: Unauthorized Direct Code Execution on VM
+id: 3cdd4191-7096-4b3e-a036-6bda6a7a6b70
+status: experimental
+description: Detects the use of cloud provider features to execute commands or scripts directly on a Virtual Machine (VM). Attackers can abuse these features, often used for remote administration and automation, to execute malicious code, bypassing traditional network controls and SSH.
+references:
+  - https://unit42.paloaltonetworks.com/cloud-virtual-machine-attack-vectors/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.execution
+  - attack.persistence
+logsource:
+  category: cloud
+detection:
+  aws_execution:
+        # Detects AWS SSM Run Command, which allows command execution on managed instances.
+    logsource:
+      service: cloudtrail
+      product: aws
+    eventName: 'SendCommand'
+  azure_run_command:
+        # Detects Azure's Run Command feature for executing scripts inside a VM.
+    logsource:
+      service: activitylogs
+      product: azure
+    operation_name: 'Microsoft.Compute/virtualMachines/runCommand/action'
+    status: 'Succeeded'
+  azure_custom_script:
+        # Detects the use of the Custom Script Extension to download and run scripts on an Azure VM.
+    logsource:
+      service: activitylogs
+      product: azure
+    operation_name: 'Microsoft.Compute/virtualMachines/extensions/write'
+    status: 'Succeeded'
+    properties:
+      type|contains: 'CustomScript'       # Identifies the Custom Script Extension for Linux or Windows.
+  gcp_execution:
+        # Detects GCP OS Config patch jobs or policy assignments that can execute scripts.
+    logsource:
+      service: gcp.audit
+    methodName:
+      - 'osconfig.patchJobs.exec'
+      - 'google.cloud.osconfig.v1.OsConfigZonalService.ExecutePatchJob'
+      - 'osconfig.osPolicyAssignments.update'
+      - 'google.cloud.osconfig.v1.OsConfigZonalService.UpdateOSPolicyAssignment'
+      - 'google.cloud.osconfig.v1.OsConfigZonalService.CreateOSPolicyAssignment'
+  condition: aws_execution or azure_run_command or azure_custom_script or gcp_execution
+falsepositives:
+  - Legitimate remote administration by system administrators or SREs.
+  - Automated configuration management and patching systems (e.g., Ansible, Chef, SCCM).
+  - CI/CD pipelines deploying or configuring applications.
+  - To reduce false positives, consider filtering events based on trusted user/service accounts, expected IP ranges, or known automation tool user agents.
+level: medium

@@ -1,0 +1,41 @@
+// Name: Potential GRE/GRETAP IP Spoofing
+// Description: Detects potential GRE/GRETAP IP spoofing attacks. Attackers can exploit these tunnels with spoofed IPs for initial
+//              access and evasion. This rule looks for GRE traffic (IP protocol 47) where the source IP is an internal, private IP
+//              address, but the traffic is communicating with a public IP address. This is a strong indicator of IP spoofing or a
+//              significant network misconfiguration, as private IP addresses should not be routable over the public internet.
+// Tactic: Initial Access, Defense Evasion
+// Technique: T1595.002 (Active Scanning: Vulnerability Scanning), T1090.002 (Proxy: External Proxy)
+// Author: RW
+// Date: 2025-08-13
+// False Positives: Network misconfigurations could potentially lead to false positives.
+// It's recommended to baseline normal GRE traffic and add exceptions for known, legitimate internal source IPs seen on external interfaces if necessary.
+// Data Source: Network Session, Firewall Logs
+
+_Im_NetworkSession
+| where isnotempty(SrcIpAddr) and isnotempty(DstIpAddr)
+// Filter for GRE traffic (IP Protocol 47)
+| where NetworkProtocolNumber == 47
+// The source IP is a private (RFC1918) address.
+| where is_private_ipv4(SrcIpAddr)
+// The destination IP is a public address.
+// This indicates the private source is attempting to communicate externally, which is anomalous.
+| where not(is_private_ipv4(DstIpAddr))
+    and not(ipv4_is_in_range(DstIpAddr, "127.0.0.0/8")) // Exclude loopback
+    and not(ipv4_is_in_range(DstIpAddr, "169.254.0.0/16")) // Exclude link-local
+    and not(ipv4_is_in_range(DstIpAddr, "224.0.0.0/4")) // Exclude multicast
+// To reduce false positives, add known legitimate GRE endpoints or misconfigured but benign assets to this allowlist.
+// | where SrcIpAddr !in ('1.2.3.4') and DstIpAddr !in ('5.6.7.8')
+| project-reorder
+    TimeGenerated,
+    SrcIpAddr,
+    DstIpAddr,
+    SrcHostname,
+    DstHostname,
+    NetworkProtocol,
+    EventVendor,
+    EventProduct,
+    DstPortNumber
+| extend
+    timestamp = TimeGenerated,
+    SrcDeviceName = SrcHostname,
+    DstDeviceName = DstHostname

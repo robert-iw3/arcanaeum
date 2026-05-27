@@ -1,0 +1,103 @@
+rule crypto24_ransomware_attack_chain {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects a combination of Tactics, Techniques, and Procedures (TTPs) associated with the Crypto24 ransomware group. This rule correlates multiple suspicious events, such as defense evasion, lateral movement, and persistence, occurring on a single host within a 24-hour window."
+    reference = "https://www.trendmicro.com/en_us/research/25/h/crypto24-ransomware-stealth-attacks.html"
+    false_positives = "Legitimate administrative activity involving the use of tools like PsExec, remote access software, or security product uninstallers might trigger individual components of this rule. The correlation of multiple distinct activities is designed to reduce false positives."
+    tags = "CRIME, RANSOMWARE, CRYPTO24, WINDOWS, DEFENSE_EVASION, LATERAL_MOVEMENT"
+    tactic = "TA0002, TA0003, TA0005, TA0007, TA0008, TA0010, TA0011"
+    technique = "T1562.001, T1490, T1053.005, T1543.003, T1021.002, T1056.001, T1041, T1078.002"
+
+  events:
+    // T1490: Inhibit System Recovery - Deletes volume shadow copies
+    $shadow_copy_delete.metadata.event_type = "PROCESS_LAUNCH"
+    $shadow_copy_delete.principal.hostname = $hostname
+    re.regex($shadow_copy_delete.target.process.file.full_path, `\\vssadmin\.exe$`) nocase
+    re.regex($shadow_copy_delete.target.process.command_line, `delete\s+shadows\s+/all\s+/quiet`) nocase
+
+    // T1562.001: Impair Defenses - Uninstalls security products via GPO script
+    $edr_bypass_gpo.metadata.event_type = "PROCESS_LAUNCH"
+    $edr_bypass_gpo.principal.hostname = $hostname
+    re.regex($edr_bypass_gpo.target.process.file.full_path, `\\gpscript\.exe$`) nocase
+    re.regex($edr_bypass_gpo.target.process.command_line, `(uninstaller|removal|xbcuninstaller)`) nocase
+
+    // T1562.001: Impair Defenses - Custom EDR bypass tool execution
+    $edr_bypass_tool.metadata.event_type = "PROCESS_LAUNCH"
+    $edr_bypass_tool.principal.hostname = $hostname
+    re.regex($edr_bypass_tool.target.process.file.full_path, `\\(AVB|AVMon)\.exe$`) nocase
+
+    // T1543.003 & T1056.001: Windows Service & Keylogging - Keylogger service installation
+    $keylogger_service.metadata.event_type = "SERVICE_CREATE"
+    $keylogger_service.principal.hostname = $hostname
+    $keylogger_service.target.service.name = "WinMainSvc" nocase
+    re.regex($keylogger_service.target.service.command_line, `svchost\.exe\s+-k\s+WinMainSvc`) nocase
+
+    // T1543.003: Windows Service - Ransomware service installation
+    $ransomware_service.metadata.event_type = "SERVICE_CREATE"
+    $ransomware_service.principal.hostname = $hostname
+    $ransomware_service.target.service.name = "MSRuntime" nocase
+    re.regex($ransomware_service.target.service.command_line, `svchost\.exe\s+-k\s+MSRuntime`) nocase
+
+    // T1041: Exfiltration Over C2 Channel - Data exfiltration to Google Drive
+    $gdrive_exfil.metadata.event_type = "NETWORK_CONNECTION"
+    $gdrive_exfil.principal.hostname = $hostname
+    $gdrive_exfil.network.http.method = "POST"
+    re.regex($gdrive_exfil.network.url, `googleapis\.com/drive/v3/files`)
+
+    // T1021.002: Remote Services - PsExec lateral movement
+    $psexec_lateral.metadata.event_type = "PROCESS_LAUNCH"
+    $psexec_lateral.principal.hostname = $hostname
+    re.regex($psexec_lateral.principal.process.file.full_path, `\\PSEXESVC\.exe$`) nocase
+
+    // T1021.001: Remote Services - Use of legitimate remote access tools
+    $remote_tool_install.metadata.event_type = "PROCESS_LAUNCH"
+    $remote_tool_install.principal.hostname = $hostname
+    re.regex($remote_tool_install.target.process.file.full_path, `(TightVNC|AnyDesk)`) nocase
+
+    // T1078: Valid Accounts - Addition of user to privileged group
+    $priv_acct_add.metadata.event_type = "GROUP_ADDITION"
+    $priv_acct_add.principal.hostname = $hostname
+    re.regex($priv_acct_add.target.group.name, `Administrators|Remote Desktop Users`) nocase
+
+  match:
+    $hostname over 24h
+
+  outcome:
+    // Risk score is elevated due to the correlation of multiple suspicious TTPs.
+    $risk_score = 75
+    $principal_hostname = $hostname
+
+    // Collect details from each observed TTP for investigation.
+    $observed_ttp_commands = array_distinct(
+        $shadow_copy_delete.target.process.command_line,
+        $edr_bypass_gpo.target.process.command_line,
+        $edr_bypass_tool.target.process.command_line,
+        $psexec_lateral.target.process.command_line,
+        $remote_tool_install.target.process.command_line
+    )
+    $observed_services = array_distinct(
+        $keylogger_service.target.service.name,
+        $ransomware_service.target.service.name
+    )
+    $observed_privilege_escalation_user = array_distinct($priv_acct_add.target.user.userid)
+    $observed_privilege_escalation_group = array_distinct($priv_acct_add.target.group.name)
+    $observed_exfil_urls = array_distinct($gdrive_exfil.network.url)
+
+    // Count the number of distinct TTPs observed.
+    $distinct_ttp_count = (
+        ( #shadow_copy_delete > 0 ) +
+        ( #edr_bypass_gpo > 0 ) +
+        ( #edr_bypass_tool > 0 ) +
+        ( #keylogger_service > 0 ) +
+        ( #ransomware_service > 0 ) +
+        ( #gdrive_exfil > 0 ) +
+        ( #psexec_lateral > 0 ) +
+        ( #remote_tool_install > 0 ) +
+        ( #priv_acct_add > 0 )
+    )
+
+  condition:
+    // The rule triggers if at least two distinct TTPs associated with Crypto24 are observed on the same host.
+    $hostname and $distinct_ttp_count > 1
+}

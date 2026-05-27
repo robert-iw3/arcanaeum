@@ -1,0 +1,104 @@
+// Name: Comprehensive Remote Registry Reconnaissance Activity
+// Author: RW
+// Date: 2025-08-07
+// Description: Identifies hosts exhibiting one or more suspicious behaviors related to remote registry usage for reconnaissance.
+//              This includes direct access to the 'winreg' pipe, enumeration of HKEY_USERS, starting the Remote Registry service,
+//              disabling the service's idle timer, and correlating this with other recon techniques like LDAP queries.
+//              This pattern is indicative of tools like BloodHound/SharpHound.
+// False Positive Sensitivity: Medium
+// Tags: Discovery, Persistence, TTPs
+
+let time_window = 1h;
+let enumeration_threshold = 5; // Threshold for HKEY_USERS SID enumeration to be considered suspicious.
+
+// Collect source-to-target reconnaissance activities.
+let source_target_recon = union
+    (
+        // Indicator: Remote pipe access for recon (winreg, wkssvc, srvsvc)
+        DeviceFileEvents
+        | where Timestamp > ago(time_window)
+        | where ActionType == "FileCreated" and FolderPath == "\\\\.\\pipe\\" and FileName in ("winreg", "wkssvc", "srvsvc")
+        | where isnotempty(RemoteDeviceName) and DeviceName != RemoteDeviceName
+        | extend ActivityType = case(
+            FileName == "winreg", "WinregPipeAccess",
+            FileName == "wkssvc", "NetWkstaUserEnum",
+            FileName == "srvsvc", "NetSessionEnum",
+            "OtherPipeAccess"
+            )
+        | project Timestamp, SourceHost = RemoteDeviceName, TargetHost = DeviceName, ActivityType, Details = pack("ConnectingDeviceIP", RemoteIP)
+    ),
+    (
+        // Indicator: LDAP queries
+        DeviceNetworkEvents
+        | where Timestamp > ago(time_window)
+        | where ActionType == "ConnectionSuccess" and RemotePort in (389, 636, 3268, 3269)
+        | project Timestamp, SourceHost = DeviceName, TargetHost = RemoteIP, ActivityType = "LDAPQuery", Details = pack("RemotePort", RemotePort)
+    );
+
+// Collect artifacts observed on the target host, where the remote source is not directly available.
+let target_only_artifacts = union
+    (
+        // Indicator: Bulk enumeration of user SIDs in HKEY_USERS via remote registry service
+        DeviceRegistryEvents
+        | where Timestamp > ago(time_window)
+        | where ActionType in ("RegistryKeyEnumerated", "RegistryKeyOpened")
+        | where RegistryKey matches regex @"^HKEY_USERS\\S-1-5-21-\d+-\d+-\d+-\d+(_Classes)?$"
+        | where InitiatingProcessFileName =~ "svchost.exe" and InitiatingProcessAccountName =~ "local service"
+        | summarize dcount(RegistryKey) by bin(Timestamp, 5m), TargetHost = DeviceName, InitiatingProcessCommandLine
+        | where dcount_RegistryKey > enumeration_threshold
+        | project Timestamp, TargetHost, ActivityType = "HkeyUsersEnumeration", Details = pack("EnumeratedSidCount", dcount_RegistryKey, "Process", InitiatingProcessCommandLine)
+    ),
+    (
+        // Indicator: Remote Registry service started, especially on client OS
+        DeviceEvents
+        | where Timestamp > ago(time_window)
+        | where ActionType == "ServiceStateChanged" and ServiceName == "RemoteRegistry" and ServiceState == "Running"
+        | where OSPlatform !startswith "WindowsServer" // This is most suspicious on client OS versions
+        | project Timestamp, TargetHost = DeviceName, ActivityType = "RemoteRegistryServiceStart", Details = pack("Process", InitiatingProcessFileName, "User", InitiatingProcessAccountName)
+    ),
+    (
+        // Indicator: Remote Registry service idle-stop timer disabled for persistence
+        DeviceRegistryEvents
+        | where Timestamp > ago(time_window)
+        | where ActionType == "RegistryValueSet" and RegistryKey endswith "\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\RemoteRegistry" and RegistryValueName == "DisableIdleStop"
+        | where RegistryValueData == "0"
+        | project Timestamp, TargetHost = DeviceName, ActivityType = "RemoteRegistryIdleStopDisabled", Details = pack("Process", InitiatingProcessFileName, "User", InitiatingProcessAccountName)
+    );
+
+// Union all source and target indicators into a single stream.
+let all_indicators = union
+    (
+        source_target_recon
+    ),
+    (
+        target_only_artifacts
+        | extend SourceHost = tostring(null) // Add null SourceHost for schema consistency
+    );
+
+// Correlate all activities around the target host.
+all_indicators
+| summarize
+    StartTime = min(Timestamp),
+    EndTime = max(Timestamp),
+    Activities = make_set(ActivityType, 20),
+    SourceHosts = make_set_if(SourceHost, isnotempty(SourceHost), 20),
+    ActivityDetails = make_bag(pack(ActivityType, Details))
+    by TargetHost, bin(Timestamp, time_window)
+// The core trigger condition: at least one remote registry related artifact must be present.
+| where "WinregPipeAccess" in (Activities)
+    or "HkeyUsersEnumeration" in (Activities)
+    or "RemoteRegistryServiceStart" in (Activities)
+    or "RemoteRegistryIdleStopDisabled" in (Activities)
+// Add a secondary condition to improve fidelity by requiring multiple indicators or a single high-confidence one.
+| where array_length(Activities) > 1 or "HkeyUsersEnumeration" in (Activities)
+// FP Tuning: Legitimate admin workstations, vulnerability scanners, or management servers may perform these actions.
+// Exclude known hosts by name.
+// ex: | where TargetHost !in ("VULNSCANNER.corp.com") and not(SourceHosts has "ADMIN-PC-01.corp.com")
+| project
+    StartTime,
+    EndTime,
+    TargetHost,
+    SourceHosts,
+    ActivityCount = array_length(Activities),
+    Activities,
+    ActivityDetails

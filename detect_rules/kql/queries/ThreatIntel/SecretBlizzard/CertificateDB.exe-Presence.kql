@@ -1,0 +1,40 @@
+// Name: CertificateDB.exe Presence
+// Author: RW
+// Date: 2025-07-31
+// Description: Detects the presence or execution of "CertificateDB.exe". This filename is used by the ApolloShadow malware (Secret Blizzard) to masquerade as a certificate installer and trigger a UAC prompt for privilege escalation.
+// False Positives: Low. The filename is highly specific to the malware described in the reference and is unlikely to be used by legitimate software.
+// References: https://www.microsoft.com/en-us/security/blog/2025/07/31/frozen-in-transit-secret-blizzards-aitm-campaign-against-diplomats/
+// MITRE ATT&CK: T1548.002
+// Data Sources: Microsoft Defender for Endpoint (DeviceProcessEvents, DeviceFileEvents)
+
+let timeframe = 1d;
+let file_ioc = "CertificateDB.exe";
+union DeviceProcessEvents, DeviceFileEvents
+| where Timestamp > ago(timeframe)
+// Search for the specific file or process name in relevant fields.
+| where FileName =~ file_ioc or ProcessCommandLine has file_ioc
+| extend
+    // Normalize user and parent process fields across different event types.
+    User = iff(isempty(InitiatingProcessAccountName), AccountName, InitiatingProcessAccountName),
+    Parent = iff(isempty(InitiatingProcessFileName), ActingProcessFileName, InitiatingProcessFileName)
+| summarize
+    startTime = min(Timestamp),
+    endTime = max(Timestamp),
+    count(),
+    // Collect distinct values for key fields to provide context.
+    CommandLine = make_set(ProcessCommandLine, 10),
+    ParentProcess = make_set(Parent, 10),
+    FilePath = make_set(FolderPath, 10)
+    by
+    DeviceName,
+    User,
+    FileName
+| project-rename
+    endpoint = DeviceName,
+    user = User,
+    process_name = FileName,
+    firstTime = startTime,
+    lastTime = endTime,
+    cmd = CommandLine,
+    parent_process = ParentProcess,
+    file_path = FilePath

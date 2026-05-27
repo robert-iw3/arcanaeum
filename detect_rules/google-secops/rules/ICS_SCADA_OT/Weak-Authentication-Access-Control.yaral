@@ -1,0 +1,55 @@
+rule weak_ics_authentication_or_brute_force {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects attempts to bypass or exploit weak authentication mechanisms in ICS/OT systems. This rule identifies brute-force attacks (a high volume of failed logins from a single source), successful logins from untrusted networks, and successful logins using common default usernames. These activities are often precursors to initial access and privilege escalation."
+    tactic = "TA0038, TA0039" // Initial Access, Credential Access
+    technique = "T0806, T0866" // Brute Force, Valid Accounts
+    tags = "ICS, OT, AUTHENTICATION, BRUTE_FORCE, INITIAL_ACCESS"
+    false_positives = "Legitimate repeated login failures from a user who has forgotten their password. Authorized administrative access from a new or unlisted network segment. Use of default accounts during initial device setup or by legacy automated systems."
+
+  events:
+    // Catches failed login attempts to be counted for brute-force detection.
+    $failure.metadata.event_type = "USER_LOGIN"
+    $failure.metadata.outcome = "FAIL"
+    $failure.principal.ip = $source_ip
+
+    // Catches successful logins to check for other suspicious patterns.
+    $success.metadata.event_type = "USER_LOGIN"
+    $success.metadata.outcome = "SUCCESS"
+    $success.principal.ip = $source_ip
+
+  match:
+    // Groups all login attempts from the same source IP over a 10 minute window.
+    $source_ip over 10m
+
+  outcome:
+    $risk_score = 75
+    $principal_ip = array_distinct($source_ip)
+    $target_hostname = array_distinct($failure.target.hostname)
+    $target_hostname = array_distinct($success.target.hostname)
+    $successful_users = array_distinct($success.principal.user.userid)
+    $failed_login_count = count_distinct($failure.metadata.id)
+    $successful_login_count = count_distinct($success.metadata.id)
+
+  condition:
+    // The condition triggers if any of the following are true for a given source IP:
+    // 1. A brute-force attempt is detected (more than 15 failures).
+    // 2. A successful login occurs from an untrusted network.
+    // 3. A successful login occurs using a common default username.
+    (
+      #failure > 15
+    )
+    or
+    (
+      any $s in $success:
+        (
+          // This filter is critical. Create a reference list named 'trusted_ics_networks'
+          // containing all trusted internal, corporate, and management network CIDR ranges.
+          not net.ip_in_range_cidr($s.principal.ip, %trusted_ics_networks)
+          or
+          // Checks for common default or weak usernames.
+          re.regex($s.principal.user.userid, `(?i)^(admin|administrator|root|user|operator|guest|factory|service|1234|0000)$`)
+        )
+    )
+}

@@ -1,0 +1,25 @@
+{
+  "comment_patterns": [
+    {"pattern": "^\\s*--\\s*(.*)$", "extractor": "group(1)"},
+    {"pattern": "^\\s*#\\s*(.*)$", "extractor": "group(1)"},
+    {"pattern": "^\\s*//\\s*(.*)$", "extractor": "group(1)"},
+    {"pattern": "^\\s*`#\\s*(.*?)\\s*#`\\s*$", "extractor": "group(1)"},
+    {"pattern": "^\\s*`comment\\(\\s*--\\s*(.*?)\\s*\\)`\\s*$", "extractor": "group(1)"},
+    {"pattern": "^\\s*/\\*\\s*(.*?)\\s*\\*/\\s*$", "extractor": "group(1)"}
+  ],
+  "validation_rules": {
+    "required_metadata": ["title"],
+    "allowed_spl_commands": ["search", "table", "stats", "eval", "where", "fields", "tstats", "inputlookup"],
+    "allow_macros": true,
+    "validate_macro_arguments": true,
+    "allow_subsearches": true
+  },
+  "normalization_rules": {
+    "standardize_case": true,
+    "normalize_whitespace": true
+  },
+  "custom_cim_mappings": {
+    "client_ip": "src_ip",
+    "server_ip": "dest_ip"
+  }
+}

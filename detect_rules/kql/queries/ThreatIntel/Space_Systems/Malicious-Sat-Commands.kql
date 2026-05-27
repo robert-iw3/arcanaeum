@@ -1,0 +1,66 @@
+// Name: Malicious Satellite Command Anomaly
+// Author: RW
+// Date: 2025-08-19
+// Description: Detects commands that were reportedly received and executed by a satellite but have no corresponding "sent" record
+// from the ground control station logs. This indicates a potential command injection attack, either from a compromised ground station
+// asset or via a Man-in-the-Middle (MitM) attack on the command link itself. This detection relies on the defense-in-depth strategy
+// of cross-validating commands sent from the ground with telemetry received from the satellite, as discussed in the reference.
+// Tactic: Impact (TA0040), Command and Control (TA0011)
+// Technique: T1489 (Service Stop), T1071 (Application Layer Protocol)
+// False Positive Sensitivity: Medium
+// Data Source: Custom Logs
+
+// This detection requires two distinct custom log sources from the satellite operations environment:
+// 1. A log of commands SENT from the ground control application.
+// 2. A log of command execution receipts from satellite TELEMETRY.
+// ---
+// Define the lookback period for the correlation.
+let lookback = 1h;
+// ---
+// Placeholder for the table containing logs of commands sent from the ground station.
+// Tuning: Replace 'GroundControl_CommandsSent_CL' with the actual table name.
+let sent_commands_table = "GroundControl_CommandsSent_CL";
+// Placeholder for the field containing the unique command identifier in the 'sent' log.
+// Tuning: Replace 'CommandID_s' with the actual field name.
+let command_id_field_sent = "CommandID_s";
+// ---
+// Placeholder for the table containing telemetry data confirming which commands were received by the satellite.
+// Tuning: Replace 'Satellite_Telemetry_CL' with the actual table name.
+let telemetry_receipts_table = "Satellite_Telemetry_CL";
+// Placeholder for the field containing the unique command identifier in the 'received' log.
+// Tuning: Replace 'ReceivedCommandID_s' with the actual field name.
+let command_id_field_received = "ReceivedCommandID_s";
+// ---
+union
+    (
+        // Get commands logged as sent from the ground station.
+        table(sent_commands_table)
+        | where TimeGenerated > ago(lookback)
+        | project TimeGenerated, CommandID = tostring(column_ifexists(command_id_field_sent, "")), SourceTable="Sent"
+    ),
+    (
+        // Get commands logged as received via satellite telemetry.
+        table(telemetry_receipts_table)
+        | where TimeGenerated > ago(lookback)
+        | project TimeGenerated, CommandID = tostring(column_ifexists(command_id_field_received, "")), SourceTable="Received"
+    )
+// Filter out any records where the Command ID is empty.
+| where isnotempty(CommandID)
+// Correlate sent vs. received logs by the unique command identifier.
+| summarize
+    SentCount = countif(SourceTable == "Sent"),
+    ReceivedCount = countif(SourceTable == "Received"),
+    FirstSeen = min(TimeGenerated),
+    LastSeen = max(TimeGenerated)
+    by CommandID
+// The core detection logic: Find commands that were received by the satellite but were never logged as sent from the ground control application.
+// This implies the command was injected into the control stream.
+| where ReceivedCount > 0 and SentCount == 0
+| project
+    timestamp = FirstSeen,
+    StartTime = FirstSeen,
+    EndTime = LastSeen,
+    AnomalousCommandID = CommandID,
+    TelemetryReceiptCount = ReceivedCount
+| extend
+    CustomEntity = AnomalousCommandID

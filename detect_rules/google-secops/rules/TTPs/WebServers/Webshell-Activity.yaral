@@ -1,0 +1,51 @@
+rule updatechecker_webshell_activity {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects post-exploitation activity consistent with the UpdateChecker.aspx web shell. The rule correlates a suspicious HTTP POST request, characteristic of the web shell's command channel, with subsequent command-line execution by the IIS worker process on the same host."
+    tags = "WEBSHELL, IIS, WINDOWS, CRITICAL_INFRASTRUCTURE"
+    tactic = "TA0002, TA0003, TA0007"
+    technique = "T1505.003, T1059.003, T1102"
+    false_positives = "Legitimate web applications might use HTTP POST with 'application/octet-stream' to upload binary data to .aspx pages. If this is common in your environment, consider adding exceptions for known-good URLs or source IPs."
+
+  events:
+    // Event 1: A suspicious HTTP POST request, matching the web shell's communication pattern.
+    $http_post.metadata.event_type = "NETWORK_HTTP"
+    $http_post.network.http.method = "POST"
+    // The web shell specifically requires this content type for its encrypted command data.
+    $http_post.network.http.content_type = "application/octet-stream"
+    // The target is an ASPX page, which hosts the web shell.
+    re.regex($http_post.target.url, `\.aspx$`) nocase
+    $http_post.principal.hostname = $hostname
+    $http_post.principal.ip = $source_ip
+
+    // Event 2: Command execution initiated by the IIS process.
+    $process_launch.metadata.event_type = "PROCESS_LAUNCH"
+    $process_launch.principal.hostname = $hostname
+    // The parent process is the IIS worker process (w3wp.exe) or the executing user is an IIS application pool identity.
+    (
+      re.regex($process_launch.principal.process.file.full_path, `\\w3wp\.exe$`) nocase
+      or re.regex($process_launch.principal.user.userid, `(?i)apppool|iis`)
+    )
+    // Looks for common reconnaissance commands executed via the web shell.
+    // This list may need to be tuned to filter noise from legitimate administrative scripts.
+    re.regex($process_launch.target.process.command_line, `(?i)\b(cmd|powershell|pwsh|whoami|hostname|net\s+(user|group)|quser|qwinsta|systeminfo|ipconfig|tasklist|netstat|dir|tree|type|findstr)\b`)
+
+  match:
+    $hostname over 10m
+
+  outcome:
+    // A higher risk score is assigned due to the strong correlation between a suspicious web request and command execution.
+    $risk_score = 75
+    $principal_hostname = $hostname
+    $principal_ip = array_distinct($source_ip)
+    $webshell_url = array_distinct($http_post.target.url)
+    $user_agent = array_distinct($http_post.network.http.user_agent)
+    $iis_user = array_distinct($process_launch.principal.user.userid)
+    $iis_process_path = array_distinct($process_launch.principal.process.file.full_path)
+    $spawned_command_line = array_distinct($process_launch.target.process.command_line)
+    $event_count = count_distinct($process_launch.metadata.id) + count_distinct($http_post.metadata.id)
+
+  condition:
+    $http_post and $process_launch
+}

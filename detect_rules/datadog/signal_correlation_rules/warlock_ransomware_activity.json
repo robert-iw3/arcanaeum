@@ -1,0 +1,85 @@
+{
+  "data": {
+    "type": "signal_correlation",
+    "attributes": {
+      "name": "Warlock Ransomware Activity",
+      "enabled": true,
+      "cases": [
+        {
+          "name": "Initial Access & Privilege Escalation via SharePoint",
+          "status": "high",
+          "query": "source:(sysmon OR xmlwineventlog OR wineventlog) @winlog.event_id:1 @process.parent.name:w3wp.exe @process.parent:*SharePoint* (@process.command_line:*net\\ user\\ guest\\ /active:yes* OR @process.command_line:*net\\ localgroup\\ administrators\\ guest\\ /add* OR @process.command_line:*New-GPO*)"
+        },
+        {
+          "name": "Discovery",
+          "status": "medium",
+          "query": "source:(sysmon OR xmlwineventlog OR wineventlog) @winlog.event_id:1 @process.command_line:(*nltest\\ /domain_trusts* OR *wmic\\ product\\ get\\ name,identifyingnumber* OR *net\\ group\\ \\\"domain\\ admins\\\"* OR *net\\ group\\ \\\"domain\\ computers\\\"* OR *net\\ group\\ \\\"domain\\ controllers\\\"* OR *quser*)"
+        },
+        {
+          "name": "Credential Access",
+          "status": "high",
+          "query": "source:(sysmon OR xmlwineventlog OR wineventlog) @winlog.event_id:1 (@process.name:mimikatz.exe OR @process.command_line:*reg*save*hklm\\\\sam* OR @process.command_line:*reg*save*hklm\\\\security*)"
+        },
+        {
+          "name": "Defense Evasion - Kill AV",
+          "status": "high",
+          "query": "source:(sysmon OR xmlwineventlog OR wineventlog) @winlog.event_id:1 @process.parent.name:vmtools.exe (@process.command_line:*taskkill* OR @process.command_line:*net\\ stop*)"
+        },
+        {
+          "name": "Defense Evasion - Malicious Driver",
+          "status": "high",
+          "query": "source:(sysmon OR xmlwineventlog OR wineventlog) @winlog.event_id:11 @file.name:googleApiUtil64.sys"
+        },
+        {
+          "name": "Command and Control",
+          "status": "high",
+          "query": "source:(sysmon OR xmlwineventlog OR wineventlog) @winlog.event_id:1 @process.command_line:*tunnel*run*--token*"
+        },
+        {
+          "name": "Lateral Movement",
+          "status": "medium",
+          "query": "source:(sysmon OR xmlwineventlog OR wineventlog) @winlog.event_id:1 @process.command_line:*copy*\\\\c$\\\\users\\\\public*"
+        },
+        {
+          "name": "Persistence & Defense Evasion - RDP Modification",
+          "status": "medium",
+          "query": "source:(sysmon OR xmlwineventlog OR wineventlog) @winlog.event_id:13 (@registry.path:*\\\\SYSTEM\\\\CurrentControlSet\\\\Control\\\\Terminal\\ Server\\\\fDenyTSConnections OR @registry.path:*\\\\SYSTEM\\\\CurrentControlSet\\\\Control\\\\Terminal\\ Server\\\\WinStations\\\\RDP-Tcp\\\\UserAuthentication) @registry.value.data:0"
+        },
+        {
+          "name": "Exfiltration",
+          "status": "critical",
+          "query": "source:(sysmon OR xmlwineventlog OR wineventlog) @winlog.event_id:1 @process.parent.name:(rclone.exe OR TrendSecurity.exe) @process.command_line:*copy*--protondrive-username*--protondrive-password*"
+        }
+      ],
+      "group_by_fields": ["@host", "@user.name"],
+      "distinct_fields": ["case_id"],
+      "correlation": {
+        "expression": "distinct_count >= 2",
+        "timeframe": "1h"
+      },
+      "message": "Warlock Ransomware Activity: {distinct_count} distinct tactics on host {@host} by user {@user.name}. Tactics: {case_names}. Evidence: {@process.command_line OR @file.name OR @registry.path}. First activity: {first_activity}, Last activity: {last_activity}",
+      "severity": "high",
+      "tags": [
+        "security:attack",
+        "tactic:TA0001",
+        "tactic:TA0004",
+        "tactic:TA0005",
+        "tactic:TA0007",
+        "tactic:TA0008",
+        "tactic:TA0009",
+        "tactic:TA0010",
+        "tactic:TA0011",
+        "technique:T1190",
+        "technique:T1078",
+        "technique:T1003",
+        "technique:T1562",
+        "technique:T1570",
+        "technique:T1021",
+        "technique:T1048"
+      ],
+      "options": {
+        "evaluation_window": "1h"
+      }
+    }
+  }
+}

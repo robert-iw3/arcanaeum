@@ -1,0 +1,300 @@
+---
+- name: Kubernetes Host Hardening
+  hosts: kubernetes_hosts
+  become: yes
+  vars:
+    # Set default for backup_dir if not passed
+    backup_dir: /var/backups/k8s_hardening_{{ ansible_date_time.date | default(ansible_date_time.iso8601_basic) }}
+
+  tasks:
+    - name: Ensure backup directory exists
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+
+    # --- Section 1: Harden Kernel Parameters ---
+    - name: Configure kernel parameters (sysctl)
+      sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        sysctl_file: "/etc/sysctl.d/99-kubernetes-hardening.conf"
+        state: present
+        reload: yes
+      loop:
+        - { name: 'net.ipv4.conf.all.rp_filter', value: '1' }
+        - { name: 'net.ipv4.conf.default.rp_filter', value: '1' }
+        - { name: 'net.ipv4.conf.all.accept_source_route', value: '0' }
+        - { name: 'net.ipv4.conf.default.accept_source_route', value: '0' }
+        - { name: 'net.ipv6.conf.all.accept_source_route', value: '0' }
+        - { name: 'net.ipv6.conf.default.accept_source_route', value: '0' }
+        - { name: 'net.ipv4.conf.all.send_redirects', value: '0' }
+        - { name: 'net.ipv4.conf.default.send_redirects', value: '0' }
+        - { name: 'net.ipv4.conf.all.accept_redirects', value: '0' }
+        - { name: 'net.ipv4.conf.default.accept_redirects', value: '0' }
+        - { name: 'net.ipv6.conf.all.accept_redirects', value: '0' }
+        - { name: 'net.ipv6.conf.default.accept_redirects', value: '0' }
+        - { name: 'net.ipv4.tcp_syncookies', value: '1' }
+        - { name: 'net.ipv4.conf.all.log_martians', value: '1' }
+        - { name: 'kernel.randomize_va_space', value: '2' }
+        - { name: 'kernel.core_uses_pid', value: '1' }
+        - { name: 'fs.suid_dumpable', value: '0' }
+        - { name: 'net.ipv4.icmp_echo_ignore_broadcasts', value: '1' }
+        - { name: 'net.ipv4.icmp_ignore_bogus_error_responses', value: '1' }
+        - { name: 'net.ipv6.conf.all.disable_ipv6', value: '1' }
+        - { name: 'net.ipv6.conf.default.disable_ipv6', value: '1' }
+
+    # --- Section 2: Secure Filesystem Permissions ---
+    - name: Set permissions for sensitive files
+      file:
+        path: "{{ item.path }}"
+        mode: "{{ item.mode }}"
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+      loop:
+        - { path: '/etc/shadow', mode: '0600', owner: 'root', group: 'root' }
+        - { path: '/etc/passwd', mode: '0644', owner: 'root', group: 'root' }
+        - { path: '/etc/gshadow', mode: '0600', owner: 'root', group: 'root' }
+        - { path: '/etc/group', mode: '0644', owner: 'root', group: 'root' }
+
+    - name: Find and set sticky bit on world-writable directories
+      command: find / -type d -perm -0002 -exec chmod +t {} \;
+      register: find_result
+      changed_when: find_result.stdout != ""
+      tags: filesystem
+
+    - name: Configure /tmp mount with hardening options
+      mount:
+        path: /tmp
+        src: tmpfs
+        fstype: tmpfs
+        opts: defaults,noexec,nosuid,nodev
+        state: mounted
+      tags: filesystem
+
+    # --- Section 3: Disable Unused Filesystems ---
+    - name: Disable unused filesystems
+      lineinfile:
+        path: /etc/modprobe.d/k8s-filesystems.conf
+        line: "install {{ item }} /bin/true"
+        create: yes
+        state: present
+      loop:
+        - cramfs
+        - freevxfs
+        - jffs2
+        - hfs
+        - hfsplus
+        - udf
+        - usb-storage
+
+    # --- Section 4: Harden SSH Configuration ---
+    - name: Back up sshd_config
+      copy:
+        src: /etc/ssh/sshd_config
+        dest: "{{ backup_dir }}/sshd_config"
+        remote_src: yes
+      ignore_errors: yes
+
+    - name: Configure sshd_config settings
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^{{ item.regexp }}'
+        line: "{{ item.line }}"
+        validate: 'sshd -T -f %s'
+      loop:
+        - { regexp: '#?PermitRootLogin', line: 'PermitRootLogin no' }
+        - { regexp: '#?PasswordAuthentication', line: 'PasswordAuthentication no' }
+        - { regexp: '#?PermitEmptyPasswords', line: 'PermitEmptyPasswords no' }
+        - { regexp: '#?Protocol', line: 'Protocol 2' }
+        - { regexp: '#?MaxAuthTries', line: 'MaxAuthTries 3' }
+        - { regexp: '#?ClientAliveInterval', line: 'ClientAliveInterval 300' }
+        - { regexp: '#?ClientAliveCountMax', line: 'ClientAliveCountMax 0' }
+        - { regexp: '#?UseDNS', line: 'UseDNS no' }
+        - { regexp: '^Ciphers', line: 'Ciphers aes256-gcm@openssh.com,chacha20-poly1305@openssh.com' }
+        - { regexp: '^MACs', line: 'MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com' }
+        - { regexp: '^Banner', line: 'Banner /etc/issue.net' }
+
+    - name: Reload sshd
+      systemd:
+        name: sshd
+        state: reloaded
+
+    # --- Section 5: Disable Unnecessary Services ---
+    - name: Define unnecessary services
+      set_fact:
+        unnecessary_services:
+          - avahi-daemon
+          - cups
+          - dhcpd
+          - slapd
+          - nfs-server
+          - rpcbind
+          - named
+          - vsftpd
+          - httpd
+          - dovecot
+          - smb
+          - squid
+          - snmpd
+          - telnet
+          - rsh-server
+          - nis
+          - xinetd
+
+    - name: Disable and stop unnecessary services
+      systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: no
+      loop: "{{ unnecessary_services }}"
+      ignore_errors: yes
+
+    # --- Section 6: Configure Firewall ---
+    - name: Ensure firewall is configured
+      include_tasks: firewall_tasks.yml
+
+    # --- Section 7: Configure Auditd ---
+    - name: Configure auditd
+      block:
+        - name: Check if auditd is installed
+          command: which auditd
+          ignore_errors: yes
+          register: auditd_check
+          changed_when: false
+
+        - name: Configure auditd rules
+          template:
+            src: templates/k8s-hardening.rules.j2
+            dest: /etc/audit/rules.d/k8s-hardening.rules
+          when: auditd_check.rc == 0
+
+        - name: Load new auditd rules
+          command: augenrules --load
+          when: auditd_check.rc == 0
+          changed_when: true
+
+        - name: Enable and start auditd
+          systemd:
+            name: auditd
+            state: started
+            enabled: yes
+          when: auditd_check.rc == 0
+      rescue:
+        - name: Auditd not installed
+          debug:
+            msg: "Warning: auditd not installed. Skipping auditd configuration."
+
+    # --- Section 8: Configure Mandatory Access Controls ---
+    - name: Enable AppArmor or SELinux
+      include_tasks: mac_tasks.yml
+
+    # --- Section 9: Configure Time Synchronization ---
+    - name: Configure chrony
+      block:
+        - name: Back up chrony.conf
+          copy:
+            src: /etc/chrony.conf
+            dest: "{{ backup_dir }}/chrony.conf"
+            remote_src: yes
+          ignore_errors: yes
+
+        - name: Configure chrony.conf
+          template:
+            src: templates/chrony.conf.j2
+            dest: /etc/chrony.conf
+          when: ansible_service_mgr == "systemd" and 'chrony' in ansible_facts.services
+
+        - name: Ensure chrony is running
+          systemd:
+            name: chronyd
+            state: started
+            enabled: yes
+          when: ansible_service_mgr == "systemd" and 'chrony' in ansible_facts.services
+      rescue:
+        - name: Chrony not configured
+          debug:
+            msg: "Warning: chronyd not installed. Skipping chrony configuration."
+
+    # --- Section 10: Secure Kubernetes File Permissions ---
+    - name: Configure Kubernetes file permissions
+      file:
+        path: "{{ item }}"
+        mode: '0600'
+        owner: 'root'
+        group: 'root'
+      loop:
+        - /etc/kubernetes/admin.conf
+        - /etc/kubernetes/scheduler.conf
+        - /etc/kubernetes/controller-manager.conf
+        - /etc/kubernetes/kubelet.conf
+      ignore_errors: yes
+
+    # --- Section 11: Configure Process Accounting ---
+    - name: Configure process accounting
+      block:
+        - name: Check if acct is installed
+          command: which acct
+          ignore_errors: yes
+          register: acct_check
+          changed_when: false
+
+        - name: Enable and start acct
+          systemd:
+            name: acct
+            state: started
+            enabled: yes
+          when: acct_check.rc == 0
+      rescue:
+        - name: Acct not installed
+          debug:
+            msg: "Warning: acct not installed. Skipping process accounting."
+
+    # --- Section 12: Additional Best Practices ---
+    - name: Ensure /boot is secure
+      file:
+        path: /boot
+        mode: '0700'
+        owner: 'root'
+        group: 'root'
+
+    - name: Harden bootloader configuration
+      lineinfile:
+        path: "{{ item.path }}"
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      loop:
+        - { path: '/etc/default/grub', regexp: '^GRUB_CMDLINE_LINUX', line: 'GRUB_CMDLINE_LINUX="audit=1"' }
+      when: ansible_os_family == 'RedHat' or ansible_os_family == 'Debian'
+
+    - name: Update grub config for Debian
+      command: update-grub
+      when: ansible_os_family == 'Debian'
+      changed_when: true
+
+    - name: Update grub config for RedHat
+      command: grub2-mkconfig -o /boot/grub2/grub.cfg
+      when: ansible_os_family == 'RedHat'
+      changed_when: true
+
+    - name: Ensure core dumps are disabled globally
+      lineinfile:
+        path: /etc/security/limits.conf
+        line: '* hard core 0'
+        state: present
+
+    - name: Disable prelinking (for older systems)
+      command: prelink -u -a
+      when: ansible_facts['distribution'] == 'CentOS' or ansible_facts['distribution'] == 'RedHat'
+      ignore_errors: yes
+
+    - name: Install audit-daemon package for CentOS/RHEL
+      package:
+        name: audit
+        state: present
+      when: ansible_os_family == 'RedHat' and ansible_user == 'root'
+
+    - name: Install auditd package for Ubuntu/Debian
+      package:
+        name: auditd
+        state: present
+      when: ansible_os_family == 'Debian' and ansible_user == 'root'

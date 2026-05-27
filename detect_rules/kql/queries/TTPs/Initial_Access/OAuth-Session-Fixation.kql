@@ -1,0 +1,60 @@
+// Name: OAuth Session Fixation Attempt
+// Author: RW
+// Date: 2025-08-14
+// Description: Detects potential OAuth session fixation attacks by identifying when the user who initiates an OAuth flow is different from the user who completes it.
+// This attack occurs when an attacker tricks a victim into completing an OAuth authorization flow that the attacker started.
+// False Positive Sensitivity: Medium. Legitimate scenarios, such as an admin acting on behalf of a user or complex delegated application permissions, may trigger this alert.
+// Triage Steps:
+// 1. Verify if the initiating and completing users are expected to be different for the application in question.
+// 2. Examine the application to understand its OAuth flow.
+// 3. Investigate the activity of both the initiating and completing users around the time of the alert.
+// 4. Check if the initiating user sent a link to the completing user via email, chat, or another medium.
+
+let lookback = 30m;
+
+// Step 1: Identify OAuth initiation events.
+// Note: The table name, ActionType, and field names are placeholders. You must adapt them to your specific log source (e.g., custom application logs, IdP logs).
+let OAuthInitiation =
+    CloudAppEvents
+    | where TimeGenerated > ago(lookback)
+    // This ActionType should correspond to the event where your application generates an OAuth authorization URL with a 'state' parameter.
+    | where ActionType == "OAuthFlowStart"
+    // The 'state' parameter and the initiating user's identity must be extracted from the logs.
+    | extend state = tostring(parse_json(AdditionalDetails).state)
+    | extend InitiatingUser = tostring(AccountDisplayName)
+    | extend InitiatingIp = IPAddress
+    | where isnotempty(state) and isnotempty(InitiatingUser)
+    | project InitiationTime = TimeGenerated, state, InitiatingUser, InitiatingIp, App = Application;
+
+// Step 2: Identify OAuth completion events (token exchange).
+// This event occurs after the user authenticates with the provider and is redirected back to the application.
+let OAuthCompletion =
+    CloudAppEvents
+    | where TimeGenerated > ago(lookback)
+    // This ActionType should correspond to the callback/redirect URI being processed.
+    | where ActionType in ("OAuthCallback", "TokenExchange")
+    // The 'state' parameter and the completing user's identity must be extracted.
+    | extend state = tostring(parse_json(AdditionalDetails).state)
+    | extend CompletingUser = tostring(AccountDisplayName)
+    | extend CompletingIp = IPAddress
+    | where isnotempty(state) and isnotempty(CompletingUser)
+    | project CompletionTime = TimeGenerated, state, CompletingUser, CompletingIp, App = Application;
+
+// Step 3: Join the initiation and completion events on the 'state' parameter and find mismatches.
+OAuthInitiation
+| join kind=inner OAuthCompletion on state, App
+// The core detection logic: the user who started the flow is not the one who finished it.
+| where InitiatingUser != CompletingUser
+// Ensure the completion happens after the initiation within our lookback window.
+| where (CompletionTime - InitiationTime) between (0s .. lookback)
+// Optional FP Tuning: Uncomment the following line to check for different source IPs. This may increase FPs for users on dynamic networks but can be a strong signal.
+// | where InitiatingIp != CompletingIp
+| project
+    DetectionTime = CompletionTime,
+    Application = App,
+    InitiatingUser,
+    InitiatingIp,
+    InitiationTime,
+    CompletingUser,
+    CompletingIp,
+    StateParameter = state

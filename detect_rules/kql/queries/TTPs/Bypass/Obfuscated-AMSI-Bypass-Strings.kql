@@ -1,0 +1,34 @@
+// Name: PowerShell Obfuscated String Manipulation for AMSI Bypass
+// Author: RW
+// Date: 2025-07-31
+// Tactic: Defense Evasion
+// Technique: T1027, Obfuscated Files or Information
+// Description: Detects PowerShell using string replacement functions like `.replace()` to construct sensitive strings such as "Amsi.dll" or "AmsiScanBuffer". This is a common technique to evade static signature-based detections before performing an AMSI bypass.
+// False Positive Sensitivity: Medium.
+// Legitimate administrative or automation scripts may use string replacement in conjunction with API calls.
+// If false positives occur, consider excluding trusted script paths, parent processes, or known command line patterns.
+
+let timeframe = 1d;
+DeviceProcessEvents
+| where Timestamp > ago(timeframe)
+// Focus on PowerShell processes where this behavior is most common.
+| where FileName in~ ("powershell.exe", "pwsh.exe")
+// The use of ".replace" is the core of the string obfuscation technique described in the PoC.
+| where ProcessCommandLine has ".replace"
+// The goal of the obfuscation is to hide strings used to find and patch AMSI functions.
+// GetModuleHandle is used to find "Amsi.dll" and GetProcAddress is used for "AmsiScanBuffer".
+and (ProcessCommandLine has "GetModuleHandle" or ProcessCommandLine has "GetProcAddress")
+// The presence of Add-Type and DllImport strongly suggests P/Invoke is being used to call these Win32 APIs,
+// which is a prerequisite for this bypass technique.
+and ProcessCommandLine has "Add-Type" and ProcessCommandLine has "DllImport"
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    FileName,
+    ProcessCommandLine,
+    MD5,
+    SHA1,
+    SHA256

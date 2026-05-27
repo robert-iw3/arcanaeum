@@ -1,0 +1,61 @@
+// Name: Privileged User Disabling Security Tools
+// Author: RW
+// Date: 2025-08-15
+// Tactic: Defense Evasion
+// Technique: T1562.001, T1078
+// Description: This rule detects when a privileged account uses command-line tools to stop or disable common security services
+// (e.g., Antivirus, EDR). This activity is a strong indicator of an insider threat or a compromised privileged account attempting
+// to impair defenses to operate undetected. This behavior directly aligns with the threat pattern of an insider attempting to bypass security controls.
+// False Positive Sensitivity: Medium. Legitimate administrators may disable security tools for troubleshooting, software installation, or
+// performance testing. It is crucial to add known administrative command lines or scripts to the 'commandline_allowlist' to reduce false positives.
+//
+// Data sources: DeviceProcessEvents
+
+let timeframe = 1d;
+// Key parameter: List of keywords found in security service or process names. Add your environment-specific tools.
+let security_tool_keywords = dynamic([
+    "WinDefend", "MsSense", "Sense", // Microsoft Defender
+    "CSFalcon", "CrowdStrike", // CrowdStrike
+    "CbDefense", "CarbonBlack", // Carbon Black
+    "SAVService", "Sophos", // Sophos
+    "TmListen", "NTRtScan", "TrendMicro", // Trend Micro
+    "McAfee", "Masvc", "Mfemms" // McAfee
+]);
+// Key parameter: List of processes used to stop/disable services or processes.
+let management_tools = dynamic([
+    "sc.exe",
+    "net.exe",
+    "powershell.exe",
+    "pwsh.exe",
+    "taskkill.exe"
+]);
+// Key parameter: Add legitimate command lines to this list to avoid false positives from approved admin activity.
+let commandline_allowlist = dynamic([
+    // "sc.exe config WinDefend start= auto", // Example of an allowlisted command
+    // "C:\\AdminScripts\\disable_av_for_maintenance.ps1"
+]);
+
+DeviceProcessEvents
+| where TimeGenerated > ago(timeframe)
+// Focus on tools commonly used to manage services and processes.
+| where FileName in~ (management_tools)
+// Filter for command lines that indicate a stop, disable, or kill action.
+| where ProcessCommandLine has_any ("stop", "delete", "disabled", "kill", "taskkill", "Stop-Service", "Set-Service")
+// And the command line targets a known security tool.
+| where ProcessCommandLine has_any (security_tool_keywords)
+// Focus on actions taken with administrative privileges.
+| where IsElevated == true
+// Exclude known and approved administrative command lines.
+| where not(ProcessCommandLine in~ (commandline_allowlist))
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    AccountDomain,
+    IsElevated,
+    ActionType = "Security Tool Tampering",
+    Process = FileName,
+    CommandLine = ProcessCommandLine,
+    ParentProcess = InitiatingProcessFileName,
+    ParentProcessCommandLine = InitiatingProcessCommandLine,
+    SHA256

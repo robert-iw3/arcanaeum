@@ -1,0 +1,56 @@
+// Name: Insecure Azure Network Security Group Rule Created
+// Author: RW
+// Date: 2025-08-31
+// Description: Detects the creation or update of an Azure Network Security Group (NSG) rule that allows inbound traffic from the
+// internet to sensitive ports (e.g., RDP, SSH) or any port. This could indicate a misconfiguration or a malicious attempt to expose resources.
+// Tactic: Defense Evasion
+// Technique: T1562.007
+
+// Set the lookback time for the detection.
+let lookback = 1d;
+
+// Define a list of sensitive ports to monitor for public exposure.
+let sensitivePorts = dynamic(["22", "3389", "*", "Any"]);
+
+// Define a list of trusted users or service principals that are allowed to perform these actions.
+// This list should be populated with known administrative and automation accounts to reduce false positives.
+let trustedCallers = dynamic([]); // e.g. dynamic(["admin@example.com", "service-principal-guid"])
+
+AzureActivity
+| where TimeGenerated > ago(lookback)
+| where OperationNameValue == "MICROSOFT.NETWORK/NETWORKSECURITYGROUPS/SECURITYRULES/WRITE"
+| where ActivityStatusValue == "Succeeded"
+// Exclude trusted callers to reduce noise from legitimate administrative activity.
+// Note: Activity from trusted callers should still be audited periodically.
+| where Caller !in (trustedCallers)
+| extend Properties = todynamic(Properties)
+// Focus on inbound 'Allow' rules.
+| where Properties.properties.direction == "Inbound" and Properties.properties.access == "Allow"
+// Check if the source is the internet. 'Internet', '*', and 'Any' are common values for this.
+| where tostring(Properties.properties.sourceAddressPrefix) in ("*", "Any", "Internet")
+// Check if the destination port is in our sensitive list.
+| where tostring(Properties.properties.destinationPortRange) in (sensitivePorts)
+// False Positive Consideration: Legitimate services may require these ports to be open.
+// Review the associated resource to determine if this access is expected.
+// Consider adding exceptions for specific NSGs or IP ranges if this activity is benign.
+| extend
+    RuleName = tostring(Properties.requestbody.name),
+    SourceAddress = tostring(Properties.properties.sourceAddressPrefix),
+    DestinationPort = tostring(Properties.properties.destinationPortRange),
+    Protocol = tostring(Properties.properties.protocol),
+    User = Caller,
+    UserIpAddress = CallerIpAddress,
+    NSGName = tostring(split(tostring(Properties.requestbody.id), '/')[-2]),
+    Details = strcat("Insecure NSG rule '", RuleName, "' created/updated in NSG '", NSGName, "'. Rule allows ", Protocol, " traffic from '", SourceAddress, "' to port(s) '", DestinationPort, "'.")
+| project
+    TimeGenerated,
+    Activity = "Insecure Network Security Group Rule Created",
+    Tactic = "Defense Evasion",
+    Technique = "T1562.007",
+    User,
+    UserIpAddress,
+    NSGName,
+    RuleName,
+    Details,
+    SubscriptionId,
+    CorrelationId

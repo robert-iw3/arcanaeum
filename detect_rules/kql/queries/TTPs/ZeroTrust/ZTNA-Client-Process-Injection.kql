@@ -1,0 +1,70 @@
+// Suspicious Child Process of ZTNA Client
+// author: RW
+// description: Detects when a Zero Trust Network Access (ZTNA) client process spawns a suspicious child process,
+//              such as a command-line interpreter or a common reconnaissance tool. This activity could indicate
+//              that an attacker has compromised the ZTNA client, potentially through process injection, to
+//              perform local privilege escalation or configuration theft.
+// creationDate 2025-08-11
+// tags
+// - attack.privilege_escalation
+// - attack.execution
+// - attack.t1059.001
+// - attack.t1059.003
+
+// Define the list of ZTNA parent processes to monitor. Customize for your environment.
+let ztna_parents = dynamic([
+    "ZSATray.exe",
+    "stAgentUI.exe",
+    "Netskope Client.exe",
+    "Zscaler.exe",
+    "ZSATunnel.exe"
+]);
+// Define a list of suspicious child processes often used for reconnaissance or execution.
+let suspicious_children = dynamic([
+    "cmd.exe",
+    "powershell.exe",
+    "pwsh.exe",
+    "wscript.exe",
+    "cscript.exe",
+    "rundll32.exe",
+    "whoami.exe",
+    "net.exe",
+    "net1.exe",
+    "systeminfo.exe",
+    "quser.exe",
+    "qwinsta.exe",
+    "reg.exe",
+    "sc.exe",
+    "tasklist.exe"
+]);
+let timeframe = 1h;
+DeviceProcessEvents
+| where TimeGenerated > ago(timeframe)
+// Look for a known ZTNA process spawning a suspicious child process.
+| where InitiatingProcessFileName in~ (ztna_parents) and FileName in~ (suspicious_children)
+// Potential False Positives: Some ZTNA clients may have legitimate diagnostic functions that spawn command shells.
+// These should be baselined and excluded if they generate noise. For example:
+// and not (InitiatingProcessCommandLine has "diagnostics" and FileName == "cmd.exe")
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    SuspiciousChildProcesses = make_set(pack(
+        "ChildProcess", FileName,
+        "ChildProcessCommandLine", ProcessCommandLine,
+        "Timestamp", TimeGenerated
+    ))
+    by
+    DeviceName,
+    AccountName,
+    ParentProcess = InitiatingProcessFileName,
+    ParentProcessCommandLine = InitiatingProcessCommandLine,
+    ParentProcessId = InitiatingProcessId
+| project-reorder
+    StartTime,
+    EndTime,
+    DeviceName,
+    AccountName,
+    ParentProcess,
+    ParentProcessCommandLine,
+    ParentProcessId,
+    SuspiciousChildProcesses

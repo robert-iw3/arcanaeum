@@ -1,0 +1,11 @@
+[
+  {
+    "type": "expert",
+    "name": "Detect Suspicious Child Process Creation from LSASS (Injection / Dumping Indicator)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"lsass.exe\" }\n      Exclude OBJECT_NAME { -v \"C:\\\\Windows\\\\System32\\\\lsass.exe\" -v \"C:\\\\Windows\\\\SysWOW64\\\\lsass.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"cmd.exe\" -v \"powershell.exe\" -v \"pwsh.exe\" -v \"rundll32.exe\" -v \"bitsadmin.exe\" -v \"certutil.exe\" }\n         Include -access \"CREATE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "Critical",
+    "enabled": true,
+    "description": "Detects the LSASS process (lsass.exe) spawning suspicious child processes (cmd/powershell/rundll32/bitsadmin/certutil) from non-standard paths (excluding legitimate C:\\Windows\\System32 and SysWOW64 locations). Extremely high-fidelity indicator of malicious activity: process injection into lsass, credential dumping (Mimikatz/DCSync), privilege escalation, or AD replication abuse (e.g., injected code spawning tools for replicationGetChanges). Legitimate lsass almost never spawns children. Very low false positives with path exclusion. Tune minimally; add more children if needed."
+  }
+]

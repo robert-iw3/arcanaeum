@@ -1,0 +1,26 @@
+// Name: DNSCmd for Reconnaissance
+// Author: RW
+// Date: 2025-08-08
+// Description: Detects the use of dnscmd.exe for Active Directory and network enumeration, a technique commonly used by APTs for reconnaissance.
+// False Positive Sensitivity: Medium
+// Tactics: Discovery
+// Techniques: T1016, T1069.001, T1069.002, T1082
+
+DeviceProcessEvents
+// Identifies the execution of dnscmd.exe
+| where FileName =~ "dnscmd.exe" or ProcessVersionInfoOriginalFileName =~ "dnscmd.exe"
+// Looks for command-line arguments associated with enumeration
+| where ProcessCommandLine has_any ("/enumrecords", "/enumzones", "/zone")
+// FP Tuning: Legitimate use by DNS administrators is expected.
+// Consider filtering for non-admin users or execution from unusual parent processes if this is noisy.
+// For example: where AccountName !in ("dns_admin_group")
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    ProcessCommandLine,
+    InitiatingProcessCommandLine,
+    InitiatingProcessFileName,
+    ReportId,
+    ProcessId,
+    InitiatingProcessId

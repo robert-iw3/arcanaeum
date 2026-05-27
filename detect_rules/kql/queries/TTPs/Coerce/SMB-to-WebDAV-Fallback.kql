@@ -1,0 +1,42 @@
+let timeWindow = 10s; // Defines the time window to correlate the SMB and subsequent WebDAV events.
+
+// Identifies initial SMB connection attempts by looking for traffic to port 445.
+let smb_attempts =
+    DeviceNetworkEvents
+    | where Timestamp > ago(1d)
+    | where RemotePort == 445
+    | project SmbTime = Timestamp, DeviceName, SmbInitiatingProcess = InitiatingProcessFileName, RemoteIP;
+
+// Identifies subsequent WebDAV/HTTP connection attempts to standard HTTP/S ports.
+let webdav_attempts =
+    DeviceNetworkEvents
+    | where Timestamp > ago(1d)
+    | where RemotePort in (80, 443)
+    | where isnotempty(RemoteUrl) // Ensures it's an HTTP-based connection, characteristic of WebDAV in this context.
+    | project WebDavTime = Timestamp, DeviceName, WebDavInitiatingProcess = InitiatingProcessFileName, RemoteIP, RemoteUrl;
+
+// Correlates an SMB attempt followed immediately by a WebDAV attempt from the same device to the same destination IP.
+smb_attempts
+| join kind=inner (
+    webdav_attempts
+) on DeviceName, RemoteIP
+// The core of the detection is the tight temporal correlation of the two distinct protocol attempts.
+| where WebDavTime between (SmbTime .. (SmbTime + timeWindow))
+// The initiating process for SMB (e.g., explorer.exe) can be different from the WebDAV one (e.g., svchost.exe for the WebClient service),
+// so we join on the device and destination IP, making the detection more robust.
+// FP Tuning: This behavior could be legitimate for certain applications. Consider excluding known good destination IPs or processes if noise occurs.
+| summarize
+    StartTime = min(SmbTime),
+    EndTime = max(WebDavTime),
+    SmbProcesses = make_set(SmbInitiatingProcess),
+    WebDavProcesses = make_set(WebDavInitiatingProcess),
+    Urls = make_set(RemoteUrl)
+    by DeviceName, RemoteIP
+| project
+    Timestamp = StartTime,
+    DeviceName,
+    DestinationIp = RemoteIP,
+    SmbInitiatingProcesses = SmbProcesses,
+    WebDavInitiatingProcesses = WebDavProcesses,
+    AccessedUrls = Urls,
+    Description = "A device made an SMB connection attempt followed immediately by a WebDAV (HTTP) connection to the same destination IP. This may indicate an attacker forcing an SMB to WebDAV fallback for relaying attacks."

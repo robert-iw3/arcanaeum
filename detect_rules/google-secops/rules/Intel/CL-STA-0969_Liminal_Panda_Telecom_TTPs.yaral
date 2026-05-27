@@ -1,0 +1,71 @@
+rule cl_sta_0969_liminal_panda_telecom_ttp_amalgamation {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects a wide range of Tactics, Techniques, and Procedures (TTPs) associated with the CL-STA-0969 (Liminal Panda) threat actor targeting telecommunications networks. This rule combines IOCs and behaviors including malicious file hashes, specific network C2 patterns, process masquerading, and defense evasion techniques."
+    reference = "https://unit42.paloaltonetworks.com/infiltration-of-global-telecom-networks/"
+    false_positives = "Legitimate administrative activity, such as disabling SELinux with 'setenforce 0' or using tools with names that coincidentally match, may generate false positives. Network traffic on UDP port 2123 could be legitimate in some telecommunications environments. Tuning may be required to exclude known benign activities."
+    tags = "CL-STA-0969, LIMINAL_PANDA, TELECOM, NATION_STATE, BACKDOOR, C2, AUTHDOOR, GTPDOOR, NODEPDNS"
+    tactic = "TA0002, TA0003, TA0005, TA0007, TA0011"
+    technique = "T1021.004, T1059.004, T1071.004, T1548.004, T1562.001, T1564.003, T1572, T1574.006"
+
+  events:
+    // This single event variable combines multiple TTPs with OR logic.
+    // A match on any of these conditions will trigger the rule.
+    (
+      // TTP: Malicious File Hashes (IOCs)
+      // Matches known malicious file hashes associated with CL-STA-0969 tooling.
+      $e.principal.process.file.sha256 in (
+        "bacbe2a793d8ddca0a195b67def527e66d280a13a8d4df90b507546b76e87d29", "1852473ca6a0b5d945e989fb65fa481452c108b718f0f6fd7e8202e9d183e707", "705a035e54ce328227341ff9d55de15f4e16d387829cba26dc948170dac1c70f", "44e83f84a5d5219e2f7c3cf1e4f02489cae81361227f46946abe4b8d8245b879", "e3b06f860b8584d69a713127f7d3a4ee5f545ad72e41ec71f9e8692c3525efa0", "efa04c33b289e97a84ec6ab1f1b161f900ed3b4521a9a69fb6986bd9991ecfc6", "827f41fc1a6f8a4c8a8575b3e2349aeaba0dfc2c9390ef1cceeef1bb85c34161", "3c42194d6c18a480d9a7f3f7550f011c69ff276707e2bae5e6143f7943343f74", "b9f67565b56c9464462fa52d937202eef0b5554993c6b2bec8c955db64460cc7", "188861d7f0861103886543eff63a96c314c8262dbf52c6e0cf9372cf1e889d52", "4985de6574ff34009b6c72504af602a21c152ec104b022d6be94e2fec607eb43", "0bb3b4d8b72fec995c56a8a0baf55f2a07d2b361ee127c2b9deced24f67426fd", "aa661e149f0a6a9a61cadcca47a83893a9e6a5cdb41c3b075175da28e641a80f", "3191e1516f39d72191e6c89460f7273826e12d493577b75b6fdee036c85e5a7e", "9e1f5a134d13167a9148f2d5a1e6a96136d22ecdfbc502aa974544e7efe16a22", "edb6ab4bba4d474e60ff266af230cb6c438056937b262f86d3779bdc14de72a4", "b1e473dd70732ba34b7e985422bfd44f3883379569d89bee523f4263c7070fd9", "8e2dd7ed7c7bec7ff6ab69990c3172b1a9c2028f67b02f6f8c5429e968d2f8d2", "3e186c24bae58de14b14332a6b14d269b84235a25a892f1327002149f0547739", "432125ca41a2c5957013c8bff09c4037ad18addccab872d46230dd662a2b8123", "540f60702ee5019cd2b39b38b07e17da69bde1f9ed3b4543ff26e9da7ba6e0be", "cd754125657f1d52c08f9274fda57600e12929847eee3f7bea2e60ca5ba7711d", "b9c91face6ddfecc26d444f891c24796dbc953fb33145749f30b17445400c87c"
+      ) or
+      $e.target.process.file.sha256 in (
+        "bacbe2a793d8ddca0a195b67def527e66d280a13a8d4df90b507546b76e87d29", "1852473ca6a0b5d945e989fb65fa481452c108b718f0f6fd7e8202e9d183e707", "705a035e54ce328227341ff9d55de15f4e16d387829cba26dc948170dac1c70f", "44e83f84a5d5219e2f7c3cf1e4f02489cae81361227f46946abe4b8d8245b879", "e3b06f860b8584d69a713127f7d3a4ee5f545ad72e41ec71f9e8692c3525efa0", "efa04c33b289e97a84ec6ab1f1b161f900ed3b4521a9a69fb6986bd9991ecfc6", "827f41fc1a6f8a4c8a8575b3e2349aeaba0dfc2c9390ef1cceeef1bb85c34161", "3c42194d6c18a480d9a7f3f7550f011c69ff276707e2bae5e6143f7943343f74", "b9f67565b56c9464462fa52d937202eef0b5554993c6b2bec8c955db64460cc7", "188861d7f0861103886543eff63a96c314c8262dbf52c6e0cf9372cf1e889d52", "4985de6574ff34009b6c72504af602a21c152ec104b022d6be94e2fec607eb43", "0bb3b4d8b72fec995c56a8a0baf55f2a07d2b361ee127c2b9deced24f67426fd", "aa661e149f0a6a9a61cadcca47a83893a9e6a5cdb41c3b075175da28e641a80f", "3191e1516f39d72191e6c89460f7273826e12d493577b75b6fdee036c85e5a7e", "9e1f5a134d13167a9148f2d5a1e6a96136d22ecdfbc502aa974544e7efe16a22", "edb6ab4bba4d474e60ff266af230cb6c438056937b262f86d3779bdc14de72a4", "b1e473dd70732ba34b7e985422bfd44f3883379569d89bee523f4263c7070fd9", "8e2dd7ed7c7bec7ff6ab69990c3172b1a9c2028f67b02f6f8c5429e968d2f8d2", "3e186c24bae58de14b14332a6b14d269b84235a25a892f1327002149f0547739", "432125ca41a2c5957013c8bff09c4037ad18addccab872d46230dd662a2b8123", "540f60702ee5019cd2b39b38b07e17da69bde1f9ed3b4543ff26e9da7ba6e0be", "cd754125657f1d52c08f9274fda57600e12929847eee3f7bea2e60ca5ba7711d", "b9c91face6ddfecc26d444f891c24796dbc953fb33145749f30b17445400c87c"
+      )
+    ) or (
+      // TTP: AuthDoor PAM Backdoor
+      // Detects modification of the pam_unix.so module or creation of its credential log file.
+      ($e.metadata.event_type = "FILE_MODIFICATION" and re.regex($e.target.file.full_path, `.*/pam_unix(2)?\.so$`)) or
+      ($e.metadata.event_type = "FILE_CREATION" and $e.target.file.full_path = "/usr/bin/.dbus.log")
+    ) or (
+      // TTP: GTPDoor C2 Traffic
+      // Detects potential C2 traffic over UDP port 2123, used by GTPDoor.
+      $e.metadata.event_type = "NETWORK_CONNECTION" and
+      $e.network.ip_protocol = "UDP" and $e.target.port = 2123
+    ) or (
+      // TTP: Defense Evasion
+      // Detects various defense evasion techniques like disabling shell history or SELinux.
+      $e.metadata.event_type = "PROCESS_LAUNCH" and (
+        re.regex($e.target.process.command_line, `(?i)HISTFILE\s*=\s*/dev/null`) or
+        re.regex($e.target.process.command_line, `setenforce\s+0`) or
+        re.regex($e.target.process.file.full_path, `.*/utmpdump$`)
+      )
+    ) or (
+      // TTP: Process Masquerading
+      // Detects processes launched with names intended to blend in with legitimate system processes.
+      $e.metadata.event_type = "PROCESS_LAUNCH" and (
+        re.regex($e.target.process.file.full_path, `.*/(cupsd|audittd|dbus-console|dbus-socks|evip-socks|httpdd|sshtun|autoreverse|dnsd|clearinfo|dbus-send)$`) or
+        re.regex($e.target.process.command_line, `^(\[kpqd\]|\[watchdog\/1\])$`)
+      )
+    ) or (
+      // TTP: SSH Reverse Tunnel for C2
+      // Detects a reverse SSH tunnel being established to port 53, a known C2 tactic for this actor.
+      $e.metadata.event_type = "PROCESS_LAUNCH" and
+      re.regex($e.target.process.command_line, `ssh\s+.*-R\s+53:`)
+    )
+
+  outcome:
+    // The risk score is set to medium-high, reflecting the specific nature of the combined TTPs.
+    $risk_score = 65
+    // Populating outcome variables to provide context for the alert.
+    $principal_hostname = $e.principal.hostname
+    $principal_user = $e.principal.user.userid
+    $process_command_line = $e.target.process.command_line
+    $process_path = $e.target.process.file.full_path
+    $process_sha256 = if($e.target.process.file.sha256, $e.target.process.file.sha256, $e.principal.process.file.sha256)
+    $file_path = $e.target.file.full_path
+    $network_target_port = $e.target.port
+    $network_protocol = $e.network.ip_protocol
+
+  condition:
+    $e
+}

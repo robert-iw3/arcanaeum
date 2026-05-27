@@ -1,0 +1,72 @@
+{
+  "rule_id": "ssh_session_without_authentication_correl",
+  "name": "SSH Session Without Prior Authentication",
+  "description": "Correlates SSH sessions (process spawn) with authentication logs. Alerts when a user-shell process (e.g., bash) is started by sshd without a corresponding successful authentication event in the immediate preceding time window. This can indicate malicious backdoor activity.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "FROM logs-endpoint.events.* | WHERE event.dataset == 'endpoint.events.process' AND process.parent.name == 'sshd' AND process.name IN ('bash', 'sh', 'zsh', 'csh', 'tcsh', 'ksh') AND host.name, user.name NOT IN (FROM logs-endpoint.events.* | WHERE event.dataset == 'endpoint.events.auth' AND process.name == 'sshd' AND event.action == 'success' AND @timestamp >= NOW() - INTERVAL '5 minutes' AND @timestamp <= NOW() | SELECT host.name, user.name)",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0003",
+        "name": "Persistence",
+        "reference": "https://attack.mitre.org/tactics/TA0003/"
+      },
+      "technique": [
+        {
+          "id": "T1098",
+          "name": "Account Manipulation",
+          "reference": "https://attack.mitre.org/techniques/T1098/"
+        },
+        {
+          "id": "T1098.004",
+          "name": "SSH Authorized Keys",
+          "reference": "https://attack.mitre.org/techniques/T1098/004/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0008",
+        "name": "Lateral Movement",
+        "reference": "https://attack.mitre.org/tactics/TA0008/"
+      },
+      "technique": [
+        {
+          "id": "T1021",
+          "name": "Remote Services",
+          "reference": "https://attack.mitre.org/techniques/T1021/"
+        },
+        {
+          "id": "T1021.004",
+          "name": "SSH",
+          "reference": "https://attack.mitre.org/techniques/T1021/004/"
+        }
+      ]
+    }
+  ],
+  "interval": "5m",
+  "from": "now-5m",
+  "max_signals": 100,
+  "risk_score": 90,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://www.elastic.co/guide/en/security/current/ssh-brute-force-attack.html"
+  ],
+  "tags": [
+    "SSH",
+    "Backdoor",
+    "Lateral Movement",
+    "Persistence"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "host.name, user.name"
+}

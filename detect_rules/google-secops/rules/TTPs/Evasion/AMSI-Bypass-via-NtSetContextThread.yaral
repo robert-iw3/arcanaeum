@@ -1,0 +1,39 @@
+rule AMSI_Bypass_NtSetContextThread_Detection {
+  meta:
+    author = "RW"
+    description = "Detects potential AMSI bypass through NtSetContextThread or SetThreadContext API calls (via Kernel Audit API ETW provider Event ID 4 or EDR logs)."
+    severity = "HIGH"
+
+  events:
+    $e.metadata.event_type = "API_CALL" // UDM event type for API calls.
+    $e.metadata.vendor_name = "Microsoft" // Assuming Windows API calls or logs.
+
+    // Filter for NtSetContextThread or SetThreadContext API calls.
+    // This covers both the ETW provider events (which would be mapped to API calls)
+    // and EDR events that explicitly log these function names.
+    $e.api.function_name in ("NtSetContextThread", "SetThreadContext")
+
+    // Optional: Filter for the specific Kernel Audit API ETW provider if you need high fidelity
+    // and know your parser maps this. Event ID 4 corresponds to this in Windows ETW.
+    // Example (assuming UDM field for provider name/GUID):
+    // $e.metadata.log_name = "Microsoft-Windows-Kernel-Audit-API-Calls/Operational" and $e.metadata.event_code = 4
+
+    // Filter out known benign processes or parent processes.
+    // This replaces the Splunk `amsi_bypass_via_ntsetcontextthread_filter` macro.
+    // Use a Chronicle Reference List named `ntsetcontextthread_whitelist` for process names or full paths.
+    // Example: not $e.principal.process.file.full_path in %ntsetcontextthread_whitelist
+    // Example: not $e.principal.process.parent_process.file.full_path in %ntsetcontextthread_parent_whitelist
+
+  outcome:
+    $firstTime = $e.metadata.event_timestamp.epoch_seconds // min(_time)
+    $lastTime = $e.metadata.event_timestamp.epoch_seconds // max(_time)
+    $host = $e.principal.hostname // dest
+    $user = $e.principal.user.userid // user
+    $process = $e.principal.process.file.full_path // process_name
+    $parent_process = $e.principal.process.parent_process.file.full_path // parent_process_name
+    $process_guid = $e.principal.process.product_object_id // process_guid
+    $count = 1
+
+  condition:
+    $e
+}

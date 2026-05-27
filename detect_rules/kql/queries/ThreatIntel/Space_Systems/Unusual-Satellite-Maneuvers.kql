@@ -1,0 +1,49 @@
+// Name: Unusual Satellite Proximity (RPO)
+// Description: Detects when a satellite of interest performs a close approach (proximity operation) to another satellite.
+// This behavior can be a precursor to a co-orbital anti-satellite (ASAT) attack, intelligence gathering, or electronic warfare,
+// as detailed in the CSIS Space Threat Assessment. This rule requires a custom table ('SatelliteOrbitalData') containing
+// near-real-time satellite positional data.
+// Tactic: Impact
+// Technique: T1529
+// Author: RW
+// Date: 2025-08-19
+
+let lookback = 1h;
+// Medium FP Risk: The proximity threshold is highly dependent on the orbital regime (LEO, GEO) and operational context. This value is a placeholder and must be tuned by orbital mechanics experts.
+let proximity_threshold_km = 10.0;
+// List of satellite owners/operators considered adversarial or of high interest, based on threat intelligence.
+let adversarial_owners = dynamic(["RUS", "CHN", "IRN", "PRK"]);
+
+// This rule requires a custom table, 'SatelliteOrbitalData', with fields like SatelliteID, SatelliteOwner, and positional data (e.g., PosX_km).
+let most_recent_positions =
+    SatelliteOrbitalData
+    | where TimeGenerated > ago(lookback)
+    // Get the latest reported position for each satellite to ensure we are comparing current states.
+    | summarize arg_max(TimeGenerated, *) by SatelliteID;
+most_recent_positions
+| as T1
+// Perform a self-join to compare every satellite with every other satellite.
+| join kind=inner (
+    most_recent_positions
+) on 1==1
+// Ensure we don't compare a satellite to itself or generate duplicate pairs (e.g., SatA-SatB and SatB-SatA).
+| where T1.SatelliteID < T2.SatelliteID
+// Focus on events where at least one of the satellites is from an owner of interest.
+| where T1.SatelliteOwner in (adversarial_owners) or T2.SatelliteOwner in (adversarial_owners)
+// Calculate the Euclidean distance between the two satellites. This assumes Cartesian coordinates.
+| extend Distance_km = sqrt(pow(T1.PosX_km - T2.PosX_km, 2) + pow(T1.PosY_km - T2.PosY_km, 2) + pow(T1.PosZ_km - T2.PosZ_km, 2))
+// Filter for events where satellites are closer than the defined threshold.
+| where Distance_km < proximity_threshold_km
+// Medium FP Risk: Whitelist known friendly constellations (e.g., Starlink) or planned rendezvous missions to reduce false positives.
+// For example: | where not(T1.SatelliteOwner == "SPACEX" and T2.SatelliteOwner == "SPACEX")
+| project
+    TimeGenerated = T1.TimeGenerated,
+    Satellite1_ID = T1.SatelliteID,
+    Satellite1_Owner = T1.SatelliteOwner,
+    Satellite2_ID = T2.SatelliteID,
+    Satellite2_Owner = T2.SatelliteOwner,
+    Distance_km,
+    Description = strcat("Satellite ", T1.SatelliteID, " (", T1.SatelliteOwner, ") approached within ", round(Distance_km, 2), " km of satellite ", T2.SatelliteID, " (", T2.SatelliteOwner, ").")
+| extend
+    timestamp = TimeGenerated,
+    customEntity = Satellite1_ID

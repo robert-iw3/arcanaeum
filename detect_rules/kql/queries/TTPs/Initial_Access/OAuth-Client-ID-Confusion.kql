@@ -1,0 +1,46 @@
+// Name: OAuth Client ID Confusion
+// Author: RW
+// Date: 2025-08-14
+// Description: Detects when a single OAuth client_id is used by multiple distinct applications or agents. This is a key indicator of a potential Client ID Confusion vulnerability in OAuth-as-a-Service (OaaS) platforms, where an attacker's application could leverage a user's consent granted to a different, legitimate application that shares the same client_id.
+// False Positive Sensitivity: Medium. Some platforms may legitimately use a shared client_id for a suite of trusted applications from the same vendor. An allowlist should be maintained for such cases.
+// Triage Steps:
+// 1. Examine the 'SharedApplicationId' and the list of applications in 'ApplicationSet'.
+// 2. Verify if all applications in the set are from the same trusted vendor and are expected to share a client_id.
+// 3. If any application in the set is unknown, untrusted, or from a different developer than the others, it's a strong indicator of a vulnerability.
+// 4. Consult the platform's documentation to see if unique client_ids can be enforced per application/agent (e.g., "Bring Your Own Client ID").
+// 5. If the shared client_id is deemed legitimate, add it to the 'SharedClientIdAllowlist' to suppress future alerts.
+
+let lookback = 14d;
+
+// Create an allowlist of Application IDs known to be safely shared across multiple apps.
+// This is a placeholder and should be populated with client_ids from your environment that are known to be safe.
+let SharedClientIdAllowlist = datatable(ApplicationId:string) [
+    "00000000-0000-0000-0000-000000000000" // Example: Placeholder for a known safe shared ID
+];
+
+// Find all OAuth authorization events over the lookback period.
+CloudAppEvents
+| where TimeGenerated > ago(lookback)
+// Filter for events related to application authorization. This may need to be adapted for your specific log source.
+| where ActionType == "Authorize app"
+| where isnotempty(ApplicationId) and isnotempty(Application)
+// Summarize by ApplicationId to find which ones are used by multiple applications.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    ApplicationSet = make_set(Application),
+    DistinctAppCount = dcount(Application),
+    AffectedUsers = make_set(AccountDisplayName)
+    by ApplicationId
+// Filter for ApplicationIds used by more than one distinct application.
+| where DistinctAppCount > 1
+// Exclude known and allowlisted shared client IDs to reduce false positives.
+| where ApplicationId !in (SharedClientIdAllowlist)
+// Project the final results for alerting and investigation.
+| project
+    DetectionTime = EndTime,
+    StartTime,
+    SharedApplicationId = ApplicationId,
+    DistinctAppCount,
+    ApplicationSet,
+    AffectedUsers

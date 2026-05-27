@@ -1,0 +1,18 @@
+{
+  "type": "detection-engine.rule",
+  "id": "silent-harvest-ttps",
+  "attributes": {
+    "risk_score": 95,
+    "enabled": true,
+    "name": "Silent Harvest TTPs Detection (ES|QL)",
+    "description": "This detection correlates multiple suspicious behaviors on a single host to identify advanced credential theft attacks like Silent Harvest. It triggers when a non-SYSTEM process accesses sensitive registry hives (SAM/SECURITY) AND is either spawned by WMI (indicating remote execution) OR is followed by a large outbound data transfer (indicating exfiltration).",
+    "rule_id": "silent_harvest_ttps",
+    "index": ["logs-sysmon-*"],
+    "language": "esql",
+    "query": "FROM logs-sysmon-*\n| WHERE event.code IN (\"1\", \"3\", \"13\")\n| EVAL event_type = CASE(\n  event.code == \"1\" AND process.parent.executable ILIKE \"%\\\\WmiPrvSE.exe\", \"wmi_child_process\",\n  event.code == \"13\" AND winlog.event_data.TargetObject ILIKE \"*\\\\(SAM|SECURITY)\\\\*\" AND user.name != \"NT AUTHORITY\\\\SYSTEM\", \"sensitive_reg_access\",\n  event.code == \"3\" AND network.direction == \"outbound\" AND network.transport == \"tcp\" AND network.bytes > 500000, \"large_upload\",\n  NULL\n)\n| WHERE event_type IS NOT NULL\n| STATS count = COUNT(*), event_types = COLLECT(event_type), users = COLLECT(user.name), processes = COLLECT(process.executable), commands = COLLECT(process.command_line), min_time = MIN(@timestamp), max_time = MAX(@timestamp) BY host.name, process.entity_id\n| WHERE ARRAY_CONTAINS(event_types, \"sensitive_reg_access\")\n| EVAL has_wmi_parent = IF(ARRAY_CONTAINS(event_types, \"wmi_child_process\"), \"Yes\", \"No\")\n| EVAL has_large_upload = IF(ARRAY_CONTAINS(event_types, \"large_upload\"), \"Yes\", \"No\")\n| WHERE has_wmi_parent == \"Yes\" OR has_large_upload == \"Yes\"\n| WHERE process.executable NOT ILIKE \"%\\\\(outlook.exe|teams.exe|onedrive.exe|msedge.exe|chrome.exe|firefox.exe|gdrive.exe|dropbox.exe|Veeam.EndPoint.Service.exe)\"\n| EVAL risk_description = CONCAT(\"Correlated Attack Pattern Detected: \", FIRST(processes), \" on \", host.name, \" by user \", FIRST(users), \".\", IF(has_wmi_parent == \"Yes\", \" | Precursor: Process spawned by WMI.\", \"\"), IF(has_large_upload == \"Yes\", \" | Follow-on: Large outbound data transfer observed.\", \"\"))\n| EVAL start_time = TO_STRING(min_time, \"yyyy-MM-dd HH:mm:ss\"), end_time = TO_STRING(max_time, \"yyyy-MM-dd HH:mm:ss\")\n| KEEP start_time, end_time, host.name, users, processes, commands, has_wmi_parent, has_large_upload, risk_description, count, duration = max_time - min_time\n| WHERE duration <= 30m",
+    "interval": "15m",
+    "severity": "critical",
+    "type": "esql",
+    "version": "1"
+  }
+}

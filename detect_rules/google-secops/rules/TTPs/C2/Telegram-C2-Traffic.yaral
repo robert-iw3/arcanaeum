@@ -1,0 +1,41 @@
+rule telegram_c2_traffic {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Identifies potential Command and Control (C2) communication or data exfiltration by malware using the Telegram Bot API. This is a prevalent technique for infostealers."
+    tactic = "TA0011"
+    technique = "T1071.001, T1572"
+    false_positives = "Legitimate bots, system management tools, or third-party applications that integrate with Telegram may trigger this rule. Tuning may be required by excluding known safe process paths or parent processes."
+
+  events:
+    // Match network connections
+    $net.metadata.event_type = "NETWORK_CONNECTION"
+
+    // Look for traffic to the Telegram API domain
+    $net.network.hostname = "api.telegram.org"
+
+    // Exclude the official Telegram Desktop client to reduce false positives
+    // Note: The process name might vary on different OSes (e.g., macOS).
+    not re.regex($net.principal.process.file.full_path, `\\Telegram\.exe$`) nocase
+
+    // Further reduce FPs by excluding common browsers which might be used to access the API legitimately.
+    // This list can be expanded.
+    not re.regex($net.principal.process.file.full_path, `\\(chrome|firefox|msedge|iexplore)\.exe$`) nocase
+
+  outcome:
+    // Set a risk score for the detection
+    $risk_score = 50
+
+    // Extract key information for analysis
+    $principal_hostname = $net.principal.hostname
+    $principal_user = $net.principal.user.userid
+    $principal_process_path = $net.principal.process.file.full_path
+    $principal_process_cmdline = $net.principal.process.command_line
+    $principal_process_sha256 = $net.principal.process.file.sha256
+    $target_hostname = $net.network.hostname
+    $target_ip = array_distinct($net.target.ip)
+    $target_port = array_distinct($net.target.port)
+
+  condition:
+    $net
+}

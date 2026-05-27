@@ -1,0 +1,67 @@
+rule CobaltStrikeTokenTheftKerberos {
+  meta:
+    author = "RW"
+    description = "Detects Cobalt Strike BOF activity by correlating LSASS process access (token theft) with subsequent Kerberos network traffic from the same process."
+    mitre_attack = "T1003.001, T1055, T1134.001, T1558.003, T1547"
+    severity = "HIGH"
+    false_positives = "Legitimate processes accessing LSASS or generating Kerberos traffic may cause false positives. Tune the 'injection_targets' and directory exclusions."
+
+  // Define a list of common processes used for injection by Cobalt Strike.
+  // This list can be tuned to reduce false positives based on your environment.
+  // In YARA-L, it's often best to use a Chronicle Reference List for dynamic values.
+  // For this example, we'll embed the list, but consider creating a reference list.
+  strings:
+    $injection_target_processes = "rundll32.exe|regsvr32.exe|svchost.exe|dllhost.exe|wermgr.exe|werfault.exe|explorer.exe|powershell.exe|msiexec.exe" nocase
+
+  events:
+    // Event 1: LSASS Process Access (token theft prerequisite)
+    $lsass_access.metadata.event_type = "PROCESS_ACCESS" // UDM event type for process access
+    // Look for specific events indicating access to the LSASS process memory.
+    // The UDM field for ActionType "LsassProcessAccess" might be mapped to a specific `security_result.category`.
+    // Alternatively, look for `OpenProcess` action on `lsass.exe`.
+    $lsass_access.security_result.category = "LsassProcessAccess" or
+    (
+        $lsass_access.metadata.event_type = "PROCESS_OPEN" and
+        $lsass_access.target.process.file.full_path =~ ".*\\lsass.exe" nocase
+    )
+    // Focus on processes that are common injection targets.
+    $lsass_access.principal.process.file.full_path regex $injection_target_processes
+
+    // FP Tuning: Exclude known legitimate processes that may access LSASS.
+    not $lsass_access.principal.process.file.directory contains "C:\\Windows\\System32\\wbem\\" nocase
+    not $lsass_access.principal.process.file.directory contains "C:\\Windows\\SysWOW64\\wbem\\" nocase
+
+    // Event 2: Kerberos Network Traffic
+    $kerberos_traffic.metadata.event_type = "NETWORK_CONNECTION" // UDM event type for network connections
+    $kerberos_traffic.network.target.port = 88 // Kerberos authentication traffic uses TCP port 88.
+    $kerberos_traffic.network.ip_protocol = "TCP" // Protocol is TCP.
+
+    // Correlate the two events by device and initiating process ID
+    $lsass_access.principal.process.product_id = $kerberos_traffic.principal.process.product_id
+    $lsass_access.principal.asset.asset_id = $kerberos_traffic.principal.asset.asset_id
+
+
+  match:
+    // Ensure the Kerberos activity happened *after* the LSASS access within a short timeframe (e.g., 5 minutes).
+    $kerberos_traffic.metadata.event_timestamp > $lsass_access.metadata.event_timestamp and
+    $kerberos_traffic.metadata.event_timestamp < $lsass_access.metadata.event_timestamp + 5m
+
+  outcome:
+    $lsass_access_time = $lsass_access.metadata.event_timestamp
+    $network_event_time = $kerberos_traffic.metadata.event_timestamp
+    $device_name = $lsass_access.principal.asset.hostname
+    $initiating_process_file_name = $lsass_access.principal.process.file.full_path
+    $initiating_process_id = $lsass_access.principal.process.product_id
+    $initiating_process_command_line = $lsass_access.principal.process.command_line
+    $remote_ip = $kerberos_traffic.target.ip
+    $remote_url = $kerberos_traffic.target.url
+    $device_id = $lsass_access.principal.asset.asset_id
+
+    // Custom entities for better context in Chronicle alerts
+    $account_custom_entity = $initiating_process_id
+    $host_custom_entity = $device_name
+
+  condition:
+    // Trigger the rule if both events are found and the time condition is met
+    $lsass_access and $kerberos_traffic
+}

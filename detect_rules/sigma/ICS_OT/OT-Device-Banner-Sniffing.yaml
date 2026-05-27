@@ -1,0 +1,37 @@
+title: OT Protocol Scanning
+status: experimental
+description: >-
+  Detects when a single source attempts to connect to multiple distinct devices on common OT/ICS ports (Modbus, DNP3, EtherNet/IP) in a short time frame.
+  This behavior is a strong indicator of network scanning or reconnaissance, where an adversary is trying to discover and enumerate industrial control systems.
+  The source of the scan could be external or an internal system from a different network segment (e.g., IT to OT).
+references:
+  - https://isc.sans.edu/diary/lt+appears+that+the+number+of+industrial+devices+accessible+from+the+internet+has+risen+by+30+thousand+over+the+past+three+years/30860
+author: RW
+date: 2025-08-18
+tags:
+  - attack.reconnaissance
+  - attack.t1595
+  - attack.t1046
+logsource:
+  category: network_traffic
+  product: zeek # Zeek's conn.log is ideal for this type of network traffic analysis
+detection:
+  selection:
+    # Detects traffic to common OT/ICS protocol ports
+    destination.port:
+      - 502     # Modbus
+      - 20000   # DNP3
+      - 44818   # EtherNet/IP
+  filter_known_scanners:
+    # Exclude known legitimate scanners or management tools to reduce false positives
+    source.ip:
+      - '192.168.1.100' # Placeholder for authorized vulnerability scanner
+      - '10.0.0.50'     # Placeholder for asset management tool
+  # Time window for the aggregation
+  timeframe: 5m
+  # Condition triggers if one source connects to more than 5 distinct destinations on the specified ports
+  condition: selection and not filter_known_scanners | count(distinct destination.ip) > 5 by source.ip
+falsepositives:
+  - Authorized vulnerability scanners or asset inventory tools that have not been added to the filter.
+  - Some centralized management or monitoring solutions might exhibit this behavior during startup or discovery cycles.
+level: medium

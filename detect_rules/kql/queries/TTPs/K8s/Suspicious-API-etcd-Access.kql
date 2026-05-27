@@ -1,0 +1,42 @@
+// Name: Kubernetes - Suspicious API Access and Secret Enumeration
+// Author: RW
+// Date: 2025-08-11
+// Description: Detects suspicious access patterns to the Kubernetes API server that may indicate reconnaissance or credential dumping.
+//              This includes anonymous users listing sensitive resources or any user attempting to list all secrets across all namespaces.
+//              Such activities are often precursors to cluster compromise.
+// False Positive Sensitivity: Medium. Legitimate administrative scripts or monitoring tools might list all secrets.
+// Exclude known service accounts or users if they perform these actions as part of their normal function.
+// MITRE TTPs: T1566.002 (Spearphishing Link), T1003.003 (/etc/passwd and /etc/shadow), T1003.001 (LSASS Memory)
+
+// Define sensitive resources that anonymous users should not be accessing.
+let sensitiveResources = dynamic(['secrets', 'configmaps', 'pods', 'deployments', 'daemonsets', 'statefulsets', 'jobs', 'cronjobs']);
+
+KubeAudit
+| where
+    // Scenario A: An anonymous user attempts to list or get sensitive resources.
+    (User.username == "system:anonymous" and Verb in ("list", "get", "watch") and ObjectRef.resource in (sensitiveResources))
+    or
+    // Scenario B: A non-system user lists all secrets across all namespaces, which is a strong indicator of credential enumeration.
+    (ObjectRef.resource == "secrets" and Verb == "list" and isempty(ObjectRef.namespace) and not(User.username has_prefix "system:serviceaccount:kube-system"))
+// Add a 'Tactic' field to explain why the event is suspicious, aiding analyst triage.
+| extend Tactic = case(
+    User.username == "system:anonymous", "Initial Access via Anonymous User",
+    ObjectRef.resource == "secrets", "Credential Access via Secret Enumeration",
+    "Reconnaissance"
+)
+// Format the output for alerting and investigation.
+| project
+    TimeGenerated,
+    AuditID,
+    OperationName,
+    Tactic,
+    ActorUsername = User.username,
+    ActorGroups = User.groups,
+    SourceIP,
+    UserAgent,
+    Verb,
+    Resource = ObjectRef.resource,
+    Namespace = ObjectRef.namespace,
+    ResourceName = ObjectRef.name,
+    RequestURI,
+    ResponseStatusCode = tostring(ResponseStatus.code)

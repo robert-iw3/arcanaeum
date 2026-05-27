@@ -1,0 +1,38 @@
+// Name: Malicious Code Execution via Pickle Deserialization
+// Author: RW
+// Date: 2025-08-14
+// Description: Detects when a Python process, after loading a pickle (.pkl, .pickle) file, spawns a command-line interpreter.
+// This is a strong indicator of a malicious pickle file executing arbitrary code upon deserialization, a technique highlighted in AI/ML security research.
+// Tactic: Execution
+// Technique: T1203, T1059
+// False Positive Sensitivity: Medium. While less common, some legitimate automation or data science workflows might execute shell commands for setup or processing.
+// Review the parent script's command line and purpose to validate.
+
+// Define a list of python interpreters
+let python_interpreters = dynamic(["python.exe", "python3.exe", "pythonw.exe"]);
+// Define a list of suspicious child processes (command-line interpreters)
+let suspicious_children = dynamic(["cmd.exe", "powershell.exe", "pwsh.exe", "sh", "bash", "zsh", "csh", "tcsh", "ksh", "dash", "tclsh"]);
+
+DeviceProcessEvents
+// Look for a process creation event
+| where ActionType == "ProcessCreated"
+// The parent process is a python interpreter
+| and InitiatingProcessFileName in~ (python_interpreters)
+// The parent process command line indicates a pickle file is being loaded
+| and (InitiatingProcessCommandLine has ".pkl" or InitiatingProcessCommandLine has ".pickle")
+// The spawned process is a shell or command-line interpreter
+| and FileName in~ (suspicious_children)
+// FP Tuning: Exclude known legitimate scripts if they cause noise.
+// For example: | where not (InitiatingProcessCommandLine contains "legit_script_that_uses_shell.py")
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    ParentProcessName = InitiatingProcessFileName,
+    ParentProcessCommandLine = InitiatingProcessCommandLine,
+    ChildProcessName = FileName,
+    ChildProcessCommandLine = ProcessCommandLine,
+    ParentProcessId = InitiatingProcessId,
+    ChildProcessId = ProcessId,
+    ReportId,
+    DeviceId

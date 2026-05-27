@@ -1,0 +1,17 @@
+[
+  {
+    "name": "Long Path Anomaly Detection",
+    "search": "index=* sourcetype=XmlWinEventLog:Microsoft-Windows-Sysmon/Operational EventCode IN (1, 7, 11) | eval FilePath = case(EventCode=1, Image, EventCode=7, ImageLoaded, EventCode=11, TargetFilename) | where isnotnull(FilePath) AND len(FilePath) > 260 | eval EventType = case( EventCode=1, \"Process Creation with Long Path\", EventCode=7, \"Module Load from Long Path\", EventCode=11, \"File Creation with Long Path\" ) | rename Computer as dest, User as user, ParentImage as parent_process_path, Image as process_path, CommandLine as process, ParentCommandLine as parent_process | table _time, dest, user, EventType, process_path, parent_process_path, process, parent_process, FilePath",
+    "description": "Detects abnormally long file, process, or module paths using Sysmon events, which can be an indicator of malware using long file names to evade detection.",
+    "is_scheduled": 1,
+    "disabled": 0,
+    "cron_schedule": "*/30 * * * *",
+    "dispatch.earliest_time": "-24h",
+    "dispatch.latest_time": "now",
+    "sharing": "global",
+    "acl": {
+      "read": ["power", "admin"],
+      "write": ["admin"]
+    }
+  }
+]

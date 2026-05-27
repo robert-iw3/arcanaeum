@@ -1,0 +1,46 @@
+// Name: CIP Class Fuzzing Attempt
+// Author: RW
+// Date: 2025-08-17
+// Description: Detects a potential Common Industrial Protocol (CIP) class fuzzing attempt.
+// This technique, as described in the provided intelligence, involves sending 'Get Attribute List' (0x03) requests to the static
+// class instance (0x00) for a wide range of class IDs to discover supported classes on a target device.
+// References: https://github.com/ICSVillage
+// False Positive Sensitivity: Medium
+// Tags: ICS, CIP, EtherNet/IP, Reconnaissance, Fuzzing
+
+let TimeFrame = 15m;
+let ClassFuzzingThreshold = 20; // Alert if a source scans more than 20 distinct classes in the timeframe.
+
+// This rule assumes a table with parsed CIP/EtherNet/IP data from an OT security monitoring tool like Defender for IoT or Zeek.
+// Please replace 'OTNetworkEvents' with your actual table name.
+// Field names like 'CipService', 'CipClass', 'CipInstance' are placeholders for parsed protocol fields.
+OTNetworkEvents
+| where TimeGenerated > ago(TimeFrame)
+// Filter for EtherNet/IP traffic. Port 44818 is for TCP (explicit messaging).
+// The fuzzing technique described uses explicit messages over TCP.
+| where DestinationPort == 44818
+// The fuzzing technique described uses the 'Get Attribute List' service (0x03) on the static class instance (0x00).
+// The service and instance may be represented as hex or integer depending on the data source.
+| where (CipService == "0x03" or CipService == "3") and (CipInstance == "0x00" or CipInstance == "0")
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    FuzzedClassCount = dcount(CipClass), // Count distinct classes being probed by the source.
+    TargetedDevicesCount = dcount(DestinationIp),
+    SampleFuzzedClasses = make_set(CipClass, 25),
+    SampleTargetedDevices = make_set(DestinationIp, 10)
+    by SourceIp, bin(TimeGenerated, TimeFrame)
+// Trigger an alert if the number of fuzzed classes from a single source exceeds the threshold.
+| where FuzzedClassCount > ClassFuzzingThreshold
+// Potential False Positives:
+// - Legitimate engineering workstations or asset inventory software might perform class discovery, though typically not at high frequency across a wide range of undocumented classes.
+// - To reduce FPs, adjust the 'ClassFuzzingThreshold' based on normal activity in your environment.
+// - Consider creating an allowlist of known management/engineering source IPs if they trigger this alert during normal operations.
+| project
+    StartTime,
+    EndTime,
+    SourceIp,
+    FuzzedClassCount,
+    TargetedDevicesCount,
+    SampleFuzzedClasses,
+    SampleTargetedDevices

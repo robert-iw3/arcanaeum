@@ -1,0 +1,54 @@
+// Name: Downgraded NTLM Authentication to WinReg Service
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects NTLM authentication attempts to the Windows Remote Registry (WinReg) service using a downgraded authentication
+//              level (RPC_C_AUTHN_LEVEL_CONNECT). The default for WinReg is PKT_PRIVACY, and a downgrade to CONNECT is a strong indicator
+//              of an NTLM relay attack attempt.
+// Tactic: Credential Access
+// Technique: T1557.001 (NTLM Relaying)
+// False Positive Sensitivity: Medium. While anomalous, this behavior could be triggered by network configuration issues or legacy applications.
+// Investigate the initiating process and its activity on the source and destination hosts.
+// References: https://learn.microsoft.com/en-us/windows/win32/rpc/authentication-level-constants
+// Data Source: Microsoft 365 Defender (DeviceEvents)
+
+let timeframe = 1h;
+let winreg_uuid = "338cd001-2244-31f1-aaaa-900038001003";
+// RPC_C_AUTHN_LEVEL_CONNECT corresponds to an authentication level of 2.
+let downgraded_auth_level = "2";
+// RPC_C_AUTHN_SVC_NTLMSSP corresponds to an authentication service of 10.
+let ntlm_auth_service = "10";
+
+DeviceEvents
+| where TimeGenerated > ago(timeframe)
+| where ActionType == "RpcClientCall"
+// Parse RPC metadata from the AdditionalFields blob. Field names may vary.
+| extend RpcFields = todynamic(AdditionalFields)
+| where isnotempty(RpcFields.InterfaceUuid)
+| extend InterfaceUuid = tostring(RpcFields.InterfaceUuid)
+| extend AuthnLevel = tostring(RpcFields.AuthenticationLevel)
+| extend AuthnSvc = tostring(RpcFields.AuthenticationService)
+// Filter for RPC calls specifically to the WinReg interface.
+| where InterfaceUuid =~ winreg_uuid
+// Filter for the specific downgraded authentication level.
+| where AuthnLevel == downgraded_auth_level
+// Filter for NTLM as the authentication service.
+| where AuthnSvc == ntlm_auth_service
+// Known callers of RegConnectRegistry include regedit.exe, mmc.exe (for Event Viewer), certutil.exe.
+// This activity is suspicious regardless of the caller, but context is key for investigation.
+| project
+    TimeGenerated,
+    DeviceName,
+    DeviceId,
+    InitiatingProcessAccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessId,
+    RemoteIP,
+    RemoteUrl,
+    AuthenticationLevel = AuthnLevel,
+    AuthenticationService = AuthnSvc,
+    InterfaceUuid
+| extend
+    AccountCustomEntity = InitiatingProcessAccountName,
+    HostCustomEntity = DeviceName,
+    IPCustomEntity = RemoteIP

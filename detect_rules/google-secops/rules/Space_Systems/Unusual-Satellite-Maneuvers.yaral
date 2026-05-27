@@ -1,0 +1,62 @@
+rule unusual_satellite_proximity_operations {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects potential Rendezvous and Proximity Operations (RPO) by identifying when two or more satellites, at least one of which belongs to an adversarial owner, occupy the same discretized 3D space grid cell within a short time frame. This behavior can be a precursor to a co-orbital anti-satellite (ASAT) attack or intelligence gathering, as detailed in the CSIS Space Threat Assessment. This rule requires a custom UDM event type (e.g., SATELLITE_ORBITAL_DATA) and a reference list of adversarial satellite owners."
+    tactic = "TA0040" // Impact
+    technique = "T1529" // System Shutdown/Reboot
+    false_positives = "Planned rendezvous missions, satellite servicing, constellation station-keeping, or grid cell boundaries causing unrelated satellites to be grouped. The grid cell size is a critical parameter for tuning."
+    severity = "High"
+    tags = "Space, Satellite, RPO, ASAT, Impact"
+
+  events:
+    // This rule requires a custom data source mapping satellite orbital data to UDM.
+    // 'SATELLITE_ORBITAL_DATA' is a placeholder for the custom event type.
+    $prox.metadata.event_type = "SATELLITE_ORBITAL_DATA"
+
+    // UDM mapping assumptions:
+    // - Satellite ID is in target.resource.name
+    // - Satellite owner is in a custom label
+    // - Positional data (in km) is in custom labels
+    $prox.target.resource.name = $satellite_id
+    $prox.target.resource.attribute.labels["owner"] = $owner
+    $pos_x = $prox.target.resource.attribute.labels["pos_x_km"]
+    $pos_y = $prox.target.resource.attribute.labels["pos_y_km"]
+    $pos_z = $prox.target.resource.attribute.labels["pos_z_km"]
+
+    // Define the size of the grid cell in kilometers. This approximates the proximity threshold.
+    // FP Risk: This value is a placeholder and must be tuned by orbital mechanics experts.
+    $grid_cell_size_km = 10
+
+    // Calculate a unique ID for the 3D grid cell the satellite is in.
+    // This is the key to approximating proximity without direct distance calculation.
+    $grid_id = strings.concat(
+        string(math.floor($pos_x / $grid_cell_size_km)),
+        "_",
+        string(math.floor($pos_y / $grid_cell_size_km)),
+        "_",
+        string(math.floor($pos_z / $grid_cell_size_km))
+    )
+
+  match:
+    // Group events by the calculated grid cell ID over a 5-minute window.
+    $grid_id over 5m
+
+  outcome:
+    // These variables are used for alert enrichment and post-detection filtering.
+    $risk_score = 85
+    $satellite_count = count_distinct($satellite_id)
+    $satellite_ids_in_cell = array_distinct($satellite_id)
+    $satellite_owners_in_cell = array_distinct($owner)
+    $grid_cell_identifier = array_distinct($grid_id)
+    // Identify which adversarial owners were present in the cell.
+    $adversarial_owners_present = array_distinct($owner, $owner in %adversarial_satellite_owners)
+
+  condition:
+    // The condition for this rule to fire.
+    // 1. More than one satellite position event is observed in the same grid cell.
+    // 2. At least one of the satellites belongs to an owner on the adversarial list.
+    // Note: This may trigger on multiple events from the same satellite. The '$satellite_count > 1' check in the outcome section
+    // should be used by the SIEM/SOAR to confirm multiple distinct satellites were involved.
+    #prox > 1 and any $owner in %adversarial_satellite_owners
+}

@@ -1,0 +1,56 @@
+rule unauthorized_internal_access_via_tunnel_spoofing {
+  meta:
+    description = "Detects egress network traffic from a private (RFC1918) source IP to a public destination IP. This is a strong indicator of a successful tunnel spoofing attack (e.g., GRE/GRETAP) or a severe network misconfiguration, as private IP addresses should not be routable over the public internet. The attack allows an external actor to bypass perimeter defenses and communicate with internal assets."
+    author = "RW"
+    date = "2025-08-13"
+    reference = "Based on intel 8b83f215c4ec0eacb4e08ef5feb16d224d48ff3b513d551122de5fb7cb893149"
+    tags = "NETWORK, EGRESS, SPOOFING, TUNNEL, GRE, RFC1918"
+    tactic = "TA0011, TA0001"
+    technique = "T1090.002"
+    false_positives = "High potential for false positives if not scoped to the correct log sources. This can trigger on misconfigured networks or on logs from internal sensors before Network Address Translation (NAT) is applied. This rule is most effective on perimeter firewall or router logs that inspect egress traffic."
+
+  events:
+    $e.metadata.event_type = "NETWORK_CONNECTION"
+
+    // Condition for private source IP (RFC1918).
+    (
+      net.ip_in_range_cidr($e.principal.ip, "10.0.0.0/8") or
+      net.ip_in_range_cidr($e.principal.ip, "172.16.0.0/12") or
+      net.ip_in_range_cidr($e.principal.ip, "192.168.0.0/16")
+    )
+    $e.principal.ip = $internal_ip
+
+    // Condition for public destination IP (not private or reserved).
+    not (
+      net.ip_in_range_cidr($e.target.ip, "10.0.0.0/8") or
+      net.ip_in_range_cidr($e.target.ip, "172.16.0.0/12") or
+      net.ip_in_range_cidr($e.target.ip, "192.168.0.0/16") or
+      net.ip_in_range_cidr($e.target.ip, "127.0.0.0/8") or      // Loopback
+      net.ip_in_range_cidr($e.target.ip, "169.254.0.0/16") or // Link-local
+      net.ip_in_range_cidr($e.target.ip, "224.0.0.0/4")       // Multicast
+    )
+    $e.target.ip = $external_ip
+
+    // To improve fidelity, filter for specific log sources at the network edge.
+    // Example: $e.metadata.product_name = "Palo Alto Networks Firewall"
+
+  match:
+    // Group by the internal source and external destination over 5 minutes.
+    $internal_ip, $external_ip over 5m
+
+  outcome:
+    // A moderate risk score is assigned due to the high potential for FPs without proper log source scoping.
+    $risk_score = 65
+    $principal_ip = array_distinct($e.principal.ip)
+    $target_ip = array_distinct($e.target.ip)
+    $principal_hostname = array_distinct($e.principal.hostname)
+    $event_count = count_distinct($e.metadata.id)
+    $network_protocols = array_distinct($e.network.ip.protocol)
+    $destination_ports = array_distinct($e.target.port)
+    // Adding a note to guide the analyst in verifying the log source.
+    $analyst_note = "Verify the log source for this event. This detection is only high-fidelity if it originates from a perimeter device (e.g., egress firewall) where NAT should have already occurred."
+
+  condition:
+    // Require at least 2 packets to indicate communication, reducing noise from single stray packets.
+    #e > 1
+}

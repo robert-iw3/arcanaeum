@@ -1,0 +1,60 @@
+// Name: Anomalous Satellite ADCS Commands
+// Author: RW
+// Date: 2025-08-18
+// Description: Detects potentially malicious commands sent to a satellite's Attitude Determination and Control System (ADCS).
+// The rule looks for two primary conditions observed during the Hack-A-Sat competition:
+// 1) Commands that set ADCS control constants (e.g., Kp, Kd, Ki) to extremely high, unstable values.
+// 2) Commands that disable the satellite's safe mode, preventing automated recovery from an unstable state.
+// Detecting these commands is critical for preventing loss of satellite control.
+// False Positive Sensitivity: Medium. False positives may occur if high control constant values are used for legitimate,
+// albeit aggressive, maneuvers. System tests or specific operational modes might also trigger these alerts.
+// Tuning:
+// - The 'SatelliteLogs_CL' table and 'LogMessage' field are placeholders. Adjust them to match your specific data schema for satellite telemetry or command logs.
+// - The 'unstable_threshold' value should be tuned based on documented safe operational parameters for the specific satellite's ADCS.
+// - Add or modify fields like 'SatelliteID' and 'CommandSource' to match your log schema for better context.
+
+let timeframe = 1h;
+let unstable_threshold = 10000.0; // Threshold for what is considered an unstable control constant value.
+
+// This query assumes a custom log table containing satellite command logs.
+// Replace 'SatelliteLogs_CL' with your actual table name.
+SatelliteLogs_CL
+| where TimeGenerated > ago(timeframe)
+// Pre-filter for relevant log messages to improve performance.
+| where LogMessage has_any ("ADCS", "safe mode")
+// Extract control constant values from the log message. The 'extract' function returns null if the pattern is not found.
+| extend Kp = todouble(extract(@"Kp\s+([\d\.]+)", 1, LogMessage))
+| extend Kd = todouble(extract(@"Kd\s+([\d\.]+)", 1, LogMessage))
+| extend Ki = todouble(extract(@"Ki\s+([\d\.]+)", 1, LogMessage))
+| extend kPa = todouble(extract(@"kPa\s+([\d\.]+)", 1, LogMessage))
+| extend kIa = todouble(extract(@"kIa\s+([\d\.]+)", 1, LogMessage))
+| extend kDa = todouble(extract(@"kDa\s+([\d\.]+)", 1, LogMessage))
+| extend kpW = todouble(extract(@"kpW\s+([\d\.]+)", 1, LogMessage))
+// Identify if the log indicates that safe mode was disabled.
+| extend is_safe_mode_disabled = (LogMessage contains "safe mode off" or LogMessage contains "safe mode disabled")
+// Identify if any extracted control constant exceeds the defined unstable threshold.
+| extend is_unstable_command = (
+    (isnotnull(Kp) and Kp > unstable_threshold) or
+    (isnotnull(Kd) and Kd > unstable_threshold) or
+    (isnotnull(Ki) and Ki > unstable_threshold) or
+    (isnotnull(kPa) and kPa > unstable_threshold) or
+    (isnotnull(kIa) and kIa > unstable_threshold) or
+    (isnotnull(kDa) and kDa > unstable_threshold) or
+    (isnotnull(kpW) and kpW > unstable_threshold)
+)
+// Filter for events that match either of the malicious conditions.
+| where is_safe_mode_disabled or is_unstable_command
+// Categorize the detected anomaly for easier analysis.
+| extend AnomalyType = case(
+    is_unstable_command and is_safe_mode_disabled, "Unstable ADCS Command and Safe Mode Disabled",
+    is_unstable_command, "Unstable ADCS Command",
+    is_safe_mode_disabled, "Safe Mode Disabled Command",
+    "Unknown"
+)
+| project
+    TimeGenerated,
+    AnomalyType,
+    LogMessage,
+    // Include other relevant fields from your source table for context.
+    SatelliteID, // Placeholder
+    CommandSource // Placeholder

@@ -1,0 +1,28 @@
+// Name: SQL Server Spawning a Command Shell
+// Author: RW
+// Date: 2025-08-23
+// Description: Detects when the SQL Server process (sqlservr.exe) spawns a command shell (cmd.exe) or PowerShell.
+// This is highly indicative of xp_cmdshell usage or SQL injection leading to remote code execution.
+// MITRE ATT&CK: T1059.001, T1059.003
+
+DeviceProcessEvents
+// Look for process creation events where the parent process is sqlservr.exe
+| where InitiatingProcessFileName =~ "sqlservr.exe"
+// Filter for command shell or PowerShell as the child process
+| where FileName in~ ("cmd.exe", "powershell.exe")
+// FP Tuning: Legitimate administrative scripts or maintenance tasks might use xp_cmdshell.
+// Consider excluding known administrative users or specific command lines if they are expected in your environment.
+// For example: | where InitiatingProcessCommandLine !contains "C:\\Program Files\\MyCustomTool\\run.cmd"
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    FileName,
+    ProcessCommandLine,
+    InitiatingProcessId,
+    ProcessId
+| extend
+    HostName = DeviceName,
+    timestamp = TimeGenerated

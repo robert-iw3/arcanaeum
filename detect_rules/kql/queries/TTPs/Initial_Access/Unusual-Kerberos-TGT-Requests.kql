@@ -1,0 +1,57 @@
+// Name: On-Prem Kerberos TGT Request Following Cloud TAP Authentication
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects a potential on-premises hash recovery attack where a user authenticates to Microsoft Entra ID using a
+//              Temporary Access Pass (TAP) and is immediately followed by a Kerberos TGT request on an on-premises domain controller.
+//              This pattern is indicative of an attacker using a TAP to get a partial TGT via Cloud Kerberos Trust and then using it
+//              to request a full TGT to recover the on-prem NT hash.
+// False Positive Sensitivity: Medium. This activity could occur legitimately if a user uses a TAP for recovery and then immediately
+// accesses on-premises resources. However, the direct correlation in a short time frame is suspicious and warrants investigation.
+// Tuning: This detection requires ingestion of Windows Security Events (EventID 4768) from on-premises Domain Controllers into the
+// same workspace as SigninLogs. Adjust the 'TimeWindow' and 'TimeDelta' to match your environment's baseline activity and reduce noise.
+
+// Define the time window for correlation.
+let TimeWindow = 1h;
+// Define the maximum expected delay between the cloud auth and the on-prem request.
+let TimeDelta = 30m;
+
+// Find successful sign-ins using a Temporary Access Pass (TAP).
+let TapSignins =
+    SigninLogs
+    | where TimeGenerated > ago(TimeWindow)
+    | where ResultType == 0
+    | where AuthenticationDetails has "Temporary Access Pass"
+    | project TapAuthTime = TimeGenerated, UserPrincipalName, TapAuthIpAddress = IPAddress
+    // Extract the on-prem username part from the UPN for joining. This assumes the UPN prefix matches the sAMAccountName.
+    | extend OnPremAccountName = tolower(tostring(split(UserPrincipalName, "@")[0]));
+
+// Find on-prem Kerberos TGT requests from Domain Controller security logs.
+let OnPremTgtRequests =
+    SecurityEvent
+    | where TimeGenerated > ago(TimeWindow)
+    | where EventID == 4768 // Event "A Kerberos authentication ticket (TGT) was requested."
+    | extend EventDataXml = parse_xml(EventData)
+    // The ServiceName for a TGT request is 'krbtgt'.
+    | extend ServiceName = tostring(EventDataXml.EventData.Data[6]['#text'])
+    | where ServiceName has "krbtgt"
+    | extend TargetUserName = tolower(tostring(EventDataXml.EventData.Data[5]['#text']))
+    | project TgtRequestTime = TimeGenerated, TargetUserName, RequestingIpAddress = IpAddress, DomainController = Computer;
+
+// Join TAP sign-ins with subsequent on-prem TGT requests for the same user.
+TapSignins
+| join kind=inner (
+    OnPremTgtRequests
+) on $left.OnPremAccountName == $right.TargetUserName
+// Ensure the on-prem TGT request happened shortly after the cloud TAP authentication.
+| where TgtRequestTime > TapAuthTime and (TgtRequestTime - TapAuthTime) < TimeDelta
+// Project key details for investigation. The cloud and on-prem IP addresses may differ, which can be a strong indicator.
+| project
+    TimeGenerated = TgtRequestTime,
+    UserPrincipalName,
+    OnPremAccountName = TargetUserName,
+    TapAuthTime,
+    TgtRequestTime,
+    TimeDeltaBetweenEvents = TgtRequestTime - TapAuthTime,
+    CloudAuthIpAddress = TapAuthIpAddress,
+    OnPremRequestIpAddress = RequestingIpAddress,
+    DomainController

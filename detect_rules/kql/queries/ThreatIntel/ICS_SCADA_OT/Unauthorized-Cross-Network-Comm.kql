@@ -1,0 +1,81 @@
+// Name: Unauthorized IT to OT Network Communication
+// Description: Detects network traffic originating from the IT network and connecting to devices on the OT network over common industrial protocol ports. This can indicate a breach of network segmentation policies, unauthorized access attempts, or lateral movement from IT to OT environments.
+// Author: RW
+// Date: 2025-08-17
+// MITRE ATT&CK:
+// - T1090: Proxy
+// - T1572: Protocol Tunneling
+// False Positive Sensitivity: Medium
+// - This rule's effectiveness is highly dependent on the accurate definition of IT and OT network segments.
+// - Legitimate systems like data historians or engineering workstations may need to communicate across these boundaries. Add any such authorized connections to the 'authorized_connections' list to prevent false positives.
+// References:
+// - https://www.cisa.gov/uscert/ics/publications/recommended-practice-improving-industrial-control-system-cybersecurity-network
+
+let lookback = 1d;
+
+// --- CONFIGURATION START ---
+// Define the IP address ranges for your IT network.
+let it_subnets = dynamic([
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16" // Note: Be specific. Avoid overly broad ranges that might overlap with OT space.
+]);
+
+// Define the IP address ranges for your OT/ICS network.
+let ot_subnets = dynamic([
+    "100.64.0.0/10" // Example OT network. Replace with your actual OT/SCADA network ranges.
+]);
+
+// Define common OT ports to monitor.
+let ot_ports = dynamic([
+    502,    // Modbus
+    20000,  // DNP3
+    44818,  // EtherNet/IP (TCP)
+    2222    // EtherNet/IP (UDP)
+]);
+
+// Define authorized connections from IT to OT to reduce false positives.
+// Format: "SourceIT_IP:DestinationOT_IP:DestinationPort"
+let authorized_connections = dynamic([
+    "10.1.1.100:100.64.10.50:502", // Example: HMI server to PLC
+    "10.1.2.200:100.64.20.75:44818"  // Example: Engineering workstation to controller
+]);
+// --- CONFIGURATION END ---
+
+DeviceNetworkEvents
+| where TimeGenerated > ago(lookback)
+// Focus on inbound connections to OT devices on specific OT ports
+| where ActionType in ("InboundConnectionAccepted", "ConnectionSuccess")
+| where LocalPort in (ot_ports)
+// Identify traffic from an IT source to an OT destination
+| where ipv4_is_in_any_range(RemoteIP, it_subnets) and ipv4_is_in_any_range(LocalIP, ot_subnets)
+// Create a unique key for each connection tuple to filter against the allowlist
+| extend ConnectionKey = strcat(RemoteIP, ":", LocalIP, ":", LocalPort)
+// Exclude authorized connections
+| where ConnectionKey !in (authorized_connections)
+// Summarize to create a single alert for a given destination device and port
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    ConnectionCount = count(),
+    SourceIT_IPs = make_set(RemoteIP),
+    InitiatingProcesses = make_set(InitiatingProcessFileName)
+    by DestinationOT_Device = DeviceName, DestinationOT_IP = LocalIP, DestinationPort = LocalPort
+// Add protocol context based on port
+| extend Protocol = case(
+    DestinationPort == 502, "Modbus",
+    DestinationPort == 20000, "DNP3",
+    DestinationPort == 44818, "EtherNet/IP",
+    DestinationPort == 2222, "EtherNet/IP",
+    "Other"
+)
+| project-reorder
+    StartTime,
+    EndTime,
+    DestinationOT_Device,
+    DestinationOT_IP,
+    Protocol,
+    DestinationPort,
+    SourceIT_IPs,
+    ConnectionCount,
+    InitiatingProcesses

@@ -1,0 +1,51 @@
+rule potential_rogue_ground_station_activity {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects network traffic between the ground station network and any unauthorized external IP address. Such activity could indicate a rogue ground station attempting to communicate with mission assets, potentially for command injection or hijacking, as described in research on NASA's Core Flight System (cFS)."
+    false_positive_sensitivity = "Medium"
+    references = "https://visionspace.com/nasa-cfs-version-aquila-software-vulnerability-assessment/, https://www.blackhat.com/us-25/briefings/schedule/#burning-trashing-spacecraft-crashing-a-collection-of-vulnerabilities-that-will-end-your-space-mission-41536"
+    tactic = "TA0011, TA0001"
+    technique = "T1090, T1059"
+
+  events:
+    // Filter for network connection events.
+    $e.metadata.event_type = "NETWORK_CONNECTION"
+
+    // FP Tuning: Define your ground station network CIDR.
+    $ground_station_network_cidr = "192.168.50.0/24"
+
+    // Identify traffic where one participant is the ground station network.
+    $is_principal_gs = net.ip_in_range_cidr($e.principal.ip, $ground_station_network_cidr)
+    $is_target_gs = net.ip_in_range_cidr($e.target.ip, $ground_station_network_cidr)
+    $is_principal_gs or $is_target_gs
+
+    // Define placeholder variables for correlation.
+    $ground_station_ip = if($is_principal_gs, $e.principal.ip, $e.target.ip)
+    $external_ip = if($is_principal_gs, $e.target.ip, $e.principal.ip)
+
+    // FP Tuning: Create a reference list named 'authorized_ground_station_peers' containing all
+    // authorized external IPs and CIDR ranges that the ground station network communicates with.
+    not $external_ip in %authorized_ground_station_peers
+
+    // Optional FP Tuning: Exclude all private IP space if not already covered by the allowlist.
+    and not net.is_private($external_ip)
+
+  match:
+    // Group events by the ground station IP and the unauthorized external IP over an hour.
+    $ground_station_ip, $external_ip over 1h
+
+  outcome:
+    $risk_score = 75
+    $detection_name = "Potential Rogue Ground Station Network Activity"
+    $description_out = "Unauthorized external IP [" + $external_ip + "] observed communicating with the Ground Station Network IP [" + $ground_station_ip + "]."
+    $connection_count = count($e.metadata.id)
+    $destination_ports = array_distinct($e.target.port)
+    $total_bytes_sent = sum($e.network.sent_bytes)
+    $total_bytes_received = sum($e.network.received_bytes)
+    $principal_hostnames = array_distinct($e.principal.hostname)
+    $target_hostnames = array_distinct($e.target.hostname)
+
+  condition:
+    $e
+}

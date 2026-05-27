@@ -1,0 +1,49 @@
+// Name: JMP or CALL ESP After VirtualProtect
+// Author: RW
+// Date: 2025-08-03
+// Description: Detects the execution of a stack pivot instruction (like JMP ESP or CALL ESP) immediately following a
+//              VirtualProtect call that makes a memory region executable. This sequence is a strong indicator of a
+//              successful DEP bypass, where an attacker first changes memory permissions and then transfers execution
+//              to shellcode on the stack or heap.
+// False Positive Sensitivity: Medium
+// MITRE TTPs: T1055, T1068, T1093
+
+let suspicious_events = union
+    (
+        DeviceEvents
+        | where ActionType == "VirtualProtectApiCall"
+        // Filter for the specific purpose of the DEP bypass: making memory executable.
+        | where NewProtection has_any ("PAGE_EXECUTE", "PAGE_EXECUTE_READ", "PAGE_EXECUTE_READWRITE", "PAGE_EXECUTE_WRITECOPY")
+        // Focus on memory regions commonly targeted by exploits.
+        | where MemoryRegionType in ("Stack", "Heap", "Private")
+        | extend EventType = "VirtualProtect"
+    ),
+    (
+        DeviceEvents
+        // ExploitGuardStackPivot is a high-fidelity event for detecting JMP/CALL ESP and similar stack control transfers.
+        | where ActionType == "ExploitGuardStackPivot"
+        | extend EventType = "StackPivot"
+    );
+suspicious_events
+// Correlate events happening in the same process context.
+| serialize by DeviceName, InitiatingProcessId
+// Look for a StackPivot event that was immediately preceded by a VirtualProtect event.
+| where EventType == "StackPivot" and prev(EventType) == "VirtualProtect"
+// The events should occur in very close succession as part of a single exploit chain.
+| where Timestamp - prev(Timestamp) between (0s .. 2s)
+// FP Tuning: Legitimate but complex software like packers, DRM, or JIT compilers might trigger this.
+// Exclude known legitimate processes if they cause false positives.
+// | where InitiatingProcessFileName !in~ ("legit_packer.exe", "drm_service.exe")
+| project
+    Timestamp,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessId,
+    // Provide context from both events for easier investigation.
+    VirtualProtectTime = prev(Timestamp),
+    VirtualProtectNewProtection = prev(NewProtection),
+    VirtualProtectMemoryRegion = prev(MemoryRegionType),
+    StackPivotTime = Timestamp,
+    StackPivotDetails = AdditionalFields,
+    ReportId = prev(ReportId)

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<zone>
+  <short>Linux Sentinel Firewall</short>
+  <description>Firewall rules for Linux Sentinel security monitoring</description>
+  <interface name="lo"/>
+  <service name="ssh"/>
+  <rule family="ipv4">
+    <source address="192.168.0.0/16"/>
+    <service name="ssh"/>
+    <limit value="3/minute"/>
+    <accept/>
+  </rule>
+  <rule family="ipv4">
+    <source address="10.0.0.0/8"/>
+    <service name="ssh"/>
+    <limit value="3/minute"/>
+    <accept/>
+  </rule>
+  <rule family="ipv4">
+    <protocol value="tcp"/>
+    <tcp-flags mask="ALL" value="NONE"/>
+    <log prefix="NULL_PACKET: "/>
+    <reject/>
+  </rule>
+  <rule family="ipv4">
+    <protocol value="tcp"/>
+    <tcp-flags mask="ALL" value="ALL"/>
+    <log prefix="XMAS_PACKET: "/>
+    <reject/>
+  </rule>
+  <rule family="ipv4">
+    <protocol value="tcp"/>
+    <match state="NEW"/>
+    <tcp-flags mask="SYN" value="!SYN"/>
+    <log prefix="SYN_FLOOD: "/>
+    <reject/>
+  </rule>
+  <rule family="ipv4">
+    <match state="ESTABLISHED,RELATED"/>
+    <accept/>
+  </rule>
+  <rule family="ipv4">
+    <log prefix="DROPPED: "/>
+    <reject/>
+  </rule>
+</zone>

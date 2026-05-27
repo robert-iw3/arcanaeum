@@ -1,0 +1,43 @@
+stages:
+  - lint
+  - test
+  - build
+  - deploy
+
+lint:
+  stage: lint
+  image: mcr.microsoft.com/windows/servercore:ltsc2022
+  script:
+    - choco install python --version=3.12.0 -y
+    - python -m pip install flake8 pylint psscriptanalyzer
+    - flake8 malware_sandbox.py compile_yara_rules.py
+    - pylint malware_sandbox.py compile_yara_rules.py
+    - psscriptanalyzer -Path malware_sandbox.ps1 filter_yara_rules.ps1 download_tools.ps1
+
+test-python:
+  stage: test
+  image: mcr.microsoft.com/windows/servercore:ltsc2022
+  script:
+    - choco install python --version=3.12.0 -y
+    - python -m pip install -r requirements.txt
+    - python -m unittest discover -p '*_test.py'
+
+test-powershell:
+  stage: test
+  image: mcr.microsoft.com/windows/servercore:ltsc2022
+  script:
+    - powershell -File test_malware_sandbox.ps1
+
+build:
+  stage: build
+  image: mcr.microsoft.com/windows/servercore:ltsc2022
+  script:
+    - docker build -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA .
+
+deploy:
+  stage: deploy
+  when: manual
+  image: mcr.microsoft.com/windows/servercore:ltsc2022
+  script:
+    - docker login $CI_REGISTRY -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA

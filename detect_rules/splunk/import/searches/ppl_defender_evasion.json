@@ -1,0 +1,17 @@
+[
+  {
+    "name": "PPL and Defender Evasion Detection (Sysmon)",
+    "search": "`sysmon` (EventCode=1 OR EventCode=11) | eval technique=case(EventCode=1 AND like(ParentImage, \"%\\\\CreateProcessAsPPL.exe\") AND like(Image, \"%\\\\clipup.exe\"), \"PPL Loader launching ClipUp\", EventCode=1 AND like(Image, \"%\\\\System32\\\\clipup.exe\") AND like(CommandLine, \"%-ppl%\") AND (like(CommandLine, \"%\\\\ProgramData\\\\Microsoft\\\\Windows Defender\\\\%\") OR like(CommandLine, \"%\\\\Program Files\\\\Windows Defender\\\\%\") OR like(CommandLine, \"%\\\\Program Files (x86)\\\\Windows Defender\\\\%\") OR match(CommandLine, \"-ppl\\\\s+.*PROGRA~\\\\d\")), \"Anomalous ClipUp Execution for File Write\", EventCode=1 AND like(Image, \"%\\\\sc.exe\") AND like(CommandLine, \"%create%\") AND like(CommandLine, \"%start=auto%\") AND (like(CommandLine, \"%binPath=%CreateProcessAsPPL.exe%\") OR like(CommandLine, \"%binPath=%\\\\Users\\\\%\") OR like(CommandLine, \"%binPath=%\\\\ProgramData\\\\%\") OR like(CommandLine, \"%binPath=%\\\\Windows\\\\Temp\\\\%\") OR like(CommandLine, \"%binPath=%\\\\Temp\\\\%\") OR match(CommandLine, \"binPath=.*(cmd|powershell|pwsh)\\\\.exe\")), \"Suspicious Auto-Start Service Creation\", EventCode=11 AND (like(TargetFilename, \"C:\\\\ProgramData\\\\Microsoft\\\\Windows Defender\\\\%\") OR like(TargetFilename, \"C:\\\\Program Files\\\\Windows Defender\\\\%\") OR like(TargetFilename, \"C:\\\\Program Files (x86)\\\\Windows Defender\\\\%\")) AND NOT (like(Image, \"%\\\\MsMpEng.exe\") OR like(Image, \"%\\\\NisSrv.exe\") OR like(Image, \"%\\\\MsMpEngCP.exe\") OR like(Image, \"%\\\\MpCmdRun.exe\") OR like(Image, \"%\\\\TiWorker.exe\") OR like(Image, \"%\\\\TrustedInstaller.exe\") OR like(Image, \"%\\\\svchost.exe\") OR like(Image, \"%\\\\setup.exe\")), \"Unauthorized Defender Directory File Modification\") | where isnotnull(technique) | table _time, Computer, User, technique, ParentImage, Image, CommandLine, TargetFilename",
+    "description": "Detects defense evasion tactics involving the Windows Defender protected process light (PPL), such as unauthorized file writes by clipup.exe, suspicious service creation, and file modifications within Defender's directories, using Sysmon events.",
+    "is_scheduled": 1,
+    "disabled": 0,
+    "cron_schedule": "*/30 * * * *",
+    "dispatch.earliest_time": "-24h",
+    "dispatch.latest_time": "now",
+    "sharing": "global",
+    "acl": {
+      "read": ["power", "admin"],
+      "write": ["admin"]
+    }
+  }
+]

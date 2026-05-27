@@ -1,0 +1,68 @@
+rule kamacite_credential_harvesting {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects credential harvesting techniques, such as LSASS memory dumping and registry hive dumping, commonly used by threat actors like KAMACITE (APT44) during initial access phases. KAMACITE is known to infiltrate IT networks that bridge to OT/ICS environments, making the detection of these credential access attempts critical to preventing deeper compromise."
+    reference = "https://attack.mitre.org/techniques/T1003/001/, https://attack.mitre.org/techniques/T1003/002/"
+    tags = "ICS, OT, CREDENTIAL_ACCESS, WINDOWS, KAMACITE, APT44"
+    tactic = "TA0006"
+    technique = "T1003.001, T1003.002"
+    false_positives = "Legitimate administrative scripts, backup solutions, or security software (e.g., EDR) may perform these actions. Whitelisting known-good parent processes or specific command-line arguments may be necessary."
+    severity = "CRITICAL"
+
+  events:
+    // Detects LSASS memory dumping via common tools (T1003.001)
+    $lsass_dump.metadata.event_type = "PROCESS_LAUNCH"
+    $lsass_dump.principal.hostname = $hostname
+    (
+      // Procdump targeting lsass.exe
+      (
+        re.regex($lsass_dump.target.process.file.full_path, `\\procdump(64)?\.exe$`) nocase
+        and re.regex($lsass_dump.target.process.command_line, `lsass\.exe`) nocase
+        and re.regex($lsass_dump.target.process.command_line, `\s-ma\s`) // -ma flag for full memory dump
+      )
+      or
+      // Rundll32 using comsvcs.dll to create a minidump of the LSASS process
+      (
+        re.regex($lsass_dump.target.process.file.full_path, `\\rundll32\.exe$`) nocase
+        and re.regex($lsass_dump.target.process.command_line, `comsvcs\.dll.*MiniDump`) nocase
+        // Note: Adversaries pass the LSASS process ID, not the name. This detection relies on event logging that enriches the command line with the target process name or other context.
+        and re.regex($lsass_dump.target.process.command_line, `lsass`) nocase
+      )
+    )
+
+    // Detects dumping of sensitive registry hives for offline credential extraction (T1003.002)
+    $registry_dump.metadata.event_type = "PROCESS_LAUNCH"
+    $registry_dump.principal.hostname = $hostname
+    re.regex($registry_dump.target.process.file.full_path, `\\reg\.exe$`) nocase
+    and re.regex($registry_dump.target.process.command_line, `\ssave\s`) nocase
+    and re.regex($registry_dump.target.process.command_line, `hklm\\(sam|security|system)`) nocase
+
+  match:
+    // Correlate credential harvesting activities on the same host over 10 minutes
+    $hostname over 10m
+
+  outcome:
+    $risk_score = 95
+    $principal_hostname = $hostname
+    $principal_ip = if(#lsass_dump > 0, array_distinct($lsass_dump.principal.ip), array_distinct($registry_dump.principal.ip))
+    $user = if(#lsass_dump > 0, array_distinct($lsass_dump.principal.user.userid), array_distinct($registry_dump.principal.user.userid))
+
+    // Consolidate detected techniques and command lines for context
+    $techniques_detected = array_distinct(
+        if(#lsass_dump > 0, "T1003.001 - LSASS Memory Dumping", ""),
+        if(#registry_dump > 0, "T1003.002 - Registry Hive Dumping", "")
+    )
+    $command_lines = array_distinct(
+        $lsass_dump.target.process.command_line,
+        $registry_dump.target.process.command_line
+    )
+    $parent_processes = array_distinct(
+        $lsass_dump.principal.process.command_line,
+        $registry_dump.principal.process.command_line
+    )
+
+  condition:
+    // Alert if either LSASS dumping or registry hive dumping is observed
+    $lsass_dump or $registry_dump
+}

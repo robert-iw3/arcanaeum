@@ -1,0 +1,40 @@
+// Name: AI Model Spawning Suspicious Child Process
+// Author: RW
+// Date: 2025-08-14
+// Description: Detects when a Python process, after its command line indicates the loading of a common AI/ML model file,
+// spawns a command-line interpreter. Malicious AI models can create untraced processes during loading or inference.
+// Monitoring for unexpected process creation is vital for early detection.
+// Tactic: Execution
+// Technique: T1059, T1566.001
+// False Positive Sensitivity: Medium. Legitimate ML pipelines might occasionally use shell commands for automation
+// (e.g., data preparation). These should be reviewed and can be added to an exclusion list based on command line or script path.
+
+// Define a list of common AI/ML model file extensions
+let model_extensions = dynamic([".pkl", ".pickle", ".joblib", ".bin", ".pt", ".pth", ".h5", ".keras", ".onnx", ".model", ".sav", ".ckpt", ".safetensors"]);
+// Define a list of suspicious child processes (command-line interpreters)
+let suspicious_children = dynamic(["cmd.exe", "powershell.exe", "pwsh.exe", "sh", "bash", "zsh", "csh", "tcsh", "ksh", "dash", "tclsh"]);
+
+DeviceProcessEvents
+// Look for a process creation event
+| where ActionType == "ProcessCreated"
+// The parent process is a python interpreter, which is commonly used to load models
+| and InitiatingProcessFileName in~ ("python.exe", "python3.exe", "pythonw.exe")
+// The parent process command line indicates a model file is being loaded
+| and InitiatingProcessCommandLine has_any (model_extensions)
+// The spawned process is a shell or command-line interpreter
+| and FileName in~ (suspicious_children)
+// Potential for False Positives: Some legitimate ML/automation scripts might call shell commands.
+// Consider excluding known-good scripts or parent processes if they generate noise.
+// For example: | where not (InitiatingProcessCommandLine contains "legitimate_script.py")
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    ParentProcessName = InitiatingProcessFileName,
+    ParentProcessCommandLine = InitiatingProcessCommandLine,
+    ChildProcessName = FileName,
+    ChildProcessCommandLine = ProcessCommandLine,
+    ParentProcessId = InitiatingProcessId,
+    ChildProcessId = ProcessId,
+    ReportId,
+    DeviceId

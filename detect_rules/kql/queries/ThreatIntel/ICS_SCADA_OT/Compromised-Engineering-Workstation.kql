@@ -1,0 +1,60 @@
+// Name: Evil PLC Attack - PLC to Engineering Workstation Connection
+// Author: RW
+// Date: 2025-08-11
+// Description: Detects a Programmable Logic Controller (PLC) initiating a network connection to an Engineering Workstation (EWS).
+//              This is highly anomalous behavior and a key indicator of an "Evil PLC" attack, where a compromised PLC is weaponized
+//              to attack the EWS that programs or manages it.
+// Tactic: Lateral Movement
+// Technique: T0840 - Exploitation of Remote Services
+// False Positive Sensitivity: Medium
+// - This rule may trigger on legitimate, albeit rare, communications from PLCs to IT-based systems like data historians or specific management applications running on an EWS.
+// - It is CRITICAL to accurately populate the 'plc_ips' and 'engineering_workstation_ips' lists. An incomplete or inaccurate asset inventory will lead to missed detections or false positives.
+
+let timeframe = 1h;
+
+// **CRITICAL TUNING STEP 1**: Populate this list with the IP addresses of your PLCs.
+let plc_ips = dynamic(["192.168.100.10", "10.10.0.5", "x.x.x.x"]);
+
+// **CRITICAL TUNING STEP 2**: Populate this list with the IP addresses of your Engineering Workstations (EWS).
+let engineering_workstation_ips = dynamic(["192.168.1.100", "10.50.1.20", "y.y.y.y"]);
+
+// Define ports that are highly suspicious for a PLC to initiate a connection to.
+// This list targets common remote service exploitation vectors.
+let suspicious_ports = dynamic([
+    21,    // FTP
+    22,    // SSH
+    135,   // RPC Endpoint Mapper
+    139,   // NetBIOS Session Service
+    445,   // SMB
+    3389,  // RDP
+    5985,  // WinRM HTTP
+    5986   // WinRM HTTPS
+]);
+
+// Using DeviceNetworkEvents as it provides rich context on connection initiation.
+DeviceNetworkEvents
+| where TimeGenerated > ago(timeframe)
+// The connection must originate from a known PLC.
+| where DeviceIP in (plc_ips)
+// The connection must be destined for a known Engineering Workstation.
+| where RemoteIP in (engineering_workstation_ips)
+// Optional but recommended: Filter for connections to suspicious ports to increase fidelity.
+// Comment this line out if you want to see ALL connections from PLCs to EWS.
+| where RemotePort in (suspicious_ports)
+// **TUNING**: If there are legitimate ports/protocols for PLC->EWS communication, exclude them here.
+// | where not(RemotePort in (known_good_ports))
+
+// Summarize the activity to create a single, high-context alert.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    ConnectionCount = count(),
+    DestinationPorts = make_set(RemotePort),
+    ProcessesOnPlc = make_set(InitiatingProcessFileName) // Note: Process info from a PLC is unlikely but included for completeness.
+    by PlcIP = DeviceIP, EngineeringWorkstationIP = RemoteIP
+| extend
+    timestamp = StartTime,
+    // The compromised host is the Engineering Workstation being targeted.
+    HostCustomEntity = EngineeringWorkstationIP,
+    // The source of the attack is the PLC.
+    IPCustomEntity = PlcIP

@@ -1,0 +1,12 @@
+kibana_url: http://localhost:5601
+api_key: your-api-key-here
+es_host: http://localhost:9200
+es_index: kibana-saved-objects
+stream_to: kibana
+overwrite: true
+no_verify_ssl: false
+pattern: "*.ndjson*"
+validate: true
+dry_run: false
+max_retries: 3
+batch_size: 1000

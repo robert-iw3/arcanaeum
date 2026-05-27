@@ -1,0 +1,26 @@
+title: AWS EC2 Instance Connect Usage For Potential Lateral Movement
+id: 98c37c3f-29e9-435c-b85e-5c745b04cc6d
+status: experimental
+description: Detects the use of EC2 Instance Connect to push a temporary SSH public key to an EC2 instance. While a legitimate feature for instance access, attackers can abuse this for lateral movement if they have compromised credentials with sufficient permissions.
+references:
+  - https://securitylabs.datadoghq.com/articles/tales-from-the-cloud-trenches-ecs-crypto-mining/#hands-on-keyboard-activity-begins
+author: RW
+date: 2025-08-19
+tags:
+  - attack.lateral_movement
+  - attack.t1021.001
+  - attack.t1559.001
+logsource:
+  service: cloudtrail
+detection:
+  selection:
+    # Detects the specific API call for EC2 Instance Connect
+    aws.cloudtrail.event_source: 'ec2-instance-connect.amazonaws.com'
+    aws.cloudtrail.event_name: 'SendSSHPublicKey'
+    aws.cloudtrail.error_code:
+  condition: selection
+falsepositives:
+  - This is a legitimate feature frequently used by developers and administrators for SSH access to EC2 instances.
+  - This rule is best used for auditing or as a signal to correlate with other suspicious activities from the same identity (e.g., a newly created IAM user).
+  - To reduce noise, consider creating an allowlist of trusted roles or users that are expected to perform this action.
+level: medium

@@ -1,0 +1,54 @@
+// Name: User-Mode Rootkit - Potential DLL Side-Loading
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects when a legitimate process running from a standard system location (e.g., System32) loads a DLL
+//              from a non-standard, user-writable location (e.g., C:\Users, C:\ProgramData). This is a common pattern
+//              for DLL side-loading, a technique used by user-mode rootkits to execute malicious code by
+//              replacing or hijacking legitimate executables.
+// Tactic: Persistence, Privilege Escalation, Defense Evasion
+// Technique: T1574.002, T1055
+// False Positive Sensitivity: Medium
+
+// Define standard system paths where legitimate processes are expected to run from.
+let system_process_paths = dynamic([
+    @"c:\windows\system32\",
+    @"c:\windows\syswow64\",
+    @"c:\program files\",
+    @"c:\program files (x86)\"
+]);
+
+// Define non-standard, often user-writable paths where malicious DLLs might be placed for side-loading.
+let suspicious_dll_paths = dynamic([
+    @"c:\users\",
+    @"c:\programdata",
+    @"c:\windows\temp\",
+    @"c:\temp\",
+    @"\appdata\"
+]);
+
+DeviceImageLoadEvents
+// Filter for DLL load events.
+| where FileName endswith ".dll"
+// The initiating process should be running from a standard system location.
+| where InitiatingProcessFolderPath has_any (system_process_paths)
+// The loaded DLL must come from a suspicious, non-standard location.
+| where FolderPath has_any (suspicious_dll_paths)
+// FP Reduction: Exclude known legitimate applications that load DLLs from user/programdata folders.
+// This list should be customized for your environment to reduce noise.
+| where InitiatingProcessFileName !in~ ("googledrivesync.exe", "onedrive.exe", "teams.exe", "dropbox.exe")
+| summarize
+    count(),
+    make_set(FileName, 10),
+    StartTime = min(Timestamp),
+    EndTime = max(Timestamp)
+    by DeviceName, InitiatingProcessFileName, InitiatingProcessFolderPath, InitiatingProcessCommandLine, FolderPath
+| project
+    StartTime,
+    EndTime,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessFolderPath,
+    InitiatingProcessCommandLine,
+    LoadedDllPath = FolderPath,
+    LoadedDlls = set_FileName,
+    EventCount = count_

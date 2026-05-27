@@ -1,0 +1,80 @@
+- type: expert
+  name: Detect APT41 DodgeBox DLL Sideloading
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "taskhost.exe" -v "taskhostw.exe" -v "SandboxieWUAU.exe" }
+       }
+       Target {
+          Match MODULE {
+             Include OBJECT_NAME { -v "sbiedll.dll" }
+             Exclude OBJECT_NAME { -v "C:\\Windows\\System32\\sbiedll.dll" -v "C:\\Windows\\SysWOW64\\sbiedll.dll" }
+             Include -access "LOAD"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects sideloading of malicious sbiedll.dll (DodgeBox loader) by Sandboxie-signed taskhost.exe/taskhostw.exe from non-system paths. Key TTP from 2024-2025 APT41 campaigns (Zscaler attribution). Excludes legitimate system locations to reduce FPs; tune for any custom Sandboxie usage."
+- type: expert
+  name: Detect APT41 DodgeBox CFG Bypass Attempt
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "**" }
+       }
+       Target {
+          Match MODULE {
+             Include OBJECT_NAME { -v "**" }
+             Include -access "WRITE,CREATE"
+             Include -command_line "*Set-ProcessMitigation -PolicyFilePath*"
+             Include -command_line "*Disable CFG*"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects attempts to disable Control Flow Guard (CFG) via Set-ProcessMitigation — used by DodgeBox to bypass exploit mitigations. APT41 TTP from 2025 samples."
+- type: expert
+  name: Detect MoonWalk Mutex Creation
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "**" }
+       }
+       Target {
+          Match MUTEX {
+             Include OBJECT_NAME { -v "Global\\ctXjvsAxpzyqElmk" }
+             Include -access "CREATE"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects creation of Global\\ctXjvsAxpzyqElmk mutex, reported as associated with MoonWalk backdoor (APT41). Mutex-based detection; may be variant-specific — verify in environment and tune if needed."
+- type: expert
+  name: Detect MoonWalk File System Artifacts
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "**" }
+       }
+       Target {
+          Match FILE {
+             Include OBJECT_NAME { -v "C:\\Windows\\Microsoft.NET\\assembly\\GAC_MSIL\\System.Data.Trace" -v "C:\\ProgramData\\**" }
+             Include -access "CREATE"
+             Include -file_name_length 32
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects creation in System.Data.Trace GAC path or 32-char filename files in C:\\ProgramData — artifacts from MoonWalk staging/DLL hollowing (APT41). Approximate length check; tune for legitimate long-named files."

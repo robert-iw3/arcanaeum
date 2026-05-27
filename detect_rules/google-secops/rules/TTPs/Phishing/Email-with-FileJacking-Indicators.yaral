@@ -1,0 +1,41 @@
+rule email_with_filejacking_indicators {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects unsolicited inbound emails with HTML or SVG attachments containing JavaScript that interacts with the File System Access API. This is indicative of the FileJacking technique used to trick users into granting file system access for data exfiltration."
+    false_positives = "Complex legitimate HTML emails or web applications sent as attachments might use some of these APIs. The combination of multiple specific indicators helps to reduce false positives. Further tuning could involve requiring more than one indicator from each category or allow-listing trusted senders."
+    tactic = "TA0001, TA0002"
+    technique = "T1566.001, T1204.001"
+    tags = "EMAIL, PHISHING, FILEJACKING, HTML, SVG"
+
+  events:
+    $email.metadata.event_type = "EMAIL_ATTACHMENT"
+
+    // Filter for HTML or SVG attachments which can contain malicious JavaScript.
+    $email.target.file.extension in ("html", "htm", "svg", "svgz")
+
+    // This field is a placeholder for sandboxed analysis results containing strings from the attachment.
+    // The field name may need to be adapted for your environment (e.g., security_result.extracted_strings).
+    $email.target.file.extracted.strings != ""
+
+    // Core detection logic: Find attachments containing at least one suspicious API call.
+    re.regex($email.target.file.extracted.strings, `getAsFileSystemHandle|showDirectoryPicker|requestPermission|getFile` nocase)
+
+    // AND at least one related trigger/permission string.
+    re.regex($email.target.file.extracted.strings, `addEventListener|'drop'|'read'|'readwrite'` nocase)
+
+  outcome:
+    // Set a risk score for the detection.
+    $risk_score = 50
+
+    // Extract key fields for investigation.
+    $principal_ip = array_distinct($email.principal.ip)
+    $principal_user_userid = array_distinct($email.principal.user.userid)
+    $target_user_userid = array_distinct($email.target.user.userid)
+    $attachment_file_name = array_distinct($email.target.file.full_path)
+    $attachment_sha256 = array_distinct($email.target.file.sha256)
+    $subject = array_distinct($email.mail.subject)
+
+  condition:
+    $email
+}

@@ -1,0 +1,88 @@
+// name Anomalous DNS Queries Indicative of C2
+// author RW
+// description
+//   This rule detects potential C2 activity over DNS by identifying several anomalous patterns.
+//   It looks for a high volume of NXDOMAIN responses, a high ratio of distinct subdomains for a
+//   single parent domain (classic DGA behavior), suspicious use of TXT records for data transfer,
+//   and unusually long query names indicative of DNS tunneling. An alert from this rule suggests a
+//   client may be communicating with a C2 server using DNS for command, control, or data exfiltration.
+// tags
+// - T1071.004
+// - T1568.002
+// - T1048
+// severity Medium
+// false_positives
+// - Content Delivery Networks (CDNs) and ad networks can sometimes generate a high volume of DNS queries to various subdomains.
+// - Legitimate software that uses DNS for configuration checks or service discovery might be flagged.
+// - Security scanners performing DNS reconnaissance may trigger the rule.
+// - Tuning the 'DomainAllowList' and adjusting thresholds for your environment is critical to reduce noise.
+// datasources
+// - DnsEvents
+//
+// Define detection thresholds. These may require tuning based on your environment's baseline.
+
+let nxdomain_threshold = 20;
+let distinct_subdomain_threshold = 10;
+let avg_query_length_threshold = 40;
+let txt_query_threshold = 2;
+let timeframe = 1d;
+let bin_size = 1h;
+
+// Allowlist for common, high-volume domains to reduce false positives.
+// This list should be customized for your environment.
+let DomainAllowList = dynamic([
+    "google.com", "microsoft.com", "apple.com", "amazonaws.com", "windowsupdate.com",
+    "g.doubleclick.net", "google-analytics.com", "googlesyndication.com", "msftncsi.com",
+    "office.com", "live.com", "outlook.com", "akamai.net", "cdn.net", "office365.com"
+]);
+
+DnsEvents
+| where TimeGenerated > ago(timeframe)
+| where isnotempty(Name) and not(Name has_any (DomainAllowList))
+| where Name !~ "localhost" and not(Name has_suffix "in-addr.arpa") and not(Name has_suffix "ip6.arpa")
+// Extract the parent domain. Note: This simple logic might not correctly handle complex TLDs like '.co.uk'.
+| extend ParsedDomain = split(Name, '.')
+| extend ParentDomain = iif(
+    array_length(ParsedDomain) > 2,
+    strcat_array(array_slice(ParsedDomain, array_length(ParsedDomain) - 2, array_length(ParsedDomain) - 1), '.'),
+    Name
+)
+| where not(ParentDomain has_any (DomainAllowList))
+// Summarize DNS activity per client and parent domain within a time window.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    TotalQueries = count(),
+    DistinctSubdomains = dcount(Name),
+    NXDomainCount = countif(ResultCode == "NXDomain"),
+    TXTQueryCount = countif(QueryType == "TXT"),
+    AvgQueryLength = toint(avg(strlen(Name))),
+    SampleQueries = make_set(Name, 5)
+    by ClientIP, ParentDomain, bin(TimeGenerated, bin_size)
+// Apply detection logic based on summarized data.
+| extend
+    // Flag for high number of failed lookups, common with DGAs.
+    IsHighNXDomain = NXDomainCount > nxdomain_threshold,
+    // Flag for high ratio of unique subdomains, also common with DGAs.
+    IsHighDistinctRatio = DistinctSubdomains > distinct_subdomain_threshold and (todouble(DistinctSubdomains) / TotalQueries > 0.8),
+    // Flag for suspicious use of TXT records, often for data exfil/C2.
+    IsSuspiciousTXT = TXTQueryCount > txt_query_threshold,
+    // Flag for unusually long domain names, common in DNS tunneling.
+    IsLongQuery = AvgQueryLength > avg_query_length_threshold
+// Trigger an alert if any of the suspicious conditions are met.
+| where IsHighNXDomain or IsHighDistinctRatio or IsSuspiciousTXT or IsLongQuery
+| project-reorder
+    StartTime,
+    EndTime,
+    ClientIP,
+    ParentDomain,
+    TotalQueries,
+    DistinctSubdomains,
+    NXDomainCount,
+    TXTQueryCount,
+    AvgQueryLength,
+    IsHighNXDomain,
+    IsHighDistinctRatio,
+    IsSuspiciousTXT,
+    IsLongQuery,
+    SampleQueries

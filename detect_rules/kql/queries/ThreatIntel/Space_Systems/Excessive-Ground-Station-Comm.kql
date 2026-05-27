@@ -1,0 +1,53 @@
+// Name: Excessive Ground Station Communication Attempts
+// Author: RW
+// Date: 2025-08-18
+// Description: Detects a ground station communicating with an anomalously high number of distinct satellites or making an excessive number
+// of total connection attempts in a short period. This behavior can indicate that an attacker has compromised a ground station and is
+// attempting to discover or attack multiple satellites, as seen in the Hack-A-Sat competition where attackers looped through known
+// radio settings to target multiple spacecraft.
+// False Positive Sensitivity: Medium. False positives may occur if a ground station, particularly one at a polar location, has a legitimate
+// mission profile that involves communicating with many satellites in a short time frame.
+// Tuning:
+// - The 'GroundStationCommLogs_CL' table and its fields ('GroundStationID', 'SatelliteID', 'ConnectionStatus', 'SourceIP') are placeholders.
+// - Adjust them to match your specific data schema.
+// - The 'distinct_satellite_threshold' should be tuned based on the normal operating procedures for each ground station.
+// - A shared or polar ground station may have a higher baseline.
+// - The 'total_attempts_threshold' should be adjusted based on expected communication frequency.
+
+let timeframe = 1h;
+let distinct_satellite_threshold = 5;
+let total_attempts_threshold = 100;
+
+// This query assumes a custom log table for ground station communications. Replace with your actual table name and fields.
+GroundStationCommLogs_CL
+| where TimeGenerated > ago(timeframe)
+| where isnotempty(GroundStationID) and isnotempty(SatelliteID)
+// Summarize communication activity per ground station.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    DistinctSatelliteCount = dcount(SatelliteID),
+    TotalAttempts = count(),
+    TargetedSatellites = make_set(SatelliteID, 100), // Cap the list of satellites for performance.
+    ConnectionSuccesses = countif(ConnectionStatus == "Success"),
+    ConnectionFailures = countif(ConnectionStatus != "Success")
+    by GroundStationID, SourceIP // Group by both ID and IP for better fidelity.
+// Apply thresholds to identify excessive activity.
+| where DistinctSatelliteCount > distinct_satellite_threshold or TotalAttempts > total_attempts_threshold
+// Add a description of why the alert was triggered for the analyst.
+| extend Reason = case(
+    DistinctSatelliteCount > distinct_satellite_threshold and TotalAttempts > total_attempts_threshold, strcat("High number of total attempts (", TotalAttempts, ") and high distinct satellite count (", DistinctSatelliteCount, ")"),
+    DistinctSatelliteCount > distinct_satellite_threshold, strcat("High distinct satellite count (", DistinctSatelliteCount, ")"),
+    strcat("High number of total attempts (", TotalAttempts, ")")
+)
+| project
+    StartTime,
+    EndTime,
+    GroundStationID,
+    SourceIP,
+    Reason,
+    DistinctSatelliteCount,
+    TotalAttempts,
+    ConnectionSuccesses,
+    ConnectionFailures,
+    TargetedSatellites

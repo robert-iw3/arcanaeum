@@ -1,0 +1,43 @@
+title: Malformed CIP Packet Detected
+status: experimental
+description: >-
+  Detects malformed Common Industrial Protocol (CIP) packets that do not conform to protocol specifications.
+  Attackers may send such packets to probe for vulnerabilities, trigger a denial-of-service, or attempt to
+  exploit memory corruption bugs in the target device's protocol stack.
+  This technique is a form of fuzzing.
+references:
+  - https://github.com/ICSVillage
+author: RW
+date: 2025-08-18
+tags:
+  - attack.impact
+  - attack.t1499
+  - attack.discovery
+  - ics
+  - cip
+logsource:
+  category: network_traffic
+  service: cip
+detection:
+  selection:
+    # This rule relies on a network security monitoring tool with CIP/EtherNet/IP parsing capabilities (e.g., Zeek, Suricata, or a commercial OT security platform).
+    # The fields and values below are examples and may need to be adapted to your specific logging source.
+    # Option 1: A dedicated status field indicating a parser error or protocol violation.
+    cip.status: 'malformed'
+    # Option 2: A reason or message field containing keywords for malformed packets.
+    cip.error_message|contains:
+      - 'malformed'
+      - 'invalid length'
+      - 'protocol violation'
+      - 'invalid object path' # Refers to syntax errors, not just non-existent objects.
+      - 'unexpected data'
+  condition: selection
+fields:
+  - source.ip
+  - destination.ip
+  - cip.error_message
+falsepositives:
+  - Faulty or non-compliant client applications or devices.
+  - Bugs or inaccuracies in the network monitoring tool's CIP parser.
+  - Proprietary vendor extensions to the CIP protocol that are not understood by the parser.
+level: medium

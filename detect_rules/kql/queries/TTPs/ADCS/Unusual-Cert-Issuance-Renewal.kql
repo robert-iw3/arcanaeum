@@ -1,0 +1,67 @@
+// title: Unusual Certificate Issuance with Injected Application Policy
+// description: |
+// Detects the successful issuance of a certificate where the requester has injected a 'CertificateApplicationPolicy' extension.
+// This behavior is highly suspicious as application policies (EKUs) are typically defined by the certificate template itself.
+// Attackers, using tools like Certify 2.0, can leverage this to mint certificates with more privileges than intended, facilitating
+// privilege escalation or persistence (e.g., ESC15). This rule identifies when a certificate is successfully issued following a
+// request that included this injected attribute.
+// author: RW
+// date: 2025-08-11
+// level: Medium
+// tags:
+//   - attack.privilege_escalation
+//   - attack.persistence
+//   - attack.t1649
+
+let timeframe = 1d;
+// Whitelist for accounts or templates where specifying application policies during enrollment is expected behavior.
+// This might include specific service accounts or automated enrollment processes.
+let policy_injection_exclusions = dynamic([]);
+
+// Find successfully issued certificate requests to correlate against.
+let SuccessfulRequests =
+    SecurityEvent
+    | where TimeGenerated > ago(timeframe)
+    | where EventID == 4887 // Certificate Services approved a request and issued a certificate.
+    | extend EventDataXml = parse_xml(EventData)
+    | extend RequestId = tostring(EventDataXml.EventData.Data[2])
+    | project TimeGenerated, RequestId, Computer;
+
+// Find certificate requests where the enrollee attempts to specify the application policy.
+SecurityEvent
+| where TimeGenerated > ago(timeframe)
+| where EventID == 4886 // A certificate request was submitted.
+// This is the key indicator. The request itself contains the 'CertificateApplicationPolicy' attribute,
+// which is an attempt by the enrollee to define the certificate's usage.
+| where EventData has "CertificateApplicationPolicy"
+| extend EventDataXml = parse_xml(EventData)
+| extend
+    RequesterName = tostring(EventDataXml.EventData.Data[0]),
+    Attributes = tostring(EventDataXml.EventData.Data[2]),
+    TemplateName = tostring(EventDataXml.EventData.Data[3]),
+    RequestId = tostring(EventDataXml.EventData.Data[4])
+// Join with successful requests to ensure the malicious request was not denied.
+| join kind=inner (SuccessfulRequests) on RequestId
+// Potential for False Positives: Some legitimate, albeit rare, enrollment scenarios might involve the client specifying policies.
+// These known-good requesters or templates should be added to the 'policy_injection_exclusions' list.
+| where not(RequesterName in (policy_injection_exclusions) or TemplateName in (policy_injection_exclusions))
+| extend InjectedPolicy = extract("CertificateApplicationPolicy: ([^\n]+)", 1, Attributes)
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    take_any(TemplateName, InjectedPolicy)
+    by
+    RequesterName,
+    CertificateAuthority = Computer
+| extend
+    AccountName = tostring(split(RequesterName, '\\')[1]),
+    AccountDomain = tostring(split(RequesterName, '\\')[0])
+| project-reorder
+    StartTime,
+    EndTime,
+    AccountName,
+    AccountDomain,
+    RequesterName,
+    CertificateAuthority,
+    TemplateName,
+    InjectedPolicy

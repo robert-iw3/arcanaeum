@@ -1,0 +1,38 @@
+rule suspicious_root_process_execution_on_space_asset {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects when a non-core or application-level process is launched with root privileges (UID 0) on a Linux-based system, such as those often used in spacecraft. The CYSAT demo highlighted that running services with excessive privileges is a common and critical vulnerability. This rule identifies processes like Java applications or payload handlers running as root, which could indicate a misconfiguration or a post-exploitation privilege escalation."
+    tags = "Space, Privilege Escalation, Root, Linux"
+    tactic = "TA0004"
+    technique = "T1068"
+    false_positives = "Legitimate applications or scripts that are intentionally configured to run as root for specific administrative tasks. An exclusion list of known benign root processes is necessary for tuning. Some embedded systems may run most processes as root by design."
+
+  events:
+    // The event is a process being launched.
+    $process.metadata.event_type = "PROCESS_LAUNCH"
+
+    // The core condition: the process is running with root privileges (UID 0).
+    $process.principal.user.userid = "0"
+
+    // Detects common application or payload processes that should not typically run as root.
+    // This list should be customized based on the software stack of the monitored asset.
+    re.regex($process.principal.process.file.full_path, `(?i)\/java$|\/tomcat|\/payload_handler|\/mission_app\/|\/usr\/bin\/python|\/usr\/bin\/perl`)
+
+    // Exclude common system daemons and processes that are expected to run as root to reduce false positives.
+    // This exclusion list is critical for tuning in a production environment.
+    not re.regex($process.principal.process.file.full_path, `(?i)\/systemd$|\/(s|u)bin\/(sshd|cron|init|getty|login|mount|shutdown|agetty)$`)
+
+  outcome:
+    // A medium risk score, as this could be a misconfiguration or active exploitation.
+    $risk_score = 55
+    $principal_hostname = array_distinct($process.principal.hostname)
+    $process_path = array_distinct($process.principal.process.file.full_path)
+    $process_commandline = array_distinct($process.principal.process.command_line)
+    $parent_process_path = array_distinct($process.principal.process.parent_process.file.full_path)
+    $parent_process_commandline = array_distinct($process.principal.process.parent_process.command_line)
+    $event_count = count_distinct($process.metadata.id)
+
+  condition:
+    $process
+}

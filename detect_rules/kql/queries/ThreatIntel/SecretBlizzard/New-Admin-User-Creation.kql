@@ -1,0 +1,37 @@
+// Name: ApolloShadow New Admin User Creation
+// Author: RW
+// Date: 2025-07-31
+// Description: Detects the creation of the local user account "UpdatusUser". This specific username is created by the ApolloShadow malware for persistence on a compromised host.
+// False Positives: Low. The username "UpdatusUser" is highly specific to this malware and is unlikely to be used in legitimate administrative activity.
+// References: https://www.microsoft.com/en-us/security/blog/2025/07-31/frozen-in-transit-secret-blizzards-aitm-campaign-against-diplomats/
+// MITRE ATT&CK: T1136.001
+// Data Sources: Microsoft Defender for Endpoint (DeviceEvents)
+
+let timeframe = 1d;
+let suspicious_username = "UpdatusUser";
+DeviceEvents
+| where Timestamp > ago(timeframe)
+// Filter for user account creation events.
+| where ActionType == "UserAccountCreated"
+| extend TargetUsername = tostring(parse_json(AdditionalFields).TargetUsername)
+// Look for the specific username created by ApolloShadow.
+// Note: The threat actor could change this username in the future. Consider adding other suspicious patterns if needed.
+| where TargetUsername =~ suspicious_username
+| summarize
+    startTime = min(Timestamp),
+    endTime = max(Timestamp),
+    count(),
+    // Collect context about the process that created the user.
+    InitiatingProcess = make_set(InitiatingProcessFileName, 10),
+    CommandLine = make_set(InitiatingProcessCommandLine, 10)
+    by
+    DeviceName,
+    DeviceId,
+    TargetUsername
+| project-rename
+    endpoint = DeviceName,
+    created_user = TargetUsername,
+    firstTime = startTime,
+    lastTime = endTime,
+    initiating_process = InitiatingProcess,
+    cmd = CommandLine

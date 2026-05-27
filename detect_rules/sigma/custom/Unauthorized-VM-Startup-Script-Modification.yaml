@@ -1,0 +1,48 @@
+title: Cloud VM Startup Script Modification
+id: 0b7dddf4-f2e8-4ea2-852d-6f38976bef62
+status: experimental
+description: Detects modification of Virtual Machine (VM) startup scripts across AWS, Azure, and GCP. Attackers can abuse permissions to alter these scripts, allowing them to inject malicious code that executes upon the next VM boot, achieving persistence or initial execution.
+references:
+  - https://unit42.paloaltonetworks.com/cloud-virtual-machine-attack-vectors/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.persistence
+  - attack.execution
+logsource:
+  category: cloud
+detection:
+  aws_modification:
+        # Detects modification of the 'userData' attribute for an EC2 instance, which contains the startup script.
+    logsource:
+      service: cloudtrail
+      product: aws
+    eventName: 'ModifyInstanceAttribute'
+    requestParameters:
+      attribute: 'userData'
+  azure_modification:
+        # Detects updates to a Virtual Machine Scale Set, which can include changes to the 'customData' (startup script).
+    logsource:
+      service: activitylogs
+      product: azure
+    operation_name: 'Microsoft.Compute/virtualMachineScaleSets/write'
+    status: 'Succeeded'
+  gcp_modification:
+        # Detects changes to instance or project metadata where the startup-script key is modified.
+    logsource:
+      service: gcp.audit
+    methodName:
+      - 'v1.compute.instances.setMetadata'
+      - 'v1.compute.projects.setCommonInstanceMetadata'
+    resource:
+      request:
+        metadata:
+          items:
+            key: 'startup-script'
+  condition: aws_modification or azure_modification or gcp_modification
+falsepositives:
+  - Legitimate administrative activities, such as deploying or updating applications, may trigger this rule.
+  - Configuration management tools (e.g., Terraform, Ansible, Chef) that manage VM configurations via API may cause false positives.
+  - Consider tuning this detection by filtering for events originating from unexpected user agents, IP ranges, or non-administrative user accounts.
+  - Correlating these modification events with a subsequent VM restart or re-image action can increase the fidelity of the alert.
+level: medium

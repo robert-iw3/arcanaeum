@@ -1,0 +1,47 @@
+stages:
+  - build-and-test
+
+esql_build_and_test:
+  stage: build-and-test
+  image: docker:24.0
+  services:
+    - docker:24.0-dind
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "release"'
+      changes:
+        - elastic-security/queries/*
+      when: always
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}-pip
+    paths:
+      - .cache/pip
+  variables:
+    PIP_CACHE_DIR: .cache/pip
+    KIBANA_URL: $KIBANA_URL
+    KIBANA_API_KEY: $KIBANA_API_KEY
+    ES_HOST: $ES_HOST
+    CA_CERT_PATH: $CA_CERT_PATH
+    ES_INDEX: $ES_INDEX
+    STREAM_TO: $STREAM_TO
+    OVERWRITE: $OVERWRITE
+  environment:
+    name: production
+  before_script:
+    - apk add --no-cache python3 py3-pip
+    - pip install --upgrade pip
+  script:
+    - set -e
+    - cd elastic-security
+    - docker build -t esql-pipeline:latest .
+    - docker run --rm esql-pipeline:latest python -m unittest test_esql_pipeline.py -v
+    - docker run --rm -e KIBANA_URL="$KIBANA_URL" -e KIBANA_API_KEY="$KIBANA_API_KEY" -e ES_HOST="$ES_HOST" -e ES_INDEX="$ES_INDEX" -e STREAM_TO="$STREAM_TO" -e OVERWRITE="$OVERWRITE" -e CA_CERT_PATH="/app/ca.crt" -v $(pwd)/ca.crt:/app/ca.crt:ro esql-pipeline:latest python esql_pipeline.py --verbose --compress --max-workers 4 --kibana-url "$KIBANA_URL" --api-key "$KIBANA_API_KEY" --es-host "$ES_HOST" --es-index "$ES_INDEX" --stream-to "$STREAM_TO" --overwrite="$OVERWRITE" --ca-cert-path="/app/ca.crt"
+    - docker run -i --rm aquasec/trivy:0.51.2 image --format table --exit-code 1 --ignore-unfixed --severity CRITICAL,HIGH esql-pipeline:latest
+  artifacts:
+    paths:
+      - elastic-security/import/final/combined_esql_rules.ndjson.gz
+      - elastic-security/ca.crt
+      - elastic-security/import/final/pipeline.log
+    expire_in: 7 days
+    when: always
+  after_script:
+    - if [ $CI_JOB_STATUS != "success" ]; then curl -X POST -H "Authorization: Bearer $SLACK_BOT_TOKEN" -H "Content-type: application/json" --data "{\"channel\":\"pipeline-notifications\",\"text\":\"ESQL Pipeline failed for $CI_PROJECT_PATH on branch $CI_COMMIT_REF_NAME. Check logs for details.\"}" https://slack.com/api/chat.postMessage; fi

@@ -1,0 +1,41 @@
+title: Unusual Network Traffic to ICS/OT Environment
+status: experimental
+description: >-
+  Detects network traffic originating from the internet or internal corporate IT segments targeting critical ICS/OT subnets.
+  This aligns with modern frameworks like MOSAICS (More Situational Awareness for Industrial Control Systems) which emphasize
+  the need for continuous network monitoring. Such traffic is often indicative of unauthorized access attempts, lateral movement,
+  or external reconnaissance against sensitive industrial control systems, such as those found in maritime or other critical
+  infrastructure. Legitimate traffic to these zones should be strictly controlled and originate only from authorized jump hosts or management servers.
+author: RW
+date: 2025-08-18
+tags:
+  - attack.initial_access
+  - attack.lateral_movement
+  - attack.reconnaissance
+  - industry.ics
+  - industry.maritime
+logsource:
+  category: network_traffic
+detection:
+  # These placeholders MUST be customized for your environment.
+  # The effectiveness of this rule is entirely dependent on accurate network segmentation definitions.
+  # Example: '10.200.0.0/16' for OT, '192.168.0.0/16' for IT.
+  selection_external:
+    DestinationIp|re: '^<CRITICAL_ICS_SUBNETS>$' # Placeholder for critical OT/ICS subnets (e.g., navigation, propulsion, safety systems).
+    SourceIp|private_address: false
+  selection_internal:
+    DestinationIp|re: '^<CRITICAL_ICS_SUBNETS>$' # Placeholder for critical OT/ICS subnets.
+    SourceIp|re: '^<IT_CORPORATE_SUBNETS>$' # Placeholder for general corporate IT subnets that should not directly access OT.
+  # This filter should contain all authorized sources that are allowed to communicate with the OT network.
+  filter_known_good:
+    SourceIp:
+      - '<AUTHORIZED_JUMP_HOSTS>' # Placeholder for IP addresses of jump hosts or bastion servers.
+      - '<AUTHORIZED_MANAGEMENT_SERVERS>' # Placeholder for patch management, AV, or other admin servers.
+      - '<AUTHORIZED_VENDOR_VPNS>' # Placeholder for IP ranges used by vendors for remote support.
+      - '<VULNERABILITY_SCANNER_IP>' # Placeholder for vulnerability scanner IPs.
+  condition: (selection_external or selection_internal) and not filter_known_good
+falsepositives:
+  - Legitimate administrative or vendor access from an IP address not included in the 'filter_known_good' exclusion list.
+  - Misconfiguration of the network subnet placeholders (ICS_SUBNETS, IT_CORPORATE_SUBNETS).
+  - Network traffic from authorized vulnerability scanners.
+level: high

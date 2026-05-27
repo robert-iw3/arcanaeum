@@ -1,0 +1,10 @@
+{
+  "xp_cmdshell": 0,
+  "clr_enabled": 0,
+  "mixed_mode_auth": false,
+  "sa_disabled": true,
+  "sample_dbs_removed": true,
+  "linked_servers": 0,
+  "service_account": "NT Service\MSSQLSERVER",
+  "sql_browser_disabled": true
+}

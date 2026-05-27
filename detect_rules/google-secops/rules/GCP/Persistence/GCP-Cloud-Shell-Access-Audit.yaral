@@ -1,0 +1,36 @@
+rule gcp_cloud_shell_access_setting_modified {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects changes to the Google Cloud Shell access settings for an organization. Disabling Cloud Shell is a key mitigation for certain persistence techniques. An alert on its re-enabling could indicate that a security control has been weakened or modified."
+    false_positives = "Legitimate administrative changes to Cloud Shell access policies. The change should be verified with the administrator who performed the action."
+    tactic = "TA0003"
+    technique = "T1098"
+    tags = "GCP, CLOUD, CLOUD_SHELL, DEFENSE_EVASION, GOOGLE_WORKSPACE"
+
+  events:
+    // Filter for GCP Audit Log events from the Google Workspace Admin SDK.
+    $gcp.metadata.event_type = "GCP_AUDIT_LOG"
+    $gcp.protoPayload.serviceName = "admin.googleapis.com"
+    $gcp.protoPayload.methodName = "google.admin.settings.v1.AppControlSettingsService.UpdateAppControlSettings"
+
+    // The resourceName contains the application ID for Google Cloud Platform (1052502934533).
+    re.regex($gcp.protoPayload.resourceName, `services/1052502934533`)
+
+    // This regex checks for the specific setting related to Cloud Shell within the request payload.
+    re.regex($gcp.protoPayload.request.json, `"cloudShellEnabled"`)
+
+  outcome:
+    // Risk score is set to medium-high as this is a significant security setting change.
+    $risk_score = 60
+    $principal_ip = array_distinct($gcp.principal.ip)
+    $principal_user = array_distinct($gcp.principal.user.email_id)
+    $method_name = array_distinct($gcp.protoPayload.methodName)
+    $resource_name = array_distinct($gcp.protoPayload.resourceName)
+    $request_payload = array_distinct($gcp.protoPayload.request.json)
+    // Capture the new setting value (true or false) for context.
+    $cloud_shell_enabled_setting = re.capture($gcp.protoPayload.request.json, `"cloudShellEnabled":\s*(true|false)`)
+
+  condition:
+    $gcp
+}

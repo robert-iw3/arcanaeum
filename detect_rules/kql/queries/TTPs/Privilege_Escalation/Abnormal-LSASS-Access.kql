@@ -1,0 +1,54 @@
+// This rule detects processes attempting to open a handle to LSASS with rights to read memory or query information.
+// This is a common precursor to credential dumping and token extraction.
+// Author: RW
+// MITRE ATT&CK Tactics: Credential Access
+// MITRE ATT&CK Techniques: T1003.001
+
+let timeframe = 1d;
+
+// Define suspicious access rights for LSASS based on the threat pattern.
+// 0x10 is PROCESS_VM_READ, 0x400 is PROCESS_QUERY_INFORMATION.
+let suspicious_access_rights = dynamic([
+    "0x10",
+    "0x400"
+]);
+// Define a list of known legitimate processes that access LSASS.
+// FP Tuning: This list is crucial for reducing noise and should be customized for your environment.
+let legitimate_processes = dynamic([
+    "svchost.exe",
+    "services.exe",
+    "wininit.exe",
+    "csrss.exe",
+    "smss.exe",
+    "winlogon.exe",
+    "MsMpEng.exe", // Microsoft Defender Antivirus
+    "sense.exe", // Microsoft Defender for Endpoint
+    "healthservice.exe", // System Center Operations Manager / Azure Monitor Agent
+    "WmiPrvSE.exe", // WMI Provider Host
+    "taskmgr.exe" // Task Manager
+]);
+DeviceEvents
+| where Timestamp > ago(timeframe)
+// Focus on events where a handle to the LSASS process was requested.
+| where ActionType == "LsassProcessAccess" or (ActionType == "OpenProcess" and TargetProcessFileName =~ "lsass.exe")
+// Check if the granted access includes rights to read memory or query information.
+| where GrantedAccess has_any (suspicious_access_rights)
+// Exclude common system processes and security tools that are expected to perform this action.
+| where not(InitiatingProcessFileName in (legitimate_processes))
+// Further FP Tuning: You might also exclude processes signed by trusted vendors like Microsoft,
+// but be aware that attackers can use legitimate, signed tools for malicious purposes (LOLBAS).
+// | where not(InitiatingProcessSignerInfo has "Microsoft")
+| project
+    Timestamp,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessId,
+    InitiatingProcessCommandLine,
+    InitiatingProcessAccountName,
+    GrantedAccess,
+    ReportId,
+    ActionType
+| extend
+    HostCustomEntity = DeviceName,
+    AccountCustomEntity = InitiatingProcessAccountName,
+    ProcessCustomEntity = InitiatingProcessId

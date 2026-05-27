@@ -1,0 +1,27 @@
+title: AWS Reconnaissance Activity Detected
+id: 8fd84a19-4029-45c3-b351-89df849ea4bd
+status: experimental
+description: >-
+  Detects common AWS API calls used for reconnaissance. Attackers often use these commands to understand the permissions of compromised credentials and enumerate accessible resources. While these events are very common, they can be indicative of malicious activity when originating from unusual IP addresses or performed by identities that do not typically perform such actions.
+references:
+  - https://www.chrisfarris.com/post/aws-ir/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.discovery
+  - attack.t1078
+  - attack.t1046
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    eventName:
+      - GetCallerIdentity # Corresponds to 'aws sts get-caller-identity', the "whoami" of AWS.
+      - ListBuckets # Corresponds to 'aws s3 ls', used to enumerate S3 buckets.
+      - DescribeInstances # Used to enumerate EC2 instances.
+  condition: selection
+falsepositives:
+  - These API calls are extremely common for legitimate user activity, administrative tasks, and automated scripts.
+  - This detection is intended to be used as a starting point for threat hunting. It is highly recommended to correlate these events with other signals, such as logins from unusual locations, non-standard user agents, or activity from identities that do not typically perform enumeration, to increase fidelity.
+level: medium

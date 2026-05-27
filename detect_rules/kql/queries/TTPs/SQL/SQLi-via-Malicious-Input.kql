@@ -1,0 +1,64 @@
+let sqli_patterns = dynamic([
+    // Classic SQLi bypass and logic operators
+    "' or ", "' and ", "'or'", "'and'", " or ", " and ",
+    // SQL comment characters
+    "--", "/*", "*/",
+    // Common SQL commands used in attacks
+    "union", "select", "insert", "update", "delete", "drop", "alter", "exec",
+    // Database-specific functions often used for reconnaissance or time-based attacks
+    "waitfor", "delay", "sleep", "benchmark", "pg_sleep", "xp_cmdshell", "xp_dirtree"
+]);
+// Define the time window for the search
+let lookback = 1h;
+// Search across common web log tables. Add or remove tables as needed for your environment.
+union isfuzzy=true CommonSecurityLog, W3CIISLog, AppServiceHTTPLogs, AzureDiagnostics
+| where TimeGenerated > ago(lookback)
+// For AzureDiagnostics, filter to Application Gateway WAF logs
+| where not(isempty(TableName) and TableName == "AzureDiagnostics") or Category == "ApplicationGatewayFirewallLog"
+// Normalize relevant fields from different log types into a single field to search.
+| extend UserInput = tolower(case(
+    TableName == "CommonSecurityLog", RequestURL,
+    TableName == "W3CIISLog", strcat(csUriStem, "?", csUriQuery),
+    TableName == "AppServiceHTTPLogs", strcat(CsHost, CsUriStem, CsUriQuery),
+    TableName == "AzureDiagnostics", requestUri_s,
+    ""
+))
+// Combine other relevant fields like headers or body if available
+| extend SearchableString = strcat(UserInput, tolower(details_data_s), tolower(WebAttackDetails_s), tolower(cs_User_Agent_s), tolower(Referer))
+// Core detection logic: Look for the presence of any of the defined SQLi patterns.
+| where SearchableString has_any (sqli_patterns)
+// FP Tuning: Vulnerability scanners or legitimate but unusual application behavior can cause FPs.
+// Consider excluding known scanner IPs, trusted user agents, or specific benign application URLs.
+// Example: | where ClientIP !in ("<scanner_IP_1>", "<scanner_IP_2>") or UserAgent !has "Nessus"
+| extend
+    // Extract and normalize relevant fields for investigation.
+    Timestamp = TimeGenerated,
+    RequestURL = UserInput,
+    ClientIP = case(
+        isnotempty(ClientIp), ClientIp,
+        isnotempty(c_ip), c_ip,
+        isnotempty(cIP), cIP,
+        isnotempty(clientIp_s), clientIp_s,
+        ""
+    ),
+    UserAgent = case(
+        isnotempty(cs_User_Agent_s), cs_User_Agent_s,
+        isnotempty(RequestClientApplication), RequestClientApplication,
+        isnotempty(csUserAgent), csUserAgent,
+        isnotempty(CsUserAgent), CsUserAgent,
+        ""
+    ),
+    ActionTaken = case(
+        isnotempty(action_s), action_s,
+        isnotempty(DeviceAction), DeviceAction,
+        ""
+    ),
+    RuleName = case(
+        isnotempty(ruleName_s), ruleName_s,
+        isnotempty(RuleName), RuleName,
+        ""
+    )
+| where isnotempty(RequestURL) and isnotempty(ClientIP)
+// Summarize alerts to reduce noise, grouping by the client IP and the request URL.
+| summarize StartTime = min(Timestamp), EndTime = max(Timestamp), Actions=make_set(ActionTaken, 5), WafRules=make_set(RuleName, 5), count() by ClientIP, RequestURL, UserAgent, TableName
+| project-reorder StartTime, EndTime, ClientIP, RequestURL, UserAgent, Actions, WafRules, TableName

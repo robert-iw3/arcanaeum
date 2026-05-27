@@ -1,0 +1,59 @@
+rule waiting_thread_hijacking_split_execution {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects WTH behavior split across multiple source processes targeting a single victim process to evade process-centric behavioral detections."
+    tactic = "TA0005"
+    technique = "T1055"
+    false_positives = "Complex software installers (e.g., msiexec), updaters, or some security/management tools might exhibit similar distributed behaviors."
+
+  events:
+    // Event for memory allocation from a remote process.
+    $alloc.metadata.event_type = "PROCESS_API_CALL"
+    $alloc.security_result.action_details = "VirtualAllocEx"
+    $alloc.target.process.pid = $target_pid
+    $alloc.principal.process.pid != $target_pid
+
+    // Event for memory writing from a remote process.
+    $write.metadata.event_type = "PROCESS_API_CALL"
+    $write.security_result.action_details = "WriteProcessMemory"
+    $write.target.process.pid = $target_pid
+    $write.principal.process.pid != $target_pid
+
+    // Event for changing memory protection from a remote process.
+    $protect.metadata.event_type = "PROCESS_API_CALL"
+    $protect.security_result.action_details = "VirtualProtectEx"
+    $protect.target.process.pid = $target_pid
+    $protect.principal.process.pid != $target_pid
+
+  match:
+    // Correlate all remote memory operations on a single target process.
+    $target_pid over 30m
+
+  outcome:
+    $risk_score = 75
+    $technique = "WTH - Split Execution"
+    // Combine PIDs from all source events to count distinct actors.
+    $source_pids = array_distinct(array_concat($alloc.principal.process.pid, $write.principal.process.pid, $protect.principal.process.pid))
+    $distinct_source_process_count = array_length($source_pids)
+    $source_processes = array_distinct(array_concat($alloc.principal.process.file.full_path, $write.principal.process.file.full_path, $protect.principal.process.file.full_path))
+    $target_process_path = array_distinct($alloc.target.process.file.full_path)
+    $target_process_pid = $target_pid
+    $target_process_cmdline = array_distinct($alloc.target.process.command_line)
+    $write_count = count_distinct($write.metadata.id)
+
+  condition:
+    // Check that all required actions occurred from various sources.
+    $alloc and $protect and #write >= 2 and
+    // Ensure the actions originate from at least 3 distinct source processes.
+    $distinct_source_process_count >= 3 and
+    // Filter out known benign actors that perform these actions.
+    all $p in $source_processes:
+      not strings.ends_with($p, "\\msiexec.exe") and
+      not strings.ends_with($p, "\\procexp.exe") and
+      not strings.ends_with($p, "\\procmon.exe") and
+      not strings.ends_with($p, "\\windbg.exe") and
+      not strings.ends_with($p, "\\perfview.exe") and
+      not strings.ends_with($p, "\\ProcessHacker.exe") and
+      not strings.ends_with($p, "\\SystemInformer.exe")
+}

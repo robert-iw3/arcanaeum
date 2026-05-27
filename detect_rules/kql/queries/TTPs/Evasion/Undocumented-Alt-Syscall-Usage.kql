@@ -1,0 +1,60 @@
+// Name: Suspicious Driver Loaded from Non-Standard Path
+// Author: RW
+// Date: 2025-08-03
+// Description: Detects the loading of a kernel driver (.sys file) from a location outside of standard system and program directories.
+//              This is a common TTP for rootkits and other malware that require kernel-level execution. Techniques like "Hells Hollow"
+//              rely on loading a malicious driver to hook system calls and evade defenses.
+// False Positive Sensitivity: Medium.
+// This detection may trigger on legitimate software installers or diagnostic tools that place drivers in temporary locations.
+// Consider adding known good driver file names or folder paths to an exclusion list to tune for your environment.
+
+// Define legitimate locations from where drivers are typically loaded.
+let legitimateDriverPathPrefixes = dynamic([
+    "c:\\windows\\system32\\drivers",
+    "c:\\windows\\system32\\driverstore\\filerepository",
+    "c:\\windows\\winsxs",
+    "c:\\program files",
+    "c:\\program files (x86)"
+]);
+DeviceImageLoadEvents
+// Filter for kernel driver load events.
+| where FileName endswith ".sys"
+// Normalize the folder path for case-insensitive matching.
+| extend NormalizedFolderPath = tolower(FolderPath)
+// The core detection logic: identify drivers loaded from outside the legitimate locations.
+| where not(
+    NormalizedFolderPath startswith "c:\\windows\\system32\\drivers" or
+    NormalizedFolderPath startswith "c:\\windows\\system32\\driverstore\\filerepository" or
+    NormalizedFolderPath startswith "c:\\windows\\winsxs" or
+    NormalizedFolderPath startswith "c:\\program files" or
+    NormalizedFolderPath startswith "c:\\program files (x86)"
+)
+// FP Tuning: Exclude known legitimate drivers that may load from non-standard paths.
+// For example, some anti-cheat or security software drivers might be loaded from app data folders.
+// | where not(NormalizedFolderPath startswith "c:\\programdata\\" and FileName in ("known_good_driver.sys"))
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    EventCount = count(),
+    InitiatingProcesses = make_set(InitiatingProcessFileName, 10),
+    Signatures = make_set(Signature, 10),
+    SignatureStatuses = make_set(SignatureStatus, 10)
+    by
+    Timestamp = bin(TimeGenerated, 1h), // Group alerts to reduce noise.
+    DeviceName,
+    DeviceId,
+    FileName,
+    FolderPath,
+    SHA1,
+    MD5
+| project-reorder
+    Timestamp,
+    DeviceName,
+    FileName,
+    FolderPath,
+    EventCount,
+    InitiatingProcesses,
+    SignatureStatuses,
+    SHA1,
+    MD5,
+    DeviceId

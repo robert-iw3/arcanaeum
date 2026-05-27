@@ -1,0 +1,46 @@
+rule NTLM_Loopback_Logon_Detection {
+  meta:
+    author = "RW"
+    description = "Detects NTLM successful network logons where the source and destination workstations are the same, excluding loopback addresses."
+    severity = "MEDIUM"
+
+  events:
+    // Filter for successful network logons (Logon Type 3)
+    $e.metadata.event_type = "USER_LOGIN"
+    $e.metadata.event_code = 4624 // Windows Event Code 4624 for successful logon
+    $e.extensions.auth.logon_type = 3 // Logon Type 3 for network logon
+
+    // Ensure the authentication package is NTLM
+    $e.extensions.auth.auth_protocol = "NTLM"
+
+    // Exclude common noise from loopback addresses
+    not $e.principal.ip = "127.0.0.1"
+    not $e.principal.ip = "::1"
+
+    // Normalize hostnames (assuming the hostname in UDM is already normalized or your parser handles it)
+    // Chronicle UDM usually stores the full hostname in principal.hostname and target.hostname.
+    // In Chronicle, if normalization is needed, it would typically be done in the parser or within the rule if the field isn't already normalized.
+
+    // Core detection logic: identify when the source workstation and destination host are the same.
+    $e.principal.hostname = $e.target.hostname
+    not $e.principal.hostname = ""
+    not $e.principal.hostname = "-"
+
+  outcome:
+    $first_seen = $e.metadata.event_timestamp.epoch_seconds // UDM field for event timestamp
+    $last_seen = $e.metadata.event_timestamp.epoch_seconds // For single events, first and last are the same
+    $host = $e.target.hostname // UDM field for hostname
+    $source_ip = $e.principal.ip // UDM field for IP address
+    $source_user = $e.principal.user.userid // UDM field for user ID
+    $target_user = $e.target.user.userid // UDM field for target user ID
+
+  //  Potential for False Positives: Certain applications or scheduled tasks might exhibit this behavior.
+  //  If legitimate activity is found, add specific exclusions for the user or host.
+  //  You can use a reference list in Chronicle for this purpose.
+  //  Example:
+  //  not $e.principal.hostname in %whitelisted_hosts
+  //  not $e.principal.user.userid in %whitelisted_users
+
+  condition:
+    $e
+}

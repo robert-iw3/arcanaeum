@@ -1,0 +1,62 @@
+// name: Insecure Firmware Update on Satellite Control System
+// author: RW
+// date: 2025-08-18
+// description: Detects the creation of a potential firmware file on a satellite control system by a process that recently received a
+// network connection from an unauthorized external IP address. This could indicate an attempt to upload a malicious firmware image
+// without proper verification.
+// references: https://www.ndss-symposium.org/wp-content/uploads/2023/02/ndss2023_s25_paper.pdf
+// data_source: microsoft_defender_for_endpoint
+// false_positive_sensitivity: medium
+
+let timeframe = 1h;
+
+// --- Configuration ---
+// This list must be populated with the hostnames of your satellite control systems.
+let satellite_control_systems = datatable(DeviceName:string) [
+    "sat-control-win.corp.net",
+    "sat-control-lnx.corp.net"
+];
+// This list must be populated with authorized external IP addresses (e.g., ground stations, admin networks).
+let authorized_ips = datatable(ip_address:string) [
+    "203.0.113.10",
+    "198.51.100.55",
+    "192.0.2.0/24"
+];
+// Define directories where firmware images are typically stored.
+let firmware_paths = dynamic(["C:\\firmware\\updates\\", "/opt/satellite/firmware/", "/var/firmware/"]);
+// Define common firmware file extensions.
+let firmware_extensions = dynamic([".bin", ".img", ".hex", ".fw", ".swu"]);
+// --- End Configuration ---
+
+// Find processes on satellite control systems that received network connections from unauthorized external IPs.
+let suspicious_processes =
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(timeframe)
+    | where DeviceName in (satellite_control_systems)
+    | where isnotempty(RemoteIP) and not(ipv4_is_private(RemoteIP))
+    | where RemoteIP !in (authorized_ips)
+    | summarize by DeviceId, InitiatingProcessId, RemoteIP;
+
+// Find firmware file creation events on the same systems.
+DeviceFileEvents
+| where TimeGenerated > ago(timeframe)
+| where DeviceName in (satellite_control_systems)
+| where ActionType == "FileCreated"
+// Check if the file was created in a known firmware directory.
+| where array_length(array_filter(firmware_paths, p -> startswith(FolderPath, tostring(p)))) > 0
+// Check if the file has a firmware-like extension.
+| where tolower(FileName) has_any (firmware_extensions)
+// Join with processes that had suspicious network activity to identify unauthorized updates.
+| join kind=inner (suspicious_processes) on DeviceId, InitiatingProcessId
+| project
+    TimeGenerated,
+    DeviceName,
+    FileName,
+    FolderPath,
+    SHA1,
+    InitiatingProcessAccountName,
+    InitiatingProcessCommandLine,
+    RemoteIP
+// FP Mitigation: This detection relies heavily on the accuracy of the 'satellite_control_systems', 'authorized_ips', and 'firmware_paths' lists.
+// Legitimate remote administration or automated update processes that are not in the 'authorized_ips' list could cause false positives.
+// Establish a baseline of normal update procedures and add any legitimate source IPs or processes to an exclusion list.

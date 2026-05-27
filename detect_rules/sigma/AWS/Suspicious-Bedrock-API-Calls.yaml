@@ -1,0 +1,35 @@
+title: AWS Bedrock API Call from Long-Lived Access Key
+id: 19865f34-feaa-4bc3-9a87-df7f33ea7bff
+status: experimental
+description: Detects when a long-lived AWS access key (AKIA) is used to make Bedrock API calls that are typically associated with the AWS Management Console. This can be an indicator of LLM hijacking, where an attacker with a compromised key attempts to enable or configure models for abuse.
+references:
+  - https://permiso.io/blog/exploiting-hosted-models
+author: RW
+date: 2025-08-19
+tags:
+  - attack.t1078.004
+  - attack.initial_access
+  - attack.defense_evasion
+  - cloud
+  - aws
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+        # Filter for AWS Bedrock events
+    eventSource: 'bedrock.amazonaws.com'
+        # Focus on long-lived access keys, not temporary credentials from roles
+    userIdentity.type: 'IAMUser'
+    userIdentity.accessKeyId: 'AKIA*'
+        # These API calls are typically made via the web console, not programmatically with static keys
+    eventName:
+      - 'GetFoundationModelAvailability'
+      - 'PutUseCaseForModelAccess'
+      - 'GetUseCaseForModelAccess'
+      - 'CreateFoundationModelAgreement'
+      - 'PutFoundationModelEntitlement'
+  condition: selection
+falsepositives:
+  - Legitimate administrative scripts or third-party tools might use these APIs, although it is uncommon. Tuning may be required to exclude known-good automation user ARNs or source IP addresses.
+level: medium

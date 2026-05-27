@@ -1,0 +1,26 @@
+title: AWS S3 Bucket Policy Modified or Deleted
+id: e6da61b1-29d3-456b-8be3-d02073165768
+status: experimental
+description: >-
+  Detects when an Amazon S3 bucket policy is modified or deleted. Attackers may alter S3 bucket policies to weaken security controls, such as removing encryption enforcement or granting public access, as a precursor to data theft or ransomware attacks.
+references:
+  - https://rhinosecuritylabs.com/aws/s3-ransomware-part-2-prevention-and-defense/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.defense_evasion
+  - attack.t1562
+  - attack.impact
+logsource:
+  product: aws
+  service: s3
+detection:
+  selection:
+    eventName:
+      - 'PutBucketPolicy' # Event for creating or modifying a bucket policy
+      - 'DeleteBucketPolicy' # Event for deleting a bucket policy
+  condition: selection
+falsepositives:
+  - Legitimate administrative changes to S3 bucket policies by authorized personnel.
+  - Automated infrastructure-as-code (IaC) deployments (e.g., Terraform, CloudFormation) may frequently modify bucket policies. It is recommended to filter out events originating from known service accounts or roles associated with these tools.
+level: medium

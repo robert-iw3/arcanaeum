@@ -1,0 +1,74 @@
+// title: Potential Forged Certificate Usage for Kerberos Authentication
+// description: |
+// Detects when an account, particularly a privileged one, authenticates using a certificate (PKINIT) for the first
+// time over a baseline period. This could indicate an attacker using a forged or stolen certificate for persistence
+// or privilege escalation, a technique known as DPERSIST1 and facilitated by tools like Certify 2.0's forge command.
+// author: RW
+// date: 2025-08-11
+// level: High
+// tags:
+//   - attack.persistence
+//   - attack.credential_access
+//   - attack.t1649
+
+// Set the lookback period for establishing a behavioral baseline.
+let baseline_days = 14d;
+// Set the recent time window to monitor for new behaviors.
+let recent_lookback = 1d;
+
+// Watchlist of high-privilege accounts. This is critical for tuning and should be customized.
+// Include members of Domain Admins, Enterprise Admins, etc.
+let privileged_accounts = dynamic([
+    "administrator", "krbtgt"
+]);
+
+// Step 1: Establish a baseline of accounts that normally use certificate-based authentication.
+let CertLogonUsers_Baseline =
+    SecurityEvent
+    | where TimeGenerated between (ago(baseline_days) .. ago(recent_lookback))
+    | where EventID == 4768 // A Kerberos authentication service (TGT) was requested.
+    | extend EventDataXml = parse_xml(EventData)
+    // PreAuthType 15 or 16 indicates PKINIT (certificate) was used for pre-authentication.
+    | where tostring(EventDataXml.EventData.Data[11]) in ("15", "16")
+    | extend TargetUserName = tostring(EventDataXml.EventData.Data[1])
+    | distinct TargetUserName;
+
+// Step 2: Identify recent certificate-based authentications.
+SecurityEvent
+| where TimeGenerated > ago(recent_lookback)
+| where EventID == 4768 // A Kerberos authentication service (TGT) was requested.
+| extend EventDataXml = parse_xml(EventData)
+| extend
+    TargetUserName = tostring(EventDataXml.EventData.Data[1]),
+    TargetDomainName = tostring(EventDataXml.EventData.Data[2]),
+    TargetSid = tostring(EventDataXml.EventData.Data[3]),
+    ClientIpAddress = tostring(EventDataXml.EventData.Data[18]),
+    PreAuthType = tostring(EventDataXml.EventData.Data[11])
+// Filter for certificate-based authentication events.
+| where PreAuthType in ("15", "16")
+// Step 3: Alert if the authenticating user has NOT been seen using a certificate in the baseline period.
+| where TargetUserName !in (CertLogonUsers_Baseline)
+// Potential for False Positives: This may alert on legitimate first-time certificate usage (e.g., new smart card issuance).
+// Focusing on privileged accounts or accounts that should not be using certificates for interactive logon helps reduce noise.
+| where TargetUserName in (privileged_accounts) or TargetUserName endswith "$" // Include computer accounts as they can also be targeted.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    ClientIpAddresses = make_set(ClientIpAddress)
+    by
+    TargetUserName,
+    TargetDomainName,
+    TargetSid,
+    LogonServer = Computer
+| extend
+    AccountName = TargetUserName,
+    AccountDomain = TargetDomainName,
+    AccountSid = TargetSid
+| project-reorder
+    StartTime,
+    EndTime,
+    AccountName,
+    AccountDomain,
+    AccountSid,
+    LogonServer,
+    ClientIpAddresses

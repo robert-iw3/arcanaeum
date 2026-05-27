@@ -1,0 +1,37 @@
+let timeframe = 1h;
+// Define the list of authorized Ground Station IP addresses and administrative networks.
+// This list is critical for reducing false positives and must be populated with the IPs of legitimate ground stations.
+let authorized_ips = datatable(ip_address:string) [
+    "203.0.113.10", // Placeholder for authorized Ground Station (GS) 1
+    "198.51.100.55", // Placeholder for authorized GS 2
+    "192.0.2.0/24"   // Placeholder for an authorized administrative network range
+];
+// Define the list of satellite control system IP addresses or hostnames.
+// These are the systems that receive telecommands (TCs) and communicate with the satellites.
+let satellite_control_systems = datatable(target_address:string) [
+    "198.18.0.1", // Placeholder for satellite control system 1
+    "sat-control.corp.net" // Placeholder for satellite control system 2
+];
+// Using CommonSecurityLog as a placeholder for network traffic logs.
+// This may need to be adjusted to match the specific log source in your environment (e.g., firewall logs, VPC flow logs).
+CommonSecurityLog
+| where TimeGenerated > ago(timeframe)
+// Filter for network traffic allowed to the satellite control systems.
+| where DestinationIP in (satellite_control_systems) or DestinationHost in (satellite_control_systems)
+// Ensure the traffic is from an external, public IP address.
+| where isnotempty(SourceIP) and not(ipv4_is_private(SourceIP))
+// Exclude traffic from known, authorized ground stations and administrative networks.
+| where SourceIP !in (authorized_ips)
+// Further filtering could be applied here if specific telecommand ports are known.
+// For example: | where DestinationPort in (30000, 30001)
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    TotalBytes = sum(ReceivedBytes),
+    DestinationPorts = make_set(DestinationPort),
+    Actions = make_set(DeviceAction)
+    by SourceIP, DestinationIP, DestinationHost, bin(TimeGenerated, 10m)
+// The results show external IP addresses communicating with satellite control systems that are not on the authorized list.
+// These could represent unauthorized attempts to send telecommands, as described in the "Space Odyssey" report.
+// FP Mitigation: The accuracy of this rule heavily depends on the completeness of the 'authorized_ips' list.
+// Regularly review and update this list with any new legitimate ground stations, partner networks, or administrative access points.

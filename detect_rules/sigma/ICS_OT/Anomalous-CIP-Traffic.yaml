@@ -1,0 +1,40 @@
+title: Anomalous CIP Service Requests Indicating Scanning
+status: experimental
+description: >-
+  Detects a high volume of Common Industrial Protocol (CIP) error responses originating from a single source.
+  This pattern can indicate reconnaissance or fuzzing activity, where an attacker attempts to enumerate valid
+  Class, Instance, and Attribute IDs on ICS devices by sending numerous requests, many of which fail.
+references:
+  - https://github.com/ICSVillage
+author: RW
+date: 2025-08-18
+tags:
+  - attack.reconnaissance
+  - attack.t1595
+  - ics
+  - cip
+logsource:
+  category: network_traffic
+  service: cip
+detection:
+  selection:
+    # These status codes indicate that the client requested a service, class, instance, or attribute that does not exist or is not supported by the target device.
+    # A high volume of these errors suggests enumeration.
+    cip.status_code:
+      - '5'   # Hex: 0x05, Error: Path Destination Unknown
+      - '8'   # Hex: 0x08, Error: Service Not Supported
+      - '12'  # Hex: 0x0C, Error: Object Does Not Exist
+      - '28'  # Hex: 0x1C, Error: Attribute Not Supported
+  # The condition aggregates errors by the source IP. A threshold is used to distinguish between incidental errors and deliberate scanning.
+  condition: selection | count() > 20 by source.ip
+  timeframe: 5m
+fields:
+  - source.ip
+  - destination.ip
+  - cip.service_name
+  - cip.status_code
+falsepositives:
+  - Misconfigured asset inventory or network management tools that aggressively scan the network.
+  - Legitimate but poorly-behaved client applications that generate frequent errors.
+  - The threshold may need to be tuned for specific environments to reduce noise from legitimate but chatty applications.
+level: medium

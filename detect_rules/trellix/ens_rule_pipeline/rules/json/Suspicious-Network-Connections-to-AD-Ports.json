@@ -1,0 +1,10 @@
+{
+    "type": "firewall",
+    "name": "Detect Suspicious AD Replication Network Activity",
+    "application": "**\\**.exe",
+    "direction": "out",
+    "protocol": "TCP",
+    "port": "135,389,88",
+    "action": "Report",
+    "enabled": true
+}

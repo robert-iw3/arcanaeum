@@ -1,0 +1,62 @@
+[
+  {
+    "type": "expert",
+    "name": "Detect AUTHENTIC ANTICS COM Hijacking Persistence",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match REGISTRY {\n         Include OBJECT_NAME { -v \"HKEY_LOCAL_MACHINE\\\\Software\\\\Classes\\\\CLSID\\\\{1299CF18-C4F5-4B6A-BB0F-2299F0398E27}\\\\InprocServer32\" }\n         Include -access \"WRITE,CREATE\"\n         Include -value_data \"*Microsoft.Identity64.dll*\"\n         Exclude -value_data \"*npmproxy.dll*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects writes to the specific CLSID\\InprocServer32 key redirecting to malicious Microsoft.Identity64.dll — core persistence mechanism of AUTHENTIC ANTICS (APT28/GRU malware, NCSC 2025). Excludes legitimate npmproxy.dll. Highly specific IOC; very low FP rate; tune only for confirmed false positives."
+  },
+  {
+    "type": "firewall",
+    "name": "Detect AUTHENTIC ANTICS Outlook Forced Authentication",
+    "application": "outlook.exe",
+    "direction": "out",
+    "protocol": "TCP",
+    "port": "443",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects outbound HTTPS from outlook.exe potentially to login.microsoftonline.com for forced credential prompts (AUTHENTIC ANTICS intercepts them). Malware mimics legitimate auth; no C2 used. Use Web Control for URL params (prompt=login, client_id); correlate with unexpected prompts or token abuse alerts."
+  },
+  {
+    "type": "expert",
+    "name": "Detect AUTHENTIC ANTICS Registry API Unhooking Proxy",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"outlook.exe\" }\n   }\n   Target {\n      Match MODULE {\n         Include OBJECT_NAME { -v \"ntdll.dll\" }\n         Include -access \"LOAD\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "Medium",
+    "enabled": true,
+    "description": "Proxy detection: outlook.exe loading ntdll.dll (AUTHENTIC ANTICS unhooks registry monitoring hooks in ntdll.dll to evade detection). Broad indicator; high FPs possible from normal Outlook behavior/add-ins. Correlate with other AUTHENTIC ANTICS IOCs; consider EDR for true unhooking detection."
+  },
+  {
+    "type": "expert",
+    "name": "Detect AUTHENTIC ANTICS Environmental Keying",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"outlook.exe\" }\n   }\n   Target {\n      Match REGISTRY {\n         Include OBJECT_NAME { -v \"HKEY_LOCAL_MACHINE\\\\Software\\\\Microsoft\\\\Cryptography\\\\MachineGuid\" }\n         Include -access \"READ\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "Medium",
+    "enabled": true,
+    "description": "Detects outlook.exe reading HKLM\\...\\MachineGuid — used by AUTHENTIC ANTICS dropper for environmental keying (only activates on targeted machines). May overlap with legitimate Outlook add-ins; correlate with COM hijack or fake prompts."
+  },
+  {
+    "type": "firewall",
+    "name": "Detect AUTHENTIC ANTICS Stealthy Email Exfiltration",
+    "application": "outlook.exe",
+    "direction": "out",
+    "protocol": "TCP",
+    "port": "443",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects outbound HTTPS from outlook.exe to outlook.office.com — used by AUTHENTIC ANTICS for hidden email exfiltration (victim's account sends data to attacker mailbox; SaveToSentItems: false). Blends with normal traffic. Use Web Control/proxy for path (/me/sendMail) and param detection; tune for heavy Outlook users."
+  },
+  {
+    "type": "expert",
+    "name": "Detect AUTHENTIC ANTICS Execution Frequency Control",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match REGISTRY {\n         Include OBJECT_NAME { -v \"HKEY_CURRENT_USER\\\\Software\\\\Microsoft\\\\Office\\\\16.0\\\\Outlook\\\\Logging\\\\Counter\" }\n         Include -access \"WRITE,CREATE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects writes to HKCU\\...\\Outlook\\Logging\\Counter — AUTHENTIC ANTICS uses this for execution frequency throttling (limits prompts/activity). Highly specific; low FP likelihood. Tune for third-party Outlook add-ins that modify logging counters."
+  }
+]

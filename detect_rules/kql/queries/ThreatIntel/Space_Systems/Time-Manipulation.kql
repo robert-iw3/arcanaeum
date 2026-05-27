@@ -1,0 +1,46 @@
+// Name: System Time Manipulation (SPARTA GNTM)
+// Author: RW
+// Date: 2025-08-15
+// Description: Aligned with the SPARTA GNTM (GNSS and Time Manipulation Threats) pattern, this rule detects processes
+// used to manually change the system time. Adversaries may manipulate system time to disrupt time-sensitive operations,
+// affect log timestamps for evasion, or bypass time-based security controls.
+// Tactic: Defense Evasion
+// Technique: T1562.001
+// False Positive Sensitivity: Medium
+
+let timeframe = 1h;
+DeviceProcessEvents
+| where Timestamp > ago(timeframe)
+| where
+    // Windows time change commands
+    (DeviceOSPlatform == "Windows" and
+        (
+            (ProcessVersionInfoOriginalFileName =~ "net.exe" and ProcessCommandLine has "time" and ProcessCommandLine has "/set") or
+            (FileName in~ ("powershell.exe", "pwsh.exe") and ProcessCommandLine contains "Set-Date") or
+            // w32tm can be noisy as it's used for legitimate time sync. Look for non-standard use.
+            (ProcessVersionInfoOriginalFileName =~ "w32tm.exe" and ProcessCommandLine has "/resync")
+        )
+    ) or
+    // Linux time change commands
+    (DeviceOSPlatform == "Linux" and
+        (
+            (FileName =~ "date" and ProcessCommandLine has_any ("-s", "--set")) or
+            (FileName =~ "timedatectl" and ProcessCommandLine has "set-time") or
+            (FileName =~ "hwclock" and ProcessCommandLine has_any ("--set", "--systohc")) or
+            // ntpdate can be used to sync to a malicious time server
+            (FileName =~ "ntpdate")
+        )
+    )
+// FP Mitigation: Legitimate time changes are often performed by high-privileged system accounts or specific services.
+// Consider filtering for interactive sessions or unusual parent processes.
+// Exclude known administrative scripts or tools if they generate noise in your environment.
+| where not (AccountName in~ ("SYSTEM", "LOCAL SERVICE") and InitiatingProcessFileName in~ ("svchost.exe", "services.exe", "chronyd", "ntpd"))
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    DeviceOSPlatform,
+    FileName,
+    ProcessCommandLine,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine

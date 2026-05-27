@@ -1,0 +1,45 @@
+rule AMSI_Bypass_Memory_Patching_Detection {
+  meta:
+    author = "RW"
+    description = "Detects potential AMSI bypass through memory patching by identifying VirtualProtect or NtProtectVirtualMemory calls on amsi.dll that set memory permissions to PAGE_EXECUTE_READWRITE (0x40)."
+    severity = "HIGH"
+
+  events:
+    $e.metadata.event_type = "API_CALL" // EDR events capturing API calls like VirtualProtect
+    $e.metadata.vendor_name = "Microsoft" // Assuming Windows API calls
+    // The specific API call function name.
+    $e.api.function_name in ("VirtualProtect", "NtProtectVirtualMemory")
+
+    // The target module is amsi.dll.
+    // UDM field for `target_module_path` is likely `target.process.file.full_path`
+    // or a similar field depending on how your EDR maps it to UDM.
+    $e.target.process.file.full_path = /.*\\amsi\.dll/ nocase
+
+    // Check for new memory protection set to PAGE_EXECUTE_READWRITE or 0x40.
+    // UDM field for `new_memory_protection` could be `extensions.api.memory_protection_flags` or similar.
+    // You may need to inspect your UDM logs for the exact field name and format of the flags.
+    ($e.extensions.api.memory_protection_flags = "PAGE_EXECUTE_READWRITE" or $e.extensions.api.memory_protection_flags = "0x40")
+
+    // FP Tuning: Exclude known legitimate processes or debuggers.
+    // Use a Chronicle Reference List named `amsi_bypass_whitelist` to store benign processes.
+    not $e.principal.process.file.full_path in %amsi_bypass_whitelist // Exclude by full process path
+    // or
+    // not $e.principal.process.parent_process.file.full_path in %amsi_bypass_parent_whitelist // Exclude by parent process path
+
+
+  outcome:
+    $firstTime = $e.metadata.event_timestamp.epoch_seconds // min(_time)
+    $lastTime = $e.metadata.event_timestamp.epoch_seconds // max(_time)
+    $host = $e.principal.hostname // dest
+    $user = $e.principal.user.userid // user
+    $parent_process = $e.principal.process.parent_process.file.full_path // parent_process_name
+    $process = $e.principal.process.file.full_path // process_name
+    $process_guid = $e.principal.process.product_object_id // process_guid
+    $target_module_path = $e.target.process.file.full_path // target_module_path
+    $new_memory_protection = $e.extensions.api.memory_protection_flags // new_memory_protection
+    $count = 1
+
+
+  condition:
+    $e
+}

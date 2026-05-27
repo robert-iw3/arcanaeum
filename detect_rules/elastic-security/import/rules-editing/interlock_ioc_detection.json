@@ -1,0 +1,22 @@
+{
+  "type": "detection-engine.rule",
+  "id": "interlock-ioc-detection",
+  "attributes": {
+    "risk_score": 90,
+    "enabled": true,
+    "name": "Interlock IOC and Persistence Detection",
+    "description": "Detects indicators of compromise (IOCs) and persistence mechanisms associated with the Interlock malware, including known file hashes, suspicious PowerShell execution, registry run keys, C2 communication, and scheduled task creation.",
+    "rule_id": "interlock_ioc_persistence_detection",
+    "index": [
+      "logs-endpoint.events.*",
+      "logs-network.*",
+      "logs-registry.*"
+    ],
+    "language": "kuery",
+    "query": "(process.hash.sha256:(\"2acaa9856ee29337c06cc2858fd71b860f53219504e6756faa3812019b5df5a6\" OR \"0b47e53f2ada0555588aa8a6a4491e14d7b2528c9a829ebb6f7e9463963cd0e4\") OR (process.name:\"powershell.exe\" AND (process.command_line:\"*irm *\" OR process.command_line:\"*iex *\" OR process.command_line:\"*Invoke-RestMethod*\" OR process.command_line:\"*Invoke-Expression*\" OR process.command_line:/\\*-w h*/ OR process.command_line:\"*-windowstyle hidden*\")) OR (registry.path:/\\*\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run*/ AND registry.value:(\"ChromeUpdater\" OR \"0neDrive\")) OR (destination.ip:(\"168.119.96.41\" OR \"95.217.22.175\") OR destination.domain:(\"cluders.org\" OR \"bronxy.cc\" OR /\\*trycloudflare.com*/)) OR (process.name:\"schtasks.exe\" AND process.command_line:/\\*\\/create*/ AND (process.command_line:/\\*\\/du 9999:59*/ OR (process.command_line:\"*BitLocker Encrypt All Drives*\" AND process.command_line:/\\*\\\\OneDriveCloud\\\\taskhostw.exe*/))))",
+    "interval": "10m",
+    "severity": "critical",
+    "type": "query",
+    "version": "1"
+  }
+}

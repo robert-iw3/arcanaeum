@@ -1,0 +1,34 @@
+// Name: New ADFS Trust Creation
+// Author: RW
+// Date: 2025-08-20
+// Mitre TTPs: T1098
+// Description: Detects the creation of a new ADFS trust (Claims Provider or Federation Service Proxy).
+// This is a high-privilege action that could indicate an attacker establishing persistence or federating
+// with a malicious identity provider to enable attacks like Golden SAML.
+
+// --- Tuning Section ---
+// Add the usernames of administrators who are authorized to create ADFS trusts to reduce false positives from legitimate administrative activity.
+let authorized_admins = dynamic([]);
+// --- End Tuning Section ---
+
+WindowsEvent
+// Filter for ADFS auditing events. This log source must be ingested into your workspace.
+| where Provider == "ADFS Auditing"
+// Event ID 307: Federation service proxy trust created.
+// Event ID 510: Claims provider trust created.
+| where EventID in (307, 510)
+// Parse the XML event data to extract details.
+| extend EventDataXml = todynamic(EventData)
+| extend TrustName = tostring(EventDataXml.EventData.Data[0]['#text'])
+| extend TrustIdentifier = tostring(EventDataXml.EventData.Data[1]['#text'])
+| extend Account = tostring(EventDataXml.UserData.EventXML.SubjectUserName)
+// Exclude activity from known authorized administrators. This is a key step to reduce noise.
+| where not(Account in~ (authorized_admins))
+| project
+    TimeGenerated,
+    Computer,
+    EventID,
+    RenderedDescription,
+    Account,
+    TrustName,
+    TrustIdentifier

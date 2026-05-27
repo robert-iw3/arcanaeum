@@ -1,0 +1,62 @@
+{
+  "rule_id": "adcs_san_mismatch_detection",
+  "name": "AD CS SAN Mismatch Detection",
+  "description": "Detects Active Directory certificate enrollment attempts where the Subject Alternative Name (SAN) UPN does not match the user making the request. This can indicate a privilege escalation attempt via Active Directory Certificate Services (AD CS) abuse.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "from winlogbeat-* | where winlog.channel = 'Security' and winlog.event_id = '4886' and winlog.event_data.CertificateAttributes RLIKE '.*san:.*' | eval san_upn = REGEXP_EXTRACT(winlog.event_data.CertificateAttributes, 'san:.*?upn=([^&\\s]+)'), requester_principal = LOWER(REPLACE(winlog.event_data.RequesterName, '^.*\\\\', '')), requester_principal = SPLIT(requester_principal, '@')[0], san_principal = LOWER(SPLIT(san_upn, '@')[0]) | where san_upn IS NOT NULL and requester_principal != san_principal | keep host.name, winlog.event_data.RequesterName, san_upn, winlog.event_data.CertificateTemplate, requester_principal, san_principal",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0004",
+        "name": "Privilege Escalation",
+        "reference": "https://attack.mitre.org/tactics/TA0004/"
+      },
+      "technique": [
+        {
+          "id": "T1649",
+          "name": "Credentials in Registry",
+          "reference": "https://attack.mitre.org/techniques/T1649/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0006",
+        "name": "Credential Access",
+        "reference": "https://attack.mitre.org/tactics/TA0006/"
+      },
+      "technique": [
+        {
+          "id": "T1003",
+          "name": "OS Credential Dumping",
+          "reference": "https://attack.mitre.org/techniques/T1003/"
+        }
+      ]
+    }
+  ],
+  "interval": "5m",
+  "from": "now-5m",
+  "max_signals": 100,
+  "risk_score": 90,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://www.crowdstrike.com/wp-content/uploads/2023/12/investigating-active-directory-certificate-abuse.pdf",
+    "https://www.blackhillsinfosec.com/abusing-active-directory-certificate-services-part-one/"
+  ],
+  "tags": [
+    "Active Directory",
+    "AD CS",
+    "Privilege Escalation"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "requester_principal, san_principal, host.name"
+}

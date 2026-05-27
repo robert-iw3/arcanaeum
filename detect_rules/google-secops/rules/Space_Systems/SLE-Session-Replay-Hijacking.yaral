@@ -1,0 +1,40 @@
+rule sle_session_hijacking_or_replay_detected {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects when a single Space Link Extension (SLE) provider asset receives successful BIND requests from multiple source IPs within a short time frame. This pattern can indicate a session hijacking attack, where an adversary uses captured credentials to establish a new session after forcing the legitimate user to disconnect, as described in the provided intelligence."
+    tactic = "TA0001, TA0005" // Initial Access, Defense Evasion
+    technique = "T1190, T1557" // Exploit Public-Facing Application, Adversary-in-the-Middle
+    false_positives = "This activity could be legitimate in environments with client-side load balancing, high-availability failover configurations, or where multiple operators connect from different workstations. Investigation should correlate this activity with other alerts, such as authentication failures from an expected source IP. Tune by adjusting the time window or allowlisting known IP ranges for specific providers."
+
+  events:
+    // This rule requires a data source with Deep Packet Inspection (DPI) capabilities.
+    $bind.metadata.event_type = "NETWORK_CONNECTION"
+
+    // The 'bf64' hex sequence is the ASN.1 signature for a CLTU-BIND message.
+    re.regex($bind.network.sent_bytes, /\xbf\x64/)
+
+    // To increase fidelity, filter for traffic targeting critical SLE Providers (e.g., Ground Stations).
+    // Example: $bind.target.ip in %sle_providers
+
+    // Define placeholder variables for correlation.
+    $bind.principal.ip = $src_ip
+    $bind.target.ip = $dest_ip
+
+  match:
+    // Group events by the destination SLE provider over a 5 minute window.
+    $dest_ip over 5m
+
+  outcome:
+    // Risk score is set to medium, reflecting the potential for false positives in some environments.
+    $risk_score = 50
+    $sle_provider_ip = $dest_ip
+    $source_ips = array_distinct($bind.principal.ip)
+    $distinct_source_ip_count = count_distinct($bind.principal.ip)
+    $target_ports = array_distinct($bind.target.port)
+    $provider_hostname = array_distinct($bind.target.hostname)
+
+  condition:
+    // The core logic: alert if more than one source IP successfully binds to the same provider in the time window.
+    #src_ip > 1
+}

@@ -1,0 +1,53 @@
+// Name: PowerShell Downgraded to Version 2 for AMSI Bypass
+// Author: RW
+// Date: 2025-07-31
+// Description: Detects PowerShell being executed in version 2.0 mode. Adversaries may use this technique to bypass the Antimalware Scan Interface (AMSI), as it is not supported in PowerShell v2.
+// Tags: TTPs, Defense Evasion
+
+// This query combines two methods to detect PowerShell v2 execution.
+// 1. Process command-line analysis for explicit version downgrade flags.
+// 2. PowerShell engine state change events indicating a v2 engine start.
+let ProcessEvents =
+    DeviceProcessEvents
+    // Look for PowerShell processes.
+    | where FileName in~ ("powershell.exe", "pwsh.exe")
+    // Check for command-line arguments that specify version 2.
+    | where ProcessCommandLine has_any ("-version 2", "-v 2")
+    | project
+        Timestamp,
+        DeviceName,
+        AccountName,
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        FileName,
+        ProcessCommandLine;
+
+let PSEvents =
+    DeviceEvents
+    // Filter for PowerShell engine state change events (corresponds to Event ID 400).
+    | where ActionType == "PowerShellEngineStateChange"
+    // Extract the engine version from the AdditionalFields blob.
+    | extend EngineVersion = todouble(extract("EngineVersion\":\"(.*?)\"", 1, AdditionalFields, typeof(string)))
+    // Check if the engine version is 2.0.
+    // FP Tuning: Some legacy applications or administrative scripts may legitimately use PowerShell v2.
+    // Consider excluding known benign parent processes, users, or command lines if necessary.
+    // For example: | where InitiatingProcessFileName !in~ ("legacyscript.exe")
+    | where EngineVersion == 2.0
+    | project
+        Timestamp,
+        DeviceName,
+        AccountName = InitiatingProcessAccountName,
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        FileName,
+        ProcessCommandLine = "PowerShell Engine Started in Version 2.0 Mode";
+
+union ProcessEvents, PSEvents
+| project-reorder
+    Timestamp,
+    DeviceName,
+    AccountName,
+    FileName,
+    ProcessCommandLine,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine

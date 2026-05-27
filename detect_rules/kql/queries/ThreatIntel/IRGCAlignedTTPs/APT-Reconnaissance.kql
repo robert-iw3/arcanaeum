@@ -1,0 +1,78 @@
+// Name: APT Reconnaissance via Phishing or VPN Exploitation
+// Author: RW
+// Date: 2025-08-08
+// Description: Detects potential reconnaissance and initial execution activity associated with Iranian APTs like APT35 and APT42.
+// This rule identifies two primary TTPs:
+// 1. Potential exploitation of public-facing applications (e.g., VPNs) spawning suspicious child processes (T1190).
+// 2. Suspicious child processes spawned by common phishing vectors like Microsoft Office, browsers, or PDF readers (T1566).
+// False Positive Sensitivity: Medium
+
+// Define suspicious child processes often used for reconnaissance or creating a foothold.
+let suspicious_child_processes = dynamic([
+    "cmd.exe",
+    "powershell.exe",
+    "pwsh.exe",
+    "wscript.exe",
+    "cscript.exe",
+    "whoami.exe",
+    "hostname.exe",
+    "ipconfig.exe",
+    "net.exe",
+    "netstat.exe",
+    "quser.exe",
+    "qwinsta.exe",
+    "nltest.exe",
+    "certutil.exe",
+    "rundll32.exe",
+    "regsvr32.exe"
+]);
+
+// Define parent processes that are common vectors for phishing attacks.
+let phishing_parent_processes = dynamic([
+    "outlook.exe",
+    "winword.exe",
+    "excel.exe",
+    "powerpnt.exe",
+    "acrord32.exe",
+    "chrome.exe",
+    "msedge.exe",
+    "firefox.exe"
+]);
+
+// Define parent processes that are common public-facing applications.
+// FP Tuning: This list should be customized to match the specific VPN, proxy, and web server software used in your environment.
+let public_facing_parent_processes = dynamic([
+    "sslvpn.exe",
+    "openvpn.exe",
+    "PulseSecure.exe",
+    "FortiSSLVPN.exe",
+    "GlobalProtect.exe",
+    "w3wp.exe",
+    "httpd.exe"
+]);
+
+// Find suspicious process execution chains.
+DeviceProcessEvents
+| where InitiatingProcessFileName in~ (phishing_parent_processes) or InitiatingProcessFileName in~ (public_facing_parent_processes)
+| where FileName in~ (suspicious_child_processes)
+// FP Tuning: The following filter helps reduce noise by focusing on PowerShell execution that involves obfuscation or download commands, which are common in phishing attacks.
+// Remove or modify this line to adjust sensitivity.
+| where not (FileName in~ ("powershell.exe", "pwsh.exe") and not ProcessCommandLine has_any("-enc", "download", "iex", "frombase64"))
+| extend
+    DetectionPattern = case(
+        InitiatingProcessFileName in~ (public_facing_parent_processes), "VPN/Web App Exploitation (T1190)",
+        InitiatingProcessFileName in~ (phishing_parent_processes), "Phishing Execution (T1566)",
+        "Unknown"
+    )
+| project
+    TimeGenerated,
+    DeviceName,
+    DetectionPattern,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    FileName,
+    ProcessCommandLine,
+    AccountName,
+    AccountDomain,
+    ProcessId,
+    InitiatingProcessId

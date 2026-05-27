@@ -1,0 +1,56 @@
+// Name: Unusual Child Process of svchost or taskeng
+// Author: RW
+// Date: 2025-08-06
+// Tactic: Persistence, Execution
+// Technique: T1543, T1053
+// MITRE: https://attack.mitre.org/techniques/T1543/, https://attack.mitre.org/techniques/T1053/
+// Description:
+// This rule detects potentially malicious child processes spawned by the Windows Service Host (svchost.exe) or the Task Scheduler Engine (taskeng.exe).
+// Adversaries abuse services (T1543) and scheduled tasks (T1053) to establish persistence and execute code.
+// This rule identifies when these parent processes spawn executables from unusual or user-writable locations, a behavior indicative of malware attempting to hide.
+
+// Define the parent processes associated with services and scheduled tasks.
+let parent_processes = dynamic(["svchost.exe", "taskeng.exe"]);
+
+// Define suspicious paths where legitimate service/task executables are not typically located.
+let suspicious_paths = dynamic([
+    @'C:\Users\',
+    @'C:\ProgramData\',
+    @'C:\Windows\Temp\',
+    @'C:\PerfLogs\',
+    @'C:\$Recycle.Bin\'
+]);
+
+// Allowlist for common, expected child processes to reduce noise. This list may need to be tuned for your environment.
+let common_children_allowlist = dynamic([
+    "conhost.exe",
+    "WerFault.exe",
+    "dllhost.exe",
+    "msiexec.exe",
+    "TiWorker.exe",
+    "TrustedInstaller.exe",
+    "wermgr.exe",
+    "rtcsrv.exe",
+    "audiodg.exe"
+]);
+
+DeviceProcessEvents
+// Filter for process creation events where the parent is svchost.exe or taskeng.exe.
+| where ParentProcessFileName in (parent_processes)
+// Exclude common and expected child processes.
+| where FileName !in (common_children_allowlist)
+// Detect child processes running from suspicious, non-standard directories.
+| where FolderPath has_any (suspicious_paths)
+// False Positive Tuning:
+// Some legitimate software installers or updaters may run from C:\ProgramData.
+// If you see false positives, you can exclude them by the process name or command line.
+// For example: | where not (FileName =~ "legit_updater.exe" and ParentProcessCommandLine contains "UpdateService")
+| project
+    Timestamp,
+    DeviceName,
+    AccountName = InitiatingProcessAccountName,
+    ParentProcess = ParentProcessFileName,
+    ParentProcessCommandLine,
+    ChildProcess = FileName,
+    ChildProcessCommandLine = CommandLine,
+    ChildProcessPath = FolderPath

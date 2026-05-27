@@ -1,0 +1,49 @@
+// Name: Kubernetes - Overly Permissive ClusterRoleBinding
+// Author: RW
+// Date: 2025-08-11
+// Description: Detects the creation or update of a ClusterRoleBinding that grants a highly privileged role, such as 'cluster-admin',
+//              to a broad system group like 'system:unauthenticated' or 'system:authenticated'. This configuration is a significant
+//              security risk and can be exploited for privilege escalation across the entire cluster.
+// False Positive Sensitivity: Medium. Binding 'cluster-admin' to 'system:unauthenticated' is a critical finding.
+// Binding to 'system:authenticated' is also highly risky but may be intentional in some non-production environments.
+// Consider tuning by excluding 'system:authenticated' if it proves to be noisy.
+// MITRE TTPs: T1078 (Valid Accounts), T1068 (Exploitation for Privilege Escalation)
+
+let PrivilegedRoles = dynamic([
+    "cluster-admin" // The highest privilege level in Kubernetes.
+]);
+
+let BroadSystemGroups = dynamic([
+    "system:unauthenticated", // Grants access to any unauthenticated user.
+    "system:authenticated"    // Grants access to any authenticated user.
+]);
+
+KubeAudit
+// Focus on ClusterRoleBinding creation or modification events.
+| where ObjectRef.resource == "clusterrolebindings" and Verb in ("create", "update")
+// Filter out automated actions by system accounts to reduce noise.
+| where not(User.username has_prefix "system:serviceaccount:")
+| extend request = todynamic(RequestObject)
+// Extract key details from the request payload.
+| extend RoleName = tostring(request.roleRef.name)
+| extend Subjects = request.subjects
+// Check if a highly privileged role is being assigned.
+| where RoleName in (PrivilegedRoles)
+// Expand the list of subjects (users/groups) the role is being bound to.
+| mvexpand Subjects
+| extend SubjectName = tostring(Subjects.name)
+| extend SubjectKind = tostring(Subjects.kind)
+// Identify bindings to broad, high-risk groups.
+| where SubjectKind == "Group" and SubjectName in (BroadSystemGroups)
+| project
+    TimeGenerated,
+    AuditID,
+    OperationName,
+    Category,
+    ActorUsername = User.username,
+    ActorGroups = User.groups,
+    SourceIP,
+    PrivilegedRoleAssigned = RoleName,
+    AssignedToGroup = SubjectName,
+    AssignedToKind = SubjectKind,
+    RequestObject

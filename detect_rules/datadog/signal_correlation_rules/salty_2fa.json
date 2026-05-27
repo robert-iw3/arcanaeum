@@ -1,0 +1,53 @@
+{
+  "name": "Salty 2FA Phishing Kit Detection",
+  "type": "signal_correlation",
+  "message": "Salty 2FA Phishing: {{distinct_count}} type(s) from src {{src}} to dest {{dest}}",
+  "is_enabled": true,
+  "options": {
+    "detection_method": "signal_correlation",
+    "correlation_rule": {
+      "correlated_by_fields": [
+        "src",
+        "dest"
+      ],
+      "distinct_fields": [
+        "case_id"
+      ],
+      "correlation_expression": "distinct_count >= 1",
+      "correlation_time_frame": 3600
+    },
+    "evaluation_window": 3600,
+    "keep_alive": 3600,
+    "max_signal_duration": 3600
+  },
+  "queries": [
+    {
+      "name": "salty_2fa_exfiltration",
+      "query": "@http.method:POST AND @network.destination.domain:*.ru AND @url.path:*/[0-9]{5,6}.php AND @http.request.body:(*request=%* AND *session=*)",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "salty_2fa_landing_page",
+      "query": "@network.destination.domain:*.[a-z]{2}.com AND ((@http.response.body:*challenges.cloudflare.com/turnstile/* AND @http.response.body:*Microsoft* AND @http.response.body:*Sign\\ in*) OR (@http.response.body:*new\\ Date()* AND @http.response.body:*debugger*))",
+      "data_source": "logs",
+      "aggregation": "count"
+    }
+  ],
+  "cases": [
+    {
+      "name": "Salty 2FA Exfiltration",
+      "status": "high",
+      "condition": "salty_2fa_exfiltration >= 1"
+    },
+    {
+      "name": "Salty 2FA Landing Page",
+      "status": "medium",
+      "condition": "salty_2fa_landing_page >= 1"
+    }
+  ],
+  "tags": [
+    "rule_id:salty_2fa_correlation",
+    "severity:high"
+  ]
+}

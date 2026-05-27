@@ -1,0 +1,26 @@
+// Name: Module Loaded from an Abnormally Long Path
+// Author: RW
+// Date: 2025-08-23
+// Description: This detection identifies modules (DLLs) being loaded from a file path that exceeds the standard Windows MAX_PATH limit
+// of 260 characters, as logged by Sysmon Event ID 7 (or equivalent). Attackers may use specially crafted long file paths to evade security
+// controls and analysis tools. While logging mechanisms might strip the "\\?\" prefix used to create such paths, the resulting path length
+// remains abnormally long and is a strong indicator of this evasion technique.
+// MITRE ATT&CK: T1073
+// False Positive Sensitivity: Medium
+
+DeviceImageLoadEvents
+// The core of the detection is checking for loaded module paths that are longer than 260 characters.
+| where isnotempty(FileName) and strlen(FileName) > 260
+// FP Tuning: Legitimate developer tools (e.g., npm, maven) or some installers can create very long paths.
+// If false positives occur, consider excluding known developer processes (e.g., devenv.exe, node.exe) or specific trusted paths.
+// For example: | where InitiatingProcessFileName !~ "node.exe"
+| project
+    Timestamp,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    FileName, // This is the full path to the loaded module (DLL)
+    SHA1,
+    ReportId,
+    InitiatingProcessAccountName,
+    InitiatingProcessFolderPath

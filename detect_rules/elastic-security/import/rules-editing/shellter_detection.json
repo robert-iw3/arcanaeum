@@ -1,0 +1,18 @@
+{
+  "type": "detection-engine.rule",
+  "id": "shellter-detection",
+  "attributes": {
+    "risk_score": 90,
+    "enabled": true,
+    "name": "SHELLTER Malware Detection",
+    "description": "Detects indicators of compromise (IOCs) and tactics, techniques, and procedures (TTPs) associated with SHELLTER malware, including known file hashes, C2 network connections, NTDLL unhooking, and suspicious module preloading.",
+    "rule_id": "shellter_malware_detection",
+    "index": ["logs-endpoint.events.*"],
+    "language": "kuery",
+    "query": "(event.category:\"process\" AND event.action:\"start\" AND process.hash.sha256:(\"c865f24e4b9b0855b8b559fc3769239b0aa6e8d680406616a13d9a36fbbc2d30\" OR \"7d0c9855167e7c19a67f800892e974c4387e1004b40efb25a2a1d25a99b03a10\" OR \"b3e93bfef12678294d9944e61d90ca4aa03b7e3dae5e909c3b2166f122a14dad\" OR \"da59d67ced88beae618b9d6c805f40385d0301d412b787e9f9c9559d00d2c880\" OR \"70ec2e65f77a940fd0b2b5c0a78a83646dec175836552622ad17fb974f1\" OR \"263ab8c9ec821ae573979ef2d5ad98cda5009a39e17398cd31b0fad98d862892\")) OR (event.category:\"network\" AND (destination.ip:(\"185.156.72.80\" OR \"94.141.12.182\") OR destination.domain:\"eaglekl.digital\")) OR (winlog.event_id:10 AND winlog.event_data.TargetImage:/\\*\\\\ntdll.dll/) OR (event.category:\"library\" AND event.action:\"load\" AND dll.name:(\"wininet.dll\" OR \"crypt32.dll\" OR \"advapi32.dll\" OR \"urlmon.dll\"))",
+    "interval": "15m",
+    "severity": "critical",
+    "type": "query",
+    "version": "1"
+  }
+}

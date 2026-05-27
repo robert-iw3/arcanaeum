@@ -1,0 +1,72 @@
+// Name: IT/OT Network Segmentation Bypass
+// Author: RW
+// Date: 2025-08-20
+// Description: Detects network traffic that crosses the defined boundary between IT and OT network segments and is not explicitly allowed.
+// This could indicate lateral movement from a compromised IT asset into the critical OT environment, or command-and-control/exfiltration from OT to IT.
+// This rule is highly dependent on the accurate definition of IT/OT subnets and an allowlist of authorized cross-segment communications.
+// False Positive Sensitivity: Medium.
+// This rule will generate false positives if the IT/OT subnets are not correctly defined or if legitimate communication channels (e.g., from a data historian, jump box, or engineering workstation) are not added to the allowlist.
+// Tactics: Lateral Movement, Command and Control
+// Techniques: T1210
+
+// --- Tuning Section ---
+let timeFrame = 1h;
+
+// Tuning: Define the IP address ranges (CIDR notation) for your corporate IT network.
+let IT_Subnets = dynamic([
+    "192.168.0.0/16",
+    "10.0.0.0/8"
+]);
+
+// Tuning: Define the IP address ranges (CIDR notation) for your Operational Technology (OT/ICS) network.
+let OT_Subnets = dynamic([
+    "172.16.0.0/12"
+]);
+
+// Tuning: Define legitimate, expected connections between IT and OT segments to prevent false positives.
+// Add specific Source IPs, Destination IPs, and Destination Ports that are authorized.
+let Allowed_IT_OT_Connections = datatable(
+    AllowedSourceIp:string,
+    AllowedDestinationIp:string,
+    AllowedDestinationPort:int
+)[
+    // Example: IT Historian Server pulling data from an OT PLC via Modbus
+    "192.168.1.50", "172.16.10.100", 502,
+    // Example: OT Jump Box accessing a file server in the IT network via SMB
+    "172.16.20.5", "192.168.1.200", 445,
+    // Example: Engineering Workstation in IT pushing a configuration to an HMI in OT
+    "192.168.5.25", "172.16.30.15", 44818
+];
+// --- End of Tuning Section ---
+
+DeviceNetworkEvents
+| where TimeGenerated > ago(timeFrame)
+// Identify traffic crossing the IT/OT boundary in either direction.
+| where
+    (ipv4_is_in_range(RemoteIP, IT_Subnets) and ipv4_is_in_range(LocalIP, OT_Subnets)) or
+    (ipv4_is_in_range(RemoteIP, OT_Subnets) and ipv4_is_in_range(LocalIP, IT_Subnets))
+// Use a left anti-join to filter out known, legitimate connections defined in the allowlist.
+| join kind=leftanti (
+    Allowed_IT_OT_Connections
+) on
+    $left.LocalIP == $right.AllowedSourceIp and
+    $left.RemoteIP == $right.AllowedDestinationIp and
+    $left.RemotePort == $right.AllowedDestinationPort
+// Summarize the unauthorized traffic to create a single, actionable alert per connection pair.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    ConnectionCount = count(),
+    take_any(DeviceName, InitiatingProcessFileName, InitiatingProcessCommandLine)
+    by SourceIP = LocalIP, DestinationIP = RemoteIP, DestinationPort = RemotePort, AccountName, AccountUpn
+| extend
+    // Determine the direction of the traffic for easier analysis.
+    TrafficDirection = iif(ipv4_is_in_range(SourceIP, IT_Subnets), "IT_to_OT", "OT_to_IT"),
+    // Map entities for investigation in Microsoft Sentinel.
+    HostName = DeviceName,
+    AccountUPN = AccountUpn
+| project-reorder StartTime, EndTime, TrafficDirection, HostName, SourceIP, DestinationIP, DestinationPort, ConnectionCount, InitiatingProcessFileName, InitiatingProcessCommandLine, AccountName
+| extend
+    HostCustomEntity = HostName,
+    AccountCustomEntity = AccountUPN,
+    IPCustomEntity = strcat(SourceIP, ",", DestinationIP)

@@ -1,0 +1,79 @@
+// This rule detects suspicious token impersonation activity by correlating LSASS process access with a subsequent logon event from the same process under a different user context.
+// This pattern is indicative of an attacker stealing a token and then using it to escalate privileges or move laterally.
+// Author: RW
+// MITRE ATT&CK Tactics: Privilege Escalation, Defense Evasion, Lateral Movement
+// MITRE ATT&CK Techniques: T1134.001
+
+let timeframe = 1h;
+
+// Define a list of common processes used for injection by attackers.
+// FP Tuning: This list can be tuned to reduce false positives based on your environment.
+let injection_targets = dynamic([
+    "rundll32.exe",
+    "regsvr32.exe",
+    "svchost.exe",
+    "dllhost.exe",
+    "wermgr.exe",
+    "werfault.exe",
+    "explorer.exe",
+    "powershell.exe",
+    "msiexec.exe"
+]);
+// Find processes, often used as injection targets, that accessed the LSASS process.
+let lsass_access_events =
+    DeviceEvents
+    | where Timestamp > ago(timeframe)
+    // Look for specific events indicating access to the LSASS process memory, a prerequisite for token theft.
+    | where ActionType has "LsassProcessAccess" or (ActionType == "OpenProcess" and TargetProcessFileName =~ "lsass.exe")
+    | where InitiatingProcessFileName in (injection_targets)
+    // FP Tuning: Exclude known legitimate processes that may access LSASS.
+    // For example, WMI Provider Host is a common source of benign activity.
+    | where not(InitiatingProcessFolderPath has_any (@"C:\Windows\System32\wbem\", @"C:\Windows\SysWOW64\wbem\"))
+    | project
+        LsassAccessTime = Timestamp,
+        DeviceId,
+        DeviceName,
+        InitiatingProcessId,
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        InitiatingProcessAccountName = AccountName;
+// Find subsequent logon events from the same process, which may indicate token impersonation.
+let logon_events =
+    DeviceLogonEvents
+    | where Timestamp > ago(timeframe)
+    // A new logon session is created when impersonating a token. LogonType 'NewCredentials' is a strong indicator.
+    | where LogonType == "NewCredentials"
+    | where isnotempty(InitiatingProcessId)
+    | project
+        LogonTime = Timestamp,
+        DeviceId,
+        InitiatingProcessId,
+        ImpersonatedAccountName = AccountName,
+        ImpersonatedDomainName = AccountDomain,
+        LogonType;
+// Join the LSASS access events with the logon events to find the full sequence of activity.
+lsass_access_events
+| join kind=inner (
+    logon_events
+) on DeviceId, InitiatingProcessId
+// Ensure the logon happened *after* the LSASS access within a short timeframe (e.g., 5 minutes).
+| where LogonTime > LsassAccessTime and (LogonTime - LsassAccessTime) < 5m
+// The core of the impersonation logic: the new logon is for a different user than the original process context.
+| where isnotempty(ImpersonatedAccountName) and isnotempty(InitiatingProcessAccountName) and ImpersonatedAccountName !~ InitiatingProcessAccountName
+// FP Tuning: To increase fidelity, you could filter for impersonation of high-privilege accounts.
+// | where ImpersonatedAccountName =~ "Administrator" or ImpersonatedAccountName endswith "$"
+| project
+    Timestamp = LsassAccessTime,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessId,
+    InitiatingProcessCommandLine,
+    InitiatingProcessAccountName,
+    ImpersonatedAccountName,
+    ImpersonatedDomainName,
+    LogonTime,
+    LogonType,
+    DeviceId
+| extend
+    HostCustomEntity = DeviceName,
+    AccountCustomEntity = ImpersonatedAccountName

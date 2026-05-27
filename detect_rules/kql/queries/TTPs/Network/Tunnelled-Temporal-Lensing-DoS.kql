@@ -1,0 +1,45 @@
+//    Tunnelled-Temporal Lensing (TuTL) DoS Attack
+//    The Tunnelled-Temporal Lensing (TuTL) DoS attack is a new technique that concentrates traffic in time, leading to a pulsing DoS effect.
+//    Identifying this pattern is important to protect against sophisticated DoS attacks.
+//    Tactics = "Denial of Service"
+//    Techniques = "Network Denial of Service"
+//    Author = "RW"
+//    Date = "2025-08-14"
+
+let timeframe = 2h;
+let bin_size = 1m;
+// This score determines the sensitivity of the anomaly detection. Higher values (e.g., 2.0, 2.5) reduce false positives but may miss more subtle attacks.
+let anomaly_score_threshold = 1.5;
+// A TuTL attack involves traffic from multiple source chains. This threshold sets the minimum number of distinct source IPs required to trigger an alert.
+// This is a key parameter to tune to avoid false positives from legitimate high-volume, single-source traffic.
+let min_distinct_sources = 20;
+// This sets a minimum traffic volume in bytes for the spike to be considered significant.
+let min_spike_bytes = 500000000; // 500 MB
+
+// This query uses VMConnection data. If you use a different network logging solution (e.g., firewall logs in CommonSecurityLog),
+// you will need to adapt the table name and fields (e.g., DestinationIP, SourceIP, ReceivedBytes).
+let traffic_data = VMConnection
+| where TimeGenerated > ago(timeframe)
+| where Direction == "inbound"
+| where isnotempty(Computer) and isnotempty(RemoteIp);
+// Create a time series of inbound traffic volume and distinct source IPs for each potential victim host.
+traffic_data
+| make-series
+    TotalBytesReceived = sum(BytesReceived),
+    DistinctSourceCount = dcount(RemoteIp)
+    on TimeGenerated from ago(timeframe) to now() step bin_size by Computer
+// Use time-series decomposition to find anomalous spikes in traffic volume.
+| extend (anomalies, score, baseline) = series_decompose_anomalies(TotalBytesReceived, anomaly_score_threshold)
+// Expand the time series data back into individual rows for each time bin.
+| mv-expand with_itemindex=idx TimeGenerated, TotalBytesReceived, DistinctSourceCount, anomalies, score
+// Filter for positive anomalies (spikes) that meet our volume and source count criteria.
+| where anomalies > 0
+| where todouble(TotalBytesReceived) > min_spike_bytes
+| where tolong(DistinctSourceCount) > min_distinct_sources
+| project
+    TimeGenerated,
+    VictimHost = Computer,
+    SpikeBytesReceived = todouble(TotalBytesReceived),
+    DistinctSourceIpCount = tolong(DistinctSourceCount),
+    AnomalyScore = score,
+    TimeWindow = bin_size

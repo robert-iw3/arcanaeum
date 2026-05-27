@@ -1,0 +1,49 @@
+rule gre_gretap_tunnel_scanning {
+  meta:
+    description = "Detects potential GRE/GRETAP tunnel scanning activity. Attackers may encapsulate ICMP echo requests within GRE packets, embedding potential peer IP addresses in the ICMP identifier and sequence number fields to discover misconfigured or vulnerable tunnels."
+    author = "RW"
+    date = "2025-08-13"
+    reference = "Based on intel 8b83f215c4ec0eacb4e08ef5feb16d224d48ff3b513d551122de5fb7cb893149"
+    tags = "NETWORK, TUNNEL, GRE, GRETAP, SCANNING, ICMP, RECONNAISSANCE"
+    tactic = "TA0043"
+    technique = "T1595.002"
+    false_positives = "Low. Some non-standard network diagnostic tools might use high ICMP identifier or sequence values, but the combination of GRE encapsulation and a high volume of varied requests from a single source is highly indicative of scanning."
+
+  events:
+    // Detect GRE traffic that contains an ICMP echo request.
+    $scan.metadata.event_type = "NETWORK_CONNECTION"
+    $scan.network.ip.protocol = "GRE"
+    $scan.network.ip.encapsulated_protocol = "ICMP"
+    $scan.network.icmp.type = 8 // Type 8 is Echo Request.
+
+    // Heuristic for embedded IP: The technique embeds a 32-bit IP into the 16-bit ID and 16-bit Sequence fields.
+    // This often results in unusually high values. A threshold of 4096 is used to filter out most standard ping utilities.
+    ($scan.network.icmp.identifier > 4096 or $scan.network.icmp.sequence_number > 4096)
+
+    // Define match and outcome variables.
+    $scan.principal.ip = $src_ip
+    $scan.target.ip = $dest_ip
+
+  match:
+    // Group events by the scanning source IP over a 10 minute window.
+    $src_ip over 10m
+
+  outcome:
+    // A high risk score is assigned due to the specificity of this scanning technique.
+    $risk_score = 75
+    $principal_ip = array_distinct($scan.principal.ip)
+    $target_ip = array_distinct($scan.target.ip)
+    $event_count = count_distinct($scan.metadata.id)
+    $distinct_dest_count = count_distinct($dest_ip)
+    // Capturing the distinct counts and values of ICMP fields is crucial for analysis.
+    $distinct_icmp_id_count = count_distinct($scan.network.icmp.identifier)
+    $distinct_icmp_seq_count = count_distinct($scan.network.icmp.sequence_number)
+    $icmp_ids = array_distinct($scan.network.icmp.identifier)
+    $icmp_seqs = array_distinct($scan.network.icmp.sequence_number)
+
+  condition:
+    // A single source must send multiple packets matching the event criteria.
+    #scan > 10 and
+    // The scanner will likely use many different values for the embedded IP, resulting in high cardinality of ICMP fields.
+    ( $distinct_icmp_id_count > 5 or $distinct_icmp_seq_count > 5 )
+}

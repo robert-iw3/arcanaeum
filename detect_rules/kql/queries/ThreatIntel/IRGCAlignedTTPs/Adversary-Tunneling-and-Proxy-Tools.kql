@@ -1,0 +1,132 @@
+// Name: Adversary Tunneling and Proxy Tools (Plink, Ngrok, MeshCentral, ReverseSocks5)
+// Author: RW
+// Date: 2025-08-08
+// Description: Detects the usage of several common tunneling and proxy tools (Plink, Ngrok, MeshCentral, ReverseSocks5)
+//              often abused by adversaries, including Iranian state-sponsored actors, to bypass network segmentation,
+//              exfiltrate data, and maintain C2 channels.
+// False Positives: All these tools have legitimate uses, especially in development and IT administration. False positives are expected.
+// Tune by excluding known administrative users, devices, or parent processes.
+// MITRE TTPs: T1572 (Protocol Tunneling), T1090.002 (External Proxy), T1219 (Remote Access Software)
+
+let PlinkTunnelingFlags = dynamic([" -L ", " -R ", " -D ", " -N "]);
+let ngrokDomains = dynamic([".ngrok.io", ".ngrok.com"]);
+let meshAgentProcesses = dynamic(["meshagent.exe", "meshagent-signed.exe"]);
+union
+(
+    // Detects Plink execution with tunneling flags.
+    DeviceProcessEvents
+    | where (ProcessVersionInfoOriginalFileName =~ "plink.exe" or FileName in~ ("plink.exe", "pvhost.exe")) and ProcessCommandLine has_any (PlinkTunnelingFlags)
+    | project
+        TimeGenerated,
+        DeviceName,
+        AccountName,
+        ToolName = "Plink",
+        ActivityType = "Process Execution (Tunneling)",
+        Detail = ProcessCommandLine,
+        ProcessName = FileName,
+        ProcessCommandLine,
+        ParentProcessName = InitiatingProcessFileName,
+        SHA256
+),
+(
+    // Detects Ngrok process execution.
+    DeviceProcessEvents
+    | where FileName =~ "ngrok.exe" or ProcessVersionInfoOriginalFileName =~ "ngrok.exe"
+    | project
+        TimeGenerated,
+        DeviceName,
+        AccountName,
+        ToolName = "Ngrok",
+        ActivityType = "Process Execution",
+        Detail = ProcessCommandLine,
+        ProcessName = FileName,
+        ProcessCommandLine,
+        ParentProcessName = InitiatingProcessFileName,
+        SHA256
+),
+(
+    // Detects network connections to Ngrok domains.
+    DeviceNetworkEvents
+    | where isnotempty(RemoteUrl) and RemoteUrl has_any (ngrokDomains)
+    | project
+        TimeGenerated,
+        DeviceName,
+        AccountName = InitiatingProcessAccountName,
+        ToolName = "Ngrok",
+        ActivityType = "Network Connection",
+        Detail = RemoteUrl,
+        ProcessName = InitiatingProcessFileName,
+        ProcessCommandLine = InitiatingProcessCommandLine,
+        ParentProcessName = "", // Not available in this context
+        SHA256 = InitiatingProcessSHA256
+),
+(
+    // Detects MeshCentral agent execution.
+    DeviceProcessEvents
+    | where FileName has_any (meshAgentProcesses) or ProcessVersionInfoOriginalFileName has_any (meshAgentProcesses)
+    | project
+        TimeGenerated,
+        DeviceName,
+        AccountName,
+        ToolName = "MeshCentral",
+        ActivityType = "Process Execution",
+        Detail = ProcessCommandLine,
+        ProcessName = FileName,
+        ProcessCommandLine,
+        ParentProcessName = InitiatingProcessFileName,
+        SHA256
+),
+(
+    // Detects network connections from the MeshCentral agent.
+    DeviceNetworkEvents
+    | where InitiatingProcessFileName has_any (meshAgentProcesses)
+    | where not(ipv4_is_private(RemoteIP) and RemotePort < 1024) and RemoteIP !in ("127.0.0.1", "::1")
+    | project
+        TimeGenerated,
+        DeviceName,
+        AccountName = InitiatingProcessAccountName,
+        ToolName = "MeshCentral",
+        ActivityType = "Network Connection",
+        Detail = strcat("Destination: ", coalesce(RemoteUrl, "N/A"), " (", RemoteIP, ":", RemotePort, ")"),
+        ProcessName = InitiatingProcessFileName,
+        ProcessCommandLine = InitiatingProcessCommandLine,
+        ParentProcessName = "", // Not available in this context
+        SHA256 = InitiatingProcessSHA256
+),
+(
+    // Detects MeshCentral agent installation as a service.
+    DeviceEvents
+    | where ActionType == "ServiceInstalled" and ServiceFileName has_any (meshAgentProcesses)
+    | project
+        TimeGenerated,
+        DeviceName,
+        AccountName = InitiatingProcessAccountName,
+        ToolName = "MeshCentral",
+        ActivityType = "Service Installation",
+        Detail = strcat("Service Name: ", ServiceName, ", Path: ", ServiceFileName),
+        ProcessName = ServiceName,
+        ProcessCommandLine = "", // Not available in this context
+        ParentProcessName = InitiatingProcessFileName,
+        SHA256 = "" // Not available in this context
+),
+(
+    // Detects ReverseSocks5 execution by filename or command line.
+    DeviceProcessEvents
+    | where FileName =~ "ReverseSocks5.exe" or ProcessCommandLine has "-connect"
+    | project
+        TimeGenerated,
+        DeviceName,
+        AccountName,
+        ToolName = "ReverseSocks5",
+        ActivityType = "Process Execution",
+        Detail = ProcessCommandLine,
+        ProcessName = FileName,
+        ProcessCommandLine,
+        ParentProcessName = InitiatingProcessFileName,
+        SHA256
+)
+// --- FP Tuning ---
+// These tools are often used legitimately by developers and administrators.
+// To reduce false positives, filter out activity from known IT/dev accounts, devices, or parent processes.
+// For example:
+// | where AccountName !in ("IT_ADMIN_01", "dev_user") and DeviceName !startswith "DEV-"

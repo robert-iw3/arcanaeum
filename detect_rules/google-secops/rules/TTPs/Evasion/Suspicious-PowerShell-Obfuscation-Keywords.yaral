@@ -1,0 +1,51 @@
+rule PowerShell_Obfuscation_Detection {
+  meta:
+    author = "RW"
+    description = "Detects PowerShell obfuscation techniques in process command lines, including encoded commands, IEX with string manipulation, and long command lines with string functions, indicating potential malicious activity."
+    severity = "HIGH"
+
+  events:
+    $e.metadata.event_type = "PROCESS_LAUNCH" // UDM event type for process creation.
+
+    // Filter for PowerShell processes.
+    $e.principal.process.file.file_name in ("powershell.exe", "pwsh.exe")
+
+    // Condition 1: Use of EncodedCommand with long command line.
+    (
+        ($e.principal.process.command_line = /.*-encodedcommand.*/ nocase or $e.principal.process.command_line = /.*-ec.*/ nocase or $e.principal.process.command_line = /.*-encoding.*/ nocase or $e.principal.process.command_line = /.*-enc.*/ nocase or $e.principal.process.command_line = /.*-en.*/ nocase or $e.principal.process.command_line = /.*-e .*/ nocase)
+        and len($e.principal.process.command_line) > 200
+    )
+    or
+    // Condition 2: Use of Invoke-Expression (IEX) with other obfuscation indicators.
+    (
+        ($e.principal.process.command_line = /.*iex.*/ nocase or $e.principal.process.command_line = /.*invoke-expression.*/ nocase)
+        and ($e.principal.process.command_line = /.*\+.*/ or $e.principal.process.command_line = /.*-join.*/ nocase or $e.principal.process.command_line = /.*\[char\].*/ nocase or $e.principal.process.command_line = /.*frombase64string.*/ nocase or len($e.principal.process.command_line) > 1024)
+    )
+    or
+    // Condition 3: Unusual command line length combined with string manipulation functions.
+    (
+        len($e.principal.process.command_line) > 400
+        and ($e.principal.process.command_line = /.*-join.*/ nocase or $e.principal.process.command_line = /.*replace.*/ nocase or $e.principal.process.command_line = /.*split.*/ nocase)
+    )
+
+    // FP Tuning: Exclude known safe parent processes or command line patterns.
+    // Use a Chronicle Reference List for known benign parent processes (e.g., %powershell_obfuscation_whitelist_parent_processes).
+    not $e.principal.process.parent_process.file.file_name = /ccmexec\.exe/ nocase
+    // Example: AND not $e.principal.process.command_line = /.*ExampleBenignEncodedCommand.*/ nocase
+    // Example: AND not $e.principal.user.userid in %powershell_obfuscation_whitelist_users
+
+  outcome:
+    $event_time = $e.metadata.event_timestamp.epoch_seconds // _time
+    $host = $e.principal.hostname // dest
+    $user = $e.principal.user.userid // user
+    $parent_process = $e.principal.process.parent_process.file.full_path // parent_process_name
+    $process_name = $e.principal.process.file.file_name // process_name
+    $process_command_line = $e.principal.process.command_line // process (full command line)
+    // Add specific boolean flags to indicate which condition triggered the alert
+    $is_encoded_command = ((len($e.principal.process.command_line) > 200) and ($e.principal.process.command_line = /.*-encodedcommand.*/ nocase or $e.principal.process.command_line = /.*-ec.*/ nocase or $e.principal.process.command_line = /.*-encoding.*/ nocase or $e.principal.process.command_line = /.*-enc.*/ nocase or $e.principal.process.command_line = /.*-en.*/ nocase or $e.principal.process.command_line = /.*-e .*/ nocase))
+    $is_iex_obfuscated = (($e.principal.process.command_line = /.*iex.*/ nocase or $e.principal.process.command_line = /.*invoke-expression.*/ nocase) and ($e.principal.process.command_line = /.*\+.*/ or $e.principal.process.command_line = /.*-join.*/ nocase or $e.principal.process.command_line = /.*\[char\].*/ nocase or $e.principal.process.command_line = /.*frombase64string.*/ nocase or len($e.principal.process.command_line) > 1024))
+    $is_long_cmd_string_manip = (len($e.principal.process.command_line) > 400 and ($e.principal.process.command_line = /.*-join.*/ nocase or $e.principal.process.command_line = /.*replace.*/ nocase or $e.principal.process.command_line = /.*split.*/ nocase))
+
+  condition:
+    $e
+}

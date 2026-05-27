@@ -1,0 +1,75 @@
+rule Silver_Fox_APT_Multi_Stage_Activity {
+  meta:
+    author = "RW"
+    date = "2025-08-30"
+    description = "Detects a combination of TTPs associated with the Silver Fox APT group. This rule correlates persistence mechanisms, vulnerable driver abuse for defense evasion, and C2 communications related to the ValleyRAT backdoor deployment."
+    reference = "https://research.checkpoint.com/2025/silver-fox-apt-vulnerable-drivers/"
+    tags = "APT, SILVER_FOX, VALLEYRAT, BYOVD, WINDOWS"
+    tactic = "TA0003, TA0005, TA0011"
+    technique = "T1543.003, T1562.001, T1071.001"
+    false_positives = "Legitimate WatchDog Antimalware installations might trigger parts of this rule. However, the correlation of multiple distinct events significantly reduces the likelihood of false positives."
+
+  events:
+    // Detection 1: Persistence via file creation in a suspicious folder
+    $file_drop.metadata.event_type = "FILE_CREATION"
+    $file_drop.principal.hostname = $hostname
+    $file_drop.target.file.full_path = /C:\\Program Files\\RunTime\\(RuntimeBroker\.exe|Amsdk_Service\.sys)/ nocase
+
+    // Detection 2: Persistence via suspicious service creation
+    $service_create.metadata.event_type = "SERVICE_CREATION"
+    $service_create.principal.hostname = $hostname
+    $service_create.target.service.name in ("Termaintor", "Amsdk_Service")
+
+    // Detection 3: Loading of known vulnerable drivers by hash
+    $driver_load.metadata.event_type = "MODULE_LOAD"
+    $driver_load.principal.hostname = $hostname
+    $driver_load.target.file.sha256 in (
+      "12b3d8bc5cc1ea6e2acd741d8a80f56cf2a0a7ebfa0998e3f0743fcf83fabb9e", // amsdk.sys v1.0.600
+      "0be8483c2ea42f1ce4c90e84ac474a4e7017bc6d682e06f96dc1e31922a07b10", // wamsdk.sys v1.1.100 (modified)
+      "9c394dcab9f711e2bf585edf0d22d2210843885917d409ee56f22a4c24ad225e"  // ZAM.exe v3.0.0.000
+    )
+
+    // Detection 4: Communication with vulnerable driver to terminate processes
+    $ioctl_comm.metadata.event_type = "DEVICE_IO_CONTROL"
+    $ioctl_comm.principal.hostname = $hostname
+    $ioctl_comm.target.device.file.name = "amsdk"
+    $ioctl_comm.target.file.ioctl_control_code in ("0x80002010", "0x80002048") // IOCTL_REGISTER_PROCESS and IOCTL_TERMINATE_PROCESS
+
+    // Detection 5: C2 communication to known ValleyRAT servers
+    $c2_comm.metadata.event_type = "NETWORK_CONNECTION"
+    $c2_comm.principal.hostname = $hostname
+    $c2_comm.target.ip in (
+      "47.239.197.97",
+      "8.217.38.238",
+      "156.234.58.194",
+      "156.241.144.66",
+      "1.13.249.217"
+    )
+    $c2_comm.target.port in (52116, 52117, 8888, 52110, 52111, 52139, 52160, 9527, 9528)
+
+  match:
+    $hostname over 24h
+
+  condition:
+    // The core of the attack is abusing the vulnerable driver.
+    // This condition triggers if the driver is loaded AND at least one other TTP is observed.
+    $driver_load and (
+      $file_drop or
+      $service_create or
+      $ioctl_comm or
+      $c2_comm
+    )
+
+  outcome:
+    // Risk score is elevated due to the correlation of multiple suspicious events.
+    $risk_score = 75
+    $principal_hostname = $hostname
+    $principal_ip = array_distinct($c2_comm.principal.ip)
+    $target_ip = array_distinct($c2_comm.target.ip)
+    $target_port = array_distinct($c2_comm.target.port)
+    $suspicious_file_paths = array_distinct($file_drop.target.file.full_path)
+    $suspicious_service_names = array_distinct($service_create.target.service.name)
+    $vulnerable_driver_hashes = array_distinct($driver_load.target.file.sha256)
+    $ioctl_codes_used = array_distinct($ioctl_comm.target.file.ioctl_control_code)
+    $initiating_process_commandlines = array_distinct($ioctl_comm.principal.process.command_line)
+}

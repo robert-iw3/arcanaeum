@@ -1,0 +1,62 @@
+// Name: Spear-phishing Attempt Targeting OT/ICS Personnel
+// Author: RW
+// Date: 2025-08-20
+// Description: Detects potential spear-phishing emails with malicious links or attachments sent to personnel associated with
+// Operational Technology (OT) or Industrial Control Systems (ICS).
+// This activity is often a precursor to attacks on critical infrastructure.
+// False Positive Sensitivity: Medium. The effectiveness of this rule heavily depends on the accuracy of the 'OT_ICS_Personnel' watchlist.
+// Benign emails with file types like .zip or .html may trigger alerts.
+// Consider adding sender domain exclusions for known business partners.
+// Tactics: Initial Access
+// Techniques: T1566.001, T1566.002
+
+// Define the watchlist for OT/ICS personnel.
+// Tuning recommendation: Populate this list with the User Principal Names (UPNs) or email addresses of employees who manage or have access to SCADA/ICS systems.
+let OT_ICS_Personnel = dynamic([
+    "operator1@contoso.com",
+    "engineer.scada@contoso.com",
+    "plant.manager@contoso.com"
+]);
+
+// Define suspicious attachment file extensions that warrant closer inspection when sent to high-value targets.
+let SuspiciousFileTypes = dynamic([".html", ".htm", ".iso", ".img", ".lnk", ".zip", ".rar", ".js", ".vbs", ".hta"]);
+
+// Find inbound emails to OT/ICS personnel that are either flagged as malicious or contain suspicious attachments.
+EmailEvents
+| where TimeGenerated > ago(1d)
+| where EmailDirection == "Inbound"
+| where RecipientEmailAddress in~ (OT_ICS_Personnel)
+// Join with attachment and URL information to get more context.
+| join kind=leftouter (
+    EmailAttachmentInfo
+    | where TimeGenerated > ago(1d)
+    | project NetworkMessageId, FileName, FileType, ThreatTypes_Attachment = ThreatTypes
+) on NetworkMessageId
+| join kind=leftouter (
+    EmailUrlInfo
+    | where TimeGenerated > ago(1d)
+    | project NetworkMessageId, Url, ThreatTypes_Url = ThreatTypes
+) on NetworkMessageId
+// The core detection logic combines high-confidence verdicts with medium-confidence suspicious indicators.
+| where
+    // High-confidence: Email, attachment, or URL is flagged as Phish or Malware by security controls.
+    (ThreatTypes has_any ("Phish", "Malware")) or (ThreatTypes_Attachment has_any ("Phish", "Malware")) or (ThreatTypes_Url has_any ("Phish", "Malware")) or
+    // Medium-confidence: Attachment has a suspicious file type.
+    (FileType in~ (SuspiciousFileTypes))
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    take_any(Subject, SenderFromAddress, SenderIPv4, SenderFromDomain),
+    RecipientCount = dcount(RecipientEmailAddress),
+    Recipients = make_set(RecipientEmailAddress, 5),
+    Attachments = make_set(FileName, 5),
+    AttachmentTypes = make_set(FileType, 5),
+    URLs = make_set(Url, 5),
+    Threats = make_set(ThreatTypes, 5)
+    by NetworkMessageId
+| extend
+    // Consolidate entity information for easier investigation.
+    AccountCustomEntity = Recipients,
+    IPCustomEntity = SenderIPv4,
+    FileCustomEntity = Attachments,
+    URLCustomEntity = URLs

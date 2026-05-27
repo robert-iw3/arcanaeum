@@ -1,0 +1,41 @@
+// Name: Unusual GRE/GRETAP Traffic Detected
+// Description: Detects GRE/GRETAP network traffic (IP protocol 47), which could indicate the establishment of a new or unauthorized tunnel.
+//              Attackers can exploit these tunnels for initial access, data exfiltration, or defense evasion. This rule is intended to be a
+//              baseline and should be tuned by adding known, legitimate GRE tunnel endpoints to an allowlist to reduce noise.
+// Tactic: Initial Access, Defense Evasion
+// Technique: T1595.002 (Active Scanning: Vulnerability Scanning), T1090.002 (Proxy: External Proxy)
+// Author: RW
+// Date: 2025-08-13
+// False Positives: This rule will trigger on any GRE/GRETAP traffic not on the allowlist.
+// Legitimate uses include site-to-site VPNs, cloud connectivity (e.g., AWS Transit Gateway), and DDoS mitigation services (e.g., Cloudflare Magic Transit).
+// It is critical to populate the 'known_gre_tunnels' list with legitimate tunnel endpoints.
+// Data Source: Network Session, Firewall Logs
+// References:
+// - https://www.kb.cert.org/vuls/id/199397
+// - https://www.securityweek.com/millions-of-internet-hosts-vulnerable-to-attacks-due-to-tunneling-protocol-flaws/
+// - Intel ID: 8b83f215c4ec0eacb4e08ef5feb16d224d48ff3b513d551122de5fb7cb893149
+
+let known_gre_tunnels = dynamic([
+    // Add known GRE tunnel source and destination pairs to this list to exclude them from detection.
+    // Example: "1.1.1.1,2.2.2.2", "2.2.2.2,1.1.1.1"
+]);
+_Im_NetworkSession
+| where isnotempty(SrcIpAddr) and isnotempty(DstIpAddr)
+// Filter for GRE traffic (IP Protocol 47). GRETAP often uses the same protocol number.
+| where NetworkProtocolNumber == 47
+// Create a unique identifier for the tunnel direction to match against the allowlist.
+| extend tunnel_pair = strcat(SrcIpAddr, ",", DstIpAddr)
+// Exclude known legitimate tunnels.
+| where not(tunnel_pair in (known_gre_tunnels))
+// Summarize the unusual traffic over a 1-hour window to reduce noise and aggregate events.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    EventCount = count(),
+    TotalBytes = sum(BytesSent + BytesReceived),
+    DstPorts = make_set(DstPortNumber)
+    by SrcIpAddr, DstIpAddr, SrcHostname, DstHostname, NetworkProtocol
+| extend
+    timestamp = StartTime,
+    SrcDeviceName = SrcHostname,
+    DstDeviceName = DstHostname

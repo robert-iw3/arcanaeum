@@ -1,0 +1,43 @@
+// Name: Sustained Satellite Communication Interference
+// Description: Detects sustained periods of high interference or low signal quality for satellite communications, potentially
+// indicating jamming activity. This is based on the CSIS Space Threat Assessment report, which highlights the increased use of
+// electronic warfare like jamming in geopolitical conflict zones. This rule requires a custom data source (e.g., 'SatelliteRFMonitoring')
+// that provides RF signal or satellite health metrics.
+// Tactic: Denial of Service (based on threat description)
+// Technique: T1070.006
+// Author: RW
+// Date: 2025-08-19
+
+let lookback = 1h;
+let time_window = 5m;
+// Placeholder: High interference level (e.g., scale 0-100). Tune based on baseline data from your monitoring systems.
+let interference_threshold = 70;
+// Placeholder: Critically low Signal-to-Noise Ratio (SNR) in dB. Tune based on baseline data.
+let snr_threshold = 10;
+// Number of distinct time windows with interference needed to trigger an alert. This helps confirm the activity is 'sustained'.
+let sustained_windows_threshold = 4;
+// Placeholder for high-risk geopolitical regions. This list should be updated based on current intelligence.
+let high_risk_regions = dynamic(["Eastern Europe", "Middle East", "South China Sea", "Ukraine"]);
+// This query assumes a custom table named 'SatelliteRFMonitoring' or similar, containing data from RF signal monitoring or satellite health systems.
+// The table schema is assumed to include fields like SatelliteID, Region, SignalToNoiseRatio, and InterferenceLevel.
+SatelliteRFMonitoring
+| where TimeGenerated > ago(lookback)
+// Filter for events indicating potential jamming based on thresholds.
+| where InterferenceLevel > interference_threshold or SignalToNoiseRatio < snr_threshold
+// Focus on high-risk areas if location data is available. Comment out this line to monitor all regions.
+| where isempty(Region) or Region in (high_risk_regions)
+// Summarize activity per region, as jamming is likely to affect a geographic area.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    EventCount = count(),
+    DistinctTimeWindowsWithInterference = dcount(bin(TimeGenerated, time_window)),
+    MaxInterferenceLevel = max(InterferenceLevel),
+    MinSNR = min(SignalToNoiseRatio),
+    AffectedSatellites = make_set(SatelliteID)
+    by Region
+// Alert if the activity is sustained across multiple time windows.
+| where DistinctTimeWindowsWithInterference >= sustained_windows_threshold
+| extend
+    timestamp = StartTime,
+    customEntity = Region

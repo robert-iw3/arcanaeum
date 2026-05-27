@@ -1,0 +1,33 @@
+// Name: Registry Run Key Modified with Encoded PowerShell
+// Author: RW
+// Date: 2025-08-07
+// Description: Detects the modification of common registry run keys to include a command that executes an encoded PowerShell command.
+//              This is a well-known persistence technique (T1547.001) used by attackers to maintain access to a system after a reboot.
+// Mitre TTPs: T1547.001
+// False Positive Sensitivity: Medium
+
+DeviceRegistryEvents
+// Look for events where a registry value was created or modified.
+| where ActionType == "RegistryValueSet"
+// Filter for the common Run and RunOnce keys used for persistence.
+| where RegistryKey endswith @"\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+    or RegistryKey endswith @"\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce"
+// Check if the command in the registry value data invokes PowerShell with an encoded command switch.
+| where RegistryValueData has_any ("powershell.exe", "pwsh.exe")
+    and RegistryValueData has_any ("-e ", "-en ", "-enc ", "-enco ", "-encod ", "-encode ", "-encodedcommand ")
+// False Positive Tuning: Legitimate software installers or administrative scripts might use this method for configuration.
+// If legitimate processes are causing alerts, consider excluding them by name or signer.
+// For example: | where InitiatingProcessFileName !in~ ("legit_installer.exe", "config_tool.exe")
+| project
+    Timestamp,
+    DeviceId,
+    DeviceName,
+    ActionType,
+    RegistryKey,
+    RegistryValueName,
+    RegistryValueData,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    Tactic = "Persistence",
+    Technique = "Boot or Logon Autostart Execution: Registry Run Keys / Startup Folder",
+    MitreTTP = "T1547.001"

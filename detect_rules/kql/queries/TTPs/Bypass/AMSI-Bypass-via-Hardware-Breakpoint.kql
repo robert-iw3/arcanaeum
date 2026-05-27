@@ -1,0 +1,29 @@
+// Name: AMSI Bypass via Hardware Breakpoint
+// Author: RW
+// Date: 2025-07-31
+// Description: Detects the use of the SetThreadContext API to set a hardware breakpoint on a function within amsi.dll. This is an emerging technique used to bypass AMSI by intercepting the scan function's execution.
+// Tags: TTPs, Defense Evasion
+
+DeviceEvents
+// Filter for SetThreadContext API calls, which are used to manipulate thread execution, including setting breakpoints.
+| where ActionType == "SetThreadContextApiCall"
+| extend ParsedFields = parse_json(AdditionalFields)
+// Extract the path of the module where the breakpoint is being set.
+| extend TargetModulePath = tostring(ParsedFields.TargetModulePath)
+// Focus on attempts to place a breakpoint within amsi.dll, the core of the Antimalware Scan Interface.
+| where TargetModulePath endswith "\\amsi.dll"
+// This technique is often executed from scripting hosts or custom loaders.
+// Filtering for these parent processes increases the fidelity of the detection.
+| where InitiatingProcessFileName in~ ("powershell.exe", "pwsh.exe", "cscript.exe", "wscript.exe", "rundll32.exe")
+// FP Tuning: While highly suspicious, some advanced debugging or security tools might perform this action.
+// Exclude known and signed tools if they generate noise.
+// For example: | where InitiatingProcessSigner != "Legitimate Security Vendor"
+| project
+    Timestamp,
+    DeviceName,
+    AccountName = InitiatingProcessAccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    TargetModulePath,
+    DebugRegister = ParsedFields.DebugRegister,
+    BreakpointAddress = ParsedFields.BreakpointAddress

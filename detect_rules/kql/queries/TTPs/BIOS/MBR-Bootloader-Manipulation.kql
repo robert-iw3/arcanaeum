@@ -1,0 +1,63 @@
+// Rule Title: MBR/Bootloader Manipulation Detected
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects attempts to modify the Master Boot Record (MBR) or create suspicious files in the EFI System Partition (ESP).
+//              This behavior is associated with bootkits and ransomware like Thanos, EFILock, and TrickBoot, which target the pre-boot
+//              environment for persistence or to render a system unbootable.
+// MITRE TTPs: T1542.002
+
+(union isfuzzy=true
+    (
+        // Part 1: Detects MBR modification using the bootsect.exe utility.
+        DeviceProcessEvents
+        | where ProcessCommandLine has "bootsect" and ProcessCommandLine has "/mbr"
+        // FP Tuning: Legitimate use of bootsect.exe for MBR modification is rare outside of system imaging or recovery scenarios.
+        // Investigate any alerts to confirm if the activity was authorized.
+        | extend
+            RuleName = "MBR Modification with bootsect.exe",
+            SuspiciousEntity = InitiatingProcessFileName,
+            EntityType = "Process"
+        | project
+            TimeGenerated,
+            DeviceName,
+            RuleName,
+            SuspiciousEntity,
+            EntityType,
+            InitiatingProcessCommandLine,
+            AccountName
+    ),
+    (
+        // Part 2: Detects suspicious file creation in the EFI System Partition (ESP).
+        DeviceFileEvents
+        | where ActionType == "FileCreated"
+        | where FolderPath has @"\EFI\" and FileName endswith ".efi"
+        // FP Tuning: Windows updates, installers, and recovery tools legitimately write to the ESP.
+        // This list of legitimate processes may need to be expanded based on your environment's software.
+        | where not(InitiatingProcessFileName in~ (
+            "bcdboot.exe",
+            "TiWorker.exe",
+            "TrustedInstaller.exe",
+            "svchost.exe",
+            "setup.exe",
+            "dism.exe",
+            "wuauclt.exe",
+            "msiexec.exe",
+            "bootim.exe"
+            )
+        )
+        | extend
+            RuleName = "Suspicious EFI File Creation in Boot Partition",
+            SuspiciousEntity = FileName,
+            EntityType = "File"
+        | project
+            TimeGenerated,
+            DeviceName,
+            RuleName,
+            SuspiciousEntity,
+            EntityType,
+            InitiatingProcessFileName,
+            InitiatingProcessCommandLine,
+            FolderPath,
+            AccountName
+    )
+)

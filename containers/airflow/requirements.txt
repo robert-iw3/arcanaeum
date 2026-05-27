@@ -1,0 +1,5 @@
+airflow-pentaho-plugin
+scikit-learn==1.5.1
+matplotlib==3.9.2
+psycopg2-binary==2.9.9
+redis==5.0.8

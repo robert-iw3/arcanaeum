@@ -1,0 +1,43 @@
+// Name: Suspicious LOLBin Execution
+// Author: RW
+// Date: 2025-08-17
+//
+// Adversaries abuse legitimate "Living Off the Land Binaries" (LOLBins) to execute malicious code,
+// download payloads, or bypass application control. This can be difficult to detect as the binaries
+// themselves are trusted and signed by Microsoft. This rule identifies suspicious usage patterns
+// for commonly abused LOLBins like regsvr32, msbuild, and bitsadmin, as highlighted in the reference.
+
+DeviceProcessEvents
+| where ActionType == "ProcessCreated"
+| where
+    // T1218.010: Regsvr32 - Used for proxy execution of code.
+    // Looks for silent execution of remote scripts (scrobj.dll) or network locations.
+    (ProcessFileName =~ "regsvr32.exe" and ProcessCommandLine has "/s" and ProcessCommandLine has_any("http:", "https:", "ftp:", "scrobj.dll")) or
+
+    // T1127.001: Trusted Developer Utilities Proxy Execution: MSBuild
+    // Looks for MSBuild executing project files from unusual, user-writable locations.
+    (ProcessFileName =~ "msbuild.exe" and InitiatingProcessFolderPath has_any ("\\Temp\\", "\\Users\\Public\\", "\\AppData\\Roaming\\", "\\ProgramData\\")) or
+
+    // T1197: BITS Jobs
+    // Looks for Bitsadmin being used to download files from the internet.
+    (ProcessFileName =~ "bitsadmin.exe" and ProcessCommandLine has "/transfer" and ProcessCommandLine has_any("http:", "https:"))
+
+// FP Tuning:
+// - Legitimate software updaters (e.g., Google Update, Adobe Updater) may use bitsadmin.exe to download files.
+//   Consider excluding known safe parent processes or download domains if FPs occur.
+//   Example: | where InitiatingProcessFileName !in~ ("GoogleUpdate.exe", "AdobeARM.exe")
+// - MSBuild may be used by legitimate developer tools or scripts. If you have developers, you may need to
+//   tune the InitiatingProcessFolderPath filter to be more specific to your environment.
+
+| summarize
+    FirstSeen = min(TimeGenerated),
+    LastSeen = max(TimeGenerated),
+    make_set(ProcessCommandLine),
+    make_set(InitiatingProcessCommandLine),
+    make_set(InitiatingProcessFolderPath)
+    by DeviceName, AccountName, ProcessFileName, InitiatingProcessFileName
+| extend
+    Tactic = "Defense Evasion, Execution",
+    Technique = "T1218, T1127, T1197",
+    LOLBin = ProcessFileName,
+    ParentProcess = InitiatingProcessFileName

@@ -1,0 +1,49 @@
+rule anomalous_cip_scanning_or_fuzzing {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects a high volume of Common Industrial Protocol (CIP) error responses from a single source IP address. This pattern is indicative of reconnaissance, scanning, or fuzzing activity, where an attacker attempts to enumerate valid Class, Instance, and Attribute IDs on ICS devices by sending numerous invalid requests. This aligns with TTPs discussed in the 'Intro to Common Industrial Protocol & Exploits' presentation."
+    reference = "https://github.com/ICSVillage"
+    tags = "ICS, CIP, RECONNAISSANCE, FUZZING"
+    tactic = "TA0043, TA0007"
+    technique = "T1595.002"
+    false_positives = "Misconfigured legitimate clients (e.g., HMIs, engineering workstations) or asset inventory tools may generate a low volume of errors. The detection threshold may need tuning based on network baseline."
+
+  events:
+    // Match network events for the CIP protocol, typically on port 44818.
+    $e.metadata.event_type = "NETWORK_CONNECTION"
+    $e.target.port = 44818
+
+    // These CIP status codes indicate the client requested a service, class, or attribute that does not exist.
+    // A high volume of these errors from one source suggests enumeration or fuzzing.
+    // Note: The UDM field path for CIP status may vary based on the log source parser.
+    $e.network.application_protocol_details.cip.status_code in (
+      5,  // 0x05: Path Destination Unknown
+      8,  // 0x08: Service Not Supported
+      12, // 0x0C: Object Does Not Exist
+      28  // 0x1C: Attribute Not Supported
+    )
+
+    // Capture the source IP for correlation.
+    $e.principal.ip = $source_ip
+
+  match:
+    // Group events by the source IP over a 10 minute window.
+    $source_ip over 10m
+
+  outcome:
+    // A risk score of 60 indicates a medium-high severity event.
+    $risk_score = 60
+    $principal_ip = array_distinct($e.principal.ip)
+    $target_ips = array_distinct($e.target.ip)
+    $event_count = count_distinct($e.metadata.id)
+    $distinct_target_count = count_distinct($e.target.ip)
+    $distinct_error_codes = array_distinct($e.network.application_protocol_details.cip.status_code)
+    $first_seen = min($e.metadata.event_timestamp)
+    $last_seen = max($e.metadata.event_timestamp)
+
+  condition:
+    // Trigger if the number of errors from a single source exceeds a threshold.
+    // This threshold can be adjusted to suit the specific environment.
+    #e > 20
+}

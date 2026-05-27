@@ -1,0 +1,42 @@
+rule unusual_gre_gretap_traffic {
+  meta:
+    description = "Detects GRE/GRETAP network traffic, which could indicate the establishment of a new or unauthorized tunnel. Attackers can exploit these tunnels for initial access, data exfiltration, or defense evasion. This rule is intended to be a baseline and should be tuned by adding known, legitimate GRE tunnel endpoints to an allowlist to reduce noise."
+    author = "RW"
+    date = "2025-08-13"
+    reference = "https://www.kb.cert.org/vuls/id/199397, https://www.securityweek.com/millions-of-internet-hosts-vulnerable-to-attacks-due-to-tunneling-protocol-flaws/"
+    tags = "NETWORK, TUNNEL, GRE, GRETAP, ANOMALY"
+    tactic = "TA0001, TA0007"
+    technique = "T1595.002, T1090.002"
+    false_positives = "This rule will trigger on any GRE/GRETAP traffic. Legitimate uses include site-to-site VPNs, cloud connectivity (e.g., AWS Transit Gateway), and DDoS mitigation services (e.g., Cloudflare Magic Transit). It is critical to create an exception list of known tunnel endpoints."
+
+  events:
+    $gre.metadata.event_type = "NETWORK_CONNECTION"
+    // GRE is IP Protocol 47.
+    $gre.network.ip.protocol = "GRE"
+    $gre.principal.ip = $src_ip
+    $gre.target.ip = $dest_ip
+
+    // To reduce noise from legitimate tunnels, create a CIDR or string reference list
+    // named "known_gre_tunnel_endpoints" containing the IP addresses of your legitimate GRE peers
+    // and uncomment the following line. A more precise filter would check for known pairs.
+    // not ($src_ip in %known_gre_tunnel_endpoints and $dest_ip in %known_gre_tunnel_endpoints)
+
+  match:
+    // Correlate traffic between the same source and destination pair over an hour.
+    $src_ip, $dest_ip over 1h
+
+  outcome:
+    // A moderate risk score is assigned, as this requires investigation to determine if it's malicious.
+    $risk_score = 40
+    $principal_ip = array_distinct($gre.principal.ip)
+    $target_ip = array_distinct($gre.target.ip)
+    $principal_hostname = array_distinct($gre.principal.hostname)
+    $target_hostname = array_distinct($gre.target.hostname)
+    $event_count = count_distinct($gre.metadata.id)
+    // Sum of bytes can help determine the significance of the tunnel activity.
+    $total_bytes_sent = sum($gre.network.sent_bytes)
+    $total_bytes_received = sum($gre.network.received_bytes)
+
+  condition:
+    $gre
+}

@@ -1,0 +1,67 @@
+{
+  "data": {
+    "type": "signal_correlation",
+    "attributes": {
+      "name": "Firmware and Hardware Attack Vector Detection",
+      "enabled": true,
+      "cases": [
+        {
+          "name": "UEFI/BIOS Firmware Modification Attempt",
+          "status": "high",
+          "query": "(source:endpoint @process.name:bcdedit.exe @process.command_line:(\"set\" AND \"path\") NOT (@process.command_line:(\"path \\Windows\\system32\\winload.(efi|exe)\" OR \"path \\EFI\\Microsoft\\Boot\\bootmgfw.efi\")) | parse regex \"path\\s+(?<new_boot_path>[^\\s]+)\" in @process.command_line | where new_boot_path IS NOT NULL) OR (source:endpoint @file.action:created @file.path:*\\EFI\\*\\Boot\\*.efi NOT @process.name:(bcdboot.exe OR TiWorker.exe OR TrustedInstaller.exe OR svchost.exe OR setup.exe OR dism.exe OR wuauclt.exe OR msiexec.exe OR bootim.exe)) | aggregate count by @host.name, @user.name, @process.name, @process.command_line, @file.name, @file.path"
+        },
+        {
+          "name": "MBR/Bootloader Manipulation",
+          "status": "high",
+          "query": "(source:endpoint @process.name:bootsect.exe @process.command_line:/mbr/) OR (source:endpoint @file.action:created @file.path:*\\EFI\\*.efi NOT @process.name:(bcdboot.exe OR TiWorker.exe OR TrustedInstaller.exe OR svchost.exe OR setup.exe OR dism.exe OR wuauclt.exe OR msiexec.exe OR bootim.exe)) | aggregate count by @host.name, @user.name, @process.name, @process.command_line, @file.name, @file.path"
+        },
+        {
+          "name": "Firmware Vulnerability Exploitation",
+          "status": "high",
+          "query": "(source:endpoint @process.name:bcdedit.exe @process.command_line:(\"set\" AND \"path\") NOT (@process.command_line:(\"path \\Windows\\system32\\winload.(efi|exe)\" OR \"path \\EFI\\Microsoft\\Boot\\bootmgfw.efi\")) | parse regex \"path\\s+(?<new_boot_path>[^\\s]+)\" in @process.command_line | where new_boot_path IS NOT NULL) OR (source:endpoint @file.action:created @file.path:*\\EFI\\* @file.name:(\"*.efi\" OR \"*.bmp\" OR \"*.jpg\" OR \"*.jpeg\" OR \"*.gif\" OR \"*.png\") NOT @process.name:(bcdboot.exe OR TiWorker.exe OR TrustedInstaller.exe OR svchost.exe OR setup.exe OR dism.exe OR wuauclt.exe OR msiexec.exe OR bootim.exe OR fwupd.exe OR DellCommandUpdate.exe OR LenovoVantage.exe OR HPImageAssistant.exe)) | aggregate count by @host.name, @user.name, @process.name, @process.command_line, @file.name, @file.path"
+        },
+        {
+          "name": "Supply Chain Integrity Compromise",
+          "status": "high",
+          "query": "source:endpoint @process.name:(powershell.exe OR pwsh.exe OR cmd.exe OR rundll32.exe OR cscript.exe OR wscript.exe OR mshta.exe OR bitsadmin.exe) @process.parent.name:(SolarWinds.BusinessLayerHost.exe OR AsusLiveUpdate.exe OR LiveUpdate.exe OR DellCommandUpdate.exe OR LenovoVantage.exe OR HPImageAssistant.exe OR AdobeARM.exe OR GoogleUpdate.exe OR Update.exe) | aggregate count by @host.name, @user.name, @process.parent.name, @process.name, @process.command_line timebucket:1h"
+        },
+        {
+          "name": "Network/VPN Firmware Compromise Attempt",
+          "status": "high",
+          "query": "source:network @dest.port:(21 OR 22 OR 23 OR 69 OR 80 OR 161 OR 443 OR 514 OR 8080 OR 8443) @dest.ip:network_devices NOT @src.ip:admin_workstations NOT (@process.name:(msedge.exe OR chrome.exe OR firefox.exe) AND @dest.port:(80 OR 443 OR 8080 OR 8443)) | aggregate count by @host.name, @user.name, @src.ip, @dest.ip, @dest.port, @process.name, @process.command_line timebucket:1h"
+        }
+      ],
+      "group_by_fields": ["@host.name", "@src.ip", "@user.name"],
+      "distinct_fields": ["case_id"],
+      "correlation": {
+        "expression": "distinct_count >= 2",
+        "timeframe": "1h"
+      },
+      "message": "Firmware/Hardware Attack Vector Detected: {distinct_count} distinct TTPs on host {@host.name}, source IP {@src.ip}, or user {@user.name}. Techniques: {case_names}. Details: {@process.command_line OR @file.path OR @dest.ip}. Timeframe: {first_activity} to {last_activity}",
+      "severity": "high",
+      "tags": [
+        "security:attack",
+        "tactic:TA0001",
+        "tactic:TA0003",
+        "tactic:TA0005",
+        "technique:T1542.001",
+        "technique:T1542.002",
+        "technique:T1542.003",
+        "technique:T1195",
+        "malware:blacklotus",
+        "malware:mosaicregressor",
+        "malware:lojax",
+        "malware:thanos",
+        "malware:efilock",
+        "malware:trickboot",
+        "vulnerability:cve-2024-0762",
+        "vulnerability:cve-2022-21894",
+        "vulnerability:logofail",
+        "vulnerability:pixiefail"
+      ],
+      "options": {
+        "evaluation_window": "1h"
+      }
+    }
+  }
+}

@@ -1,0 +1,35 @@
+title: Godzilla Webshell POST to Unusual ASPX Route
+id: ee53f076-0d61-4c45-af43-aa3241e5dbce
+status: experimental
+description: Detects POST requests to ASP.NET pages (.aspx) that may indicate interaction with a Godzilla webshell. Attackers often use POST requests to rarely used or custom .aspx pages for command and control. This detection is broad and should be correlated with other indicators.
+references:
+  - https://kerberpoasting.medium.com/sharepoint-of-no-return-analysing-the-godzilla-webshell-cve-2025-53770-cve-2025-53771-a4e8e6a74bd1
+author: Rob Weber
+date: 2025-07-26
+tags:
+  - attack.command_and_control
+  - attack.t1071.001
+  - attack.t1102
+  - tool.godzilla
+logsource:
+  category: webserver
+detection:
+  selection:
+        # Detects POST requests, a common method for C2 communication
+    http.request.method: 'POST'
+        # The target is an ASP.NET page
+    http.request.uri.path|endswith: '.aspx'
+  filter_known_good:
+        # This section is a placeholder for known-good .aspx pages that receive POST requests in your environment.
+        # You should populate this list to reduce false positives.
+    http.request.uri.path|endswith:
+      - '/_layouts/15/inplview.aspx'       # Example: Common SharePoint page
+      - '/owa/auth.owa'       # Example: Common Exchange page
+      - '/your/application/page.aspx'
+  condition: selection and not filter_known_good
+falsepositives:
+  - Legitimate web applications frequently use POST requests to .aspx pages for normal functionality (e.g., submitting forms).
+  - This rule is intended as a starting point for threat hunting and will likely require significant tuning.
+  - To reduce false positives, populate the `filter_known_good` section with pages that are expected to receive POST requests in your environment.
+  - Correlate alerts from this rule with other suspicious activity on the host, such as the IIS worker process (w3wp.exe) spawning child processes or loading unusual CLR modules.
+level: medium

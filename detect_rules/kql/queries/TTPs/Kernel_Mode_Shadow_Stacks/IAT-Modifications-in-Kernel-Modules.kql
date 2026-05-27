@@ -1,0 +1,32 @@
+// Name: Kernel Module IAT Modification
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects potential modification of a kernel module's Import Address Table (IAT), which resides in the .idata section.
+//              This is a known technique for bypassing Kernel Control Flow Guard (KCFG). This detection relies on an EDR's capability
+//              to monitor and alert on the integrity of loaded kernel modules in memory.
+// False Positive Sensitivity: Medium
+
+DeviceEvents
+// This detection assumes the EDR sensor can detect and log memory tampering within loaded kernel modules.
+// The ActionType 'ImageSectionTampered' is a placeholder; actual values may include 'ModuleTampering', 'ImageIntegrityViolation', or 'KernelHookDetected'.
+| where ActionType == "ImageSectionTampered"
+// Parse additional fields which may contain details about the tampered section.
+| extend TamperDetails = todynamic(AdditionalFields)
+| extend TamperedSection = tostring(TamperDetails.TamperedSectionName),
+         ImageFilePath = tostring(TamperDetails.FilePath)
+// Filter for modifications specifically within kernel modules (drivers).
+| where ImageFilePath has_any (@"\system32\drivers\", @"\systemroot\system32\drivers\")
+// The IAT resides in the .idata section of a PE file. A modification here is a strong indicator of IAT hooking.
+// FP Tuning: If the EDR does not provide section-level detail, this line can be removed, but the rule will become more generic and may require additional tuning.
+| where TamperedSection == ".idata"
+| project
+    Timestamp,
+    DeviceId,
+    DeviceName,
+    ActionType,
+    ImageFilePath,
+    TamperedSection,
+    // The process that performed the write, if available. This would likely be a compromised driver or a user-mode process with a kernel exploit.
+    InitiatingProcessFileName,
+    InitiatingProcessFolderPath,
+    ReportId

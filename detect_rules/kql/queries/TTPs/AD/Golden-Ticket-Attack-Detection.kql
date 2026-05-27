@@ -1,0 +1,66 @@
+// Name: Golden Ticket Usage Detected
+// Author: RW
+// Date: 2025-08-04
+// Description: This rule detects potential Golden Ticket usage by identifying successful Kerberos network logons
+//              (LogonType 3) performed by highly privileged accounts originating from workstations that are not
+//              domain controllers. A Golden Ticket allows an attacker to forge Kerberos tickets and authenticate
+//              as any user, and this activity often manifests as privileged logons from unexpected sources.
+// MITRE ATT&CK: T1558.001
+// False Positive Sensitivity: Medium
+// Tags: Persistence, T1558.001
+
+let timeWindow = 1h;
+
+// This is a critical list for tuning. Populate it with the SIDs or account names of highly privileged groups/users.
+// e.g., Domain Admins, Enterprise Admins.
+let PrivilegedAccounts = dynamic([
+    "S-1-5-21-domain-512", // Domain Admins
+    "S-1-5-21-domain-519", // Enterprise Admins
+    "Administrator"
+    // Add other privileged account SIDs or names here.
+]);
+
+// This list must be populated with the hostnames or IPs of all legitimate Domain Controllers.
+let DomainControllers = dynamic([
+    "DC01.contoso.local",
+    "DC02.contoso.local"
+    // Add all DC hostnames/IPs here.
+]);
+
+// Optional: Whitelist for Privileged Access Workstations (PAWs) or management servers from which admins are expected to work.
+// Populating this list is key to reducing false positives from legitimate administrative activity.
+let AdminWorkstations = dynamic([]);
+
+SecurityEvent
+| where TimeGenerated > ago(timeWindow)
+// Filter for successful Kerberos network logons.
+| where EventID == 4624
+| where LogonType == 3 // Network Logon
+| where AuthenticationPackageName == "Kerberos"
+// Focus on logons by highly privileged accounts.
+| where TargetUserSid in (PrivilegedAccounts) or TargetUserName in (PrivilegedAccounts)
+// The core logic: The source of the logon is NOT a known Domain Controller or an approved admin workstation.
+| where IpAddress !in (DomainControllers) and Computer !in (DomainControllers)
+| where IpAddress !in (AdminWorkstations)
+// Exclude logons to the local machine from itself, which can be noisy.
+| where IpAddress != "127.0.0.1" and IpAddress != "::1"
+// Summarize to create a concise alert.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    EventCount = count(),
+    TargetComputers = make_set(Computer, 10)
+    by LogonAccount = TargetUserName,
+       LogonAccountSid = TargetUserSid,
+       SourceIp = IpAddress,
+       SourceHostname = WorkstationName
+// Project the relevant fields for the alert.
+| project
+    StartTime,
+    EndTime,
+    LogonAccount,
+    LogonAccountSid,
+    SourceIp,
+    SourceHostname,
+    TargetComputers,
+    EventCount

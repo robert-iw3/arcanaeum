@@ -1,0 +1,58 @@
+// Name: WinReg RPC Relay to Sensitive Service
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects a potential NTLM relay attack sequence where a failed attempt to connect to the Remote Registry
+//              service over a named pipe is followed shortly by a successful RPC call to a sensitive service like ADCS,
+//              SCM, or Task Scheduler from the same device. This pattern may indicate that an initial connection was
+//              coerced to fail, and the captured credentials were then relayed to a high-value target.
+// Tactic: Credential Access
+// Technique: T1557.001 (NTLM Relaying)
+// False Positive Sensitivity: Medium. While this sequence is highly suspicious, some complex administrative scripts or
+// deployment tools might exhibit similar behavior under certain failure conditions. Investigation should focus on the
+// legitimacy of the initiating process, its command line, and the target of the sensitive RPC call.
+// Data Source: Microsoft 365 Defender (DeviceEvents, DeviceFileEvents)
+
+let timeframe = 1h;
+let lookup_window = 5m;
+
+// Define the interface UUIDs for sensitive services commonly targeted in relay attacks.
+let sensitive_uuids = dynamic([
+    "367abb81-9844-35f1-ad32-98f038001003", // SCM (svcctl)
+    "86d35949-83c9-4044-b424-db363231fd0c", // Task Scheduler (ITaskSchedulerService)
+    "d99e6e70-fc88-11d0-b498-00a0c90312f3"  // ADCS (ICertRequestD2)
+]);
+
+// Combine file and RPC events to identify the attack sequence.
+union DeviceFileEvents, DeviceEvents
+| where TimeGenerated > ago(timeframe)
+// Categorize events into the two stages of the attack pattern.
+| extend EventType = case(
+    // Stage 1: A failed connection attempt to the WinReg named pipe.
+    TableName == "DeviceFileEvents" and IsSuccess == false and FolderPath endswith "\\pipe\\winreg", "FailedWinRegAttempt",
+    // Stage 2: A successful RPC call to a sensitive service.
+    TableName == "DeviceEvents" and ActionType == "RpcClientCall" and tostring(todynamic(AdditionalFields).InterfaceUuid) in (sensitive_uuids), "SensitiveRpcCall",
+    "Other"
+  )
+| where EventType != "Other"
+| extend InterfaceUuid = tostring(todynamic(AdditionalFields).InterfaceUuid)
+// Analyze events sequentially for each device.
+| sort by DeviceId, TimeGenerated asc
+| serialize
+// Look for a 'SensitiveRpcCall' that immediately follows a 'FailedWinRegAttempt'.
+| where EventType == "SensitiveRpcCall"
+    and prev(EventType, 1) == "FailedWinRegAttempt"
+    and (TimeGenerated - prev(TimeGenerated, 1)) <= lookup_window
+| project
+    TimeGenerated,
+    DeviceName,
+    DeviceId,
+    InitiatingProcessAccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RemoteIP,
+    InterfaceUuid,
+    Description = "A failed WinReg RPC attempt was followed by a sensitive RPC call (ADCS, SCM, or Task Scheduler) from the same device, suggesting a potential NTLM relay attack."
+| extend
+    AccountCustomEntity = InitiatingProcessAccountName,
+    HostCustomEntity = DeviceName,
+    IPCustomEntity = RemoteIP

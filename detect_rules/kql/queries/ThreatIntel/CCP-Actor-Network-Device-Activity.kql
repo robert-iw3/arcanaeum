@@ -1,0 +1,57 @@
+// Name: Chinese State-Sponsored Actor Network Device Activity
+// Description: Detects various TTPs associated with Chinese state-sponsored actors targeting network infrastructure.
+// This includes enabling backdoors, modifying ACLs, creating users, and capturing traffic as described in the joint cybersecurity advisory.
+// Author: RW
+// Date: 2025-08-29
+// References:
+// - https://www.cisa.gov/news-events/cybersecurity-advisories/aa25-239a (Placeholder URL for the advisory)
+
+let timeframe = 1d;
+// Define suspicious command line arguments and strings based on the advisory.
+let suspiciousCommands = dynamic([
+    "service sshd_operns start", // Enabling SSH on IOS XR Linux host
+    "access-list 20", // Common ACL name used by actor
+    "access-list 50", // Common ACL name used by actor
+    "access-list 10", // Common ACL name used by actor
+    "useradd cisco", // Adding a new user as seen in the advisory
+    "vi /etc/sudoers", // Modifying sudoers file for privilege escalation
+    "monitor capture", // Starting packet capture
+    "mycap.pcap", // Common pcap filename
+    "tac.pcap", // Common pcap filename for TACACS+
+    "1.pcap", // Common pcap filename
+    "span", // SPAN/RSPAN configuration
+    "erspan" // ERSPAN configuration
+]);
+// Using a union of tables is a common practice for broad hunting.
+// Replace with specific tables relevant to your environment (e.g., CiscoASA, PaloAltoNetworks, Syslog etc.)
+union isfuzzy=true DeviceProcessEvents, DeviceNetworkEvents, CommonSecurityLog, Syslog
+| where TimeGenerated > ago(timeframe)
+// Coalesce command line and message fields into a single 'Activity' field for easier searching.
+| extend Activity = tostring(coalesce(ProcessCommandLine, CommandLine, SyslogMessage, AdditionalExtensions, Message))
+| where
+    // Detects suspicious commands executed on network devices.
+    (isnotempty(Activity) and
+        (
+            Activity has_any (suspiciousCommands) or
+            (Activity has "monitor capture" and Activity has "eq 49") // Specific command to capture TACACS+ traffic
+        )
+    ) or
+    // Detects network connections to non-standard SSH ports used for persistence.
+    (isnotempty(DestinationPort) and
+        (
+            DestinationPort == 57722 or // IOS XR sshd_operns service port
+            (DestinationPort > 1024 and tostring(DestinationPort) endswith "22") // Actor pattern for high ports (e.g., xxx22)
+            // FP-Tuning: The 'xxx22' pattern may be noisy. Exclude legitimate applications or source/destination pairs known to use this pattern.
+            // and SourceIP !in ("x.x.x.x")
+        )
+    )
+| extend
+    timestamp = TimeGenerated,
+    host = tostring(coalesce(DeviceName, Computer)),
+    account = tostring(coalesce(InitiatingProcessAccountName, AccountName, UserName)),
+    process = tostring(coalesce(Process, InitiatingProcessFileName)),
+    command = Activity,
+    src_ip = tostring(coalesce(RemoteIP, SourceIP)),
+    dest_ip = tostring(coalesce(DeviceIP, DestinationIP)),
+    dest_port = tostring(DestinationPort)
+| project-reorder timestamp, host, account, src_ip, dest_ip, dest_port, process, command

@@ -1,0 +1,73 @@
+//    Source IP Spoofing via Vulnerable Tunneling Host
+//    Over 1.8 million hosts are capable of source IP spoofing through vulnerable tunneling protocols, enabling
+//    attackers to bypass filtering and launch further attacks. Detecting instances of source IP spoofing is critical
+//    for network integrity and threat attribution.
+//    Tactics = "Defense Evasion, Initial Access"
+//    Techniques = "T1090"
+//    Author = "RW"
+//    Date = "2025-08-14"
+
+// This detection rule requires firewall logs that can identify the original internal source IP of an outbound packet,
+// even if the source IP in the packet header has been spoofed. In Sentinel's CommonSecurityLog, this field is often 'OriginalSourceIp'.
+// If your firewall logs this differently, you will need to adjust the field name.
+
+let timeframe = 1h;
+
+// --- Configuration: Critical for accuracy ---
+// Define your organization's legitimate public IP ranges used for egress traffic (e.g., for NAT).
+// This list is essential to distinguish between legitimate traffic and traffic with a spoofed source IP.
+let known_organization_public_ips = dynamic([
+    "203.0.113.0/24",
+    "198.51.100.0/25"
+    // e.g., "192.0.2.0/24", "198.51.100.0/24"
+]);
+
+// --- Detection Logic ---
+
+// Part 1: Identify internal hosts sending outbound traffic with a source IP address that does not belong to your organization.
+// This is a strong indicator of egress filtering failure and potential source IP spoofing.
+let EgressSpoofingHosts = CommonSecurityLog
+| where TimeGenerated > ago(timeframe)
+| where CommunicationDirection == "Outbound"
+| where isnotempty(OriginalSourceIp) and ipv4_is_private(OriginalSourceIp) // Ensure the traffic originated from a private internal IP.
+// The core spoofing logic: the packet's source IP is NOT one of our known public IPs.
+| where not(ipv4_is_in_any_range(SourceIP, known_organization_public_ips))
+// Also exclude packets where the source is still a private IP, as this is a different kind of misconfiguration (lack of NAT).
+| where not(ipv4_is_private(SourceIP))
+| distinct InternalHostIp = OriginalSourceIp;
+
+// Part 2: Identify internal hosts that are receiving traffic using common tunneling protocols from the internet.
+// These are potential candidates for being vulnerable tunneling hosts.
+let tunnel_protocol_names = dynamic(["ipip", "gre", "ipv6-in-ipv4", "4", "41", "47"]);
+let gue_port = 6080;
+
+let InboundTunnelingHosts = CommonSecurityLog
+| where TimeGenerated > ago(timeframe)
+| where CommunicationDirection == "Inbound"
+| where isnotempty(DestinationIP) and ipv4_is_private(DestinationIP) // Traffic is destined for an internal host.
+| where not(ipv4_is_private(SourceIP)) // Traffic originates from the internet.
+// Filter for common tunneling protocols (IPIP, GRE, 6in4) or the GUE protocol on its default UDP port.
+| where (isnotempty(Protocol) and tolower(Protocol) in (tunnel_protocol_names)) or (tolower(Protocol) == "udp" and DestinationPort == gue_port)
+| distinct InternalHostIp = DestinationIP;
+
+// Part 3: Correlate the two behaviors. A host that both receives tunnel traffic and sends spoofed traffic is a high-confidence indicator of abuse.
+EgressSpoofingHosts
+| join kind=inner (
+    InboundTunnelingHosts
+  ) on InternalHostIp
+// Join back to the original logs to get details of the spoofed traffic for the alert.
+| join kind=inner (
+    CommonSecurityLog
+    | where TimeGenerated > ago(timeframe)
+    | where CommunicationDirection == "Outbound"
+    | where isnotempty(OriginalSourceIp)
+    | where not(ipv4_is_in_any_range(SourceIP, known_organization_public_ips)) and not(ipv4_is_private(SourceIP))
+  ) on $left.InternalHostIp == $right.OriginalSourceIp
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    EventCount = count(),
+    SpoofedSources = make_set(SourceIP, 10),
+    Destinations = make_set(DestinationIP, 10),
+    DestinationPorts = make_set(DestinationPort, 10)
+    by AbusedHost = InternalHostIp

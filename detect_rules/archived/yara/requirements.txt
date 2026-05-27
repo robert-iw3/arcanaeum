@@ -1,0 +1,4 @@
+yara-python==4.5.4
+chardet==5.2.0
+psutil==7.0.0
+tqdm==4.67.1

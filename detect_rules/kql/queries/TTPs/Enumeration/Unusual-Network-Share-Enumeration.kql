@@ -1,0 +1,42 @@
+// Name: Unusual Network Share Enumeration by Browser
+// Author: RW
+// Date: 2025-08-13
+// Description: Detects a browser process enumerating or reading an unusually high number of files from a network share.
+// This behavior is a strong indicator of the FileJacking technique, where a malicious website uses browser APIs to exfiltrate
+// data from mapped drives. This rule is based on monitoring network share read events, similar to what Windows Event ID 5145 provides.
+// MITRE ATT&CK: T1083, T1119, T1059
+// False Positives: Medium. Legitimate web applications that interact heavily with network shares (e.g., web-based file explorers, some
+// SharePoint integrations) could trigger this alert. Tuning the file access threshold or excluding trusted applications may be necessary.
+
+let timeframe = 10m;
+// The threshold for the number of unique files accessed from a network share. Adjust based on environment.
+let file_access_threshold = 50;
+let browser_processes = dynamic(['msedge.exe', 'chrome.exe', 'firefox.exe', 'brave.exe', 'opera.exe']);
+
+DeviceFileEvents
+| where Timestamp > ago(timeframe)
+// The 'FileCreated' action can indicate a handle being opened to a file for reading, which is a good proxy for an access event.
+| where ActionType == "FileCreated"
+// Filter for activity initiated by common web browsers.
+| where InitiatingProcessFileName in~ (browser_processes)
+// Core logic: Focus on access to network shares, identified by UNC paths.
+| where FolderPath startswith @"\\"
+| summarize
+    StartTime = min(Timestamp),
+    EndTime = max(Timestamp),
+    AccessedFilePaths = make_set(strcat(FolderPath, FileName), 100),
+    UniqueFileCount = dcount(strcat(FolderPath, FileName))
+    by DeviceId, DeviceName, AccountName, AccountDomain, InitiatingProcessFileName, InitiatingProcessId, InitiatingProcessCommandLine
+// Trigger an alert if the number of unique files accessed exceeds the defined threshold.
+| where UniqueFileCount > file_access_threshold
+| project
+    StartTime,
+    EndTime,
+    DeviceName,
+    AccountName,
+    AccountDomain,
+    InitiatingProcessFileName,
+    InitiatingProcessId,
+    InitiatingProcessCommandLine,
+    UniqueFileCount,
+    AccessedFilePaths

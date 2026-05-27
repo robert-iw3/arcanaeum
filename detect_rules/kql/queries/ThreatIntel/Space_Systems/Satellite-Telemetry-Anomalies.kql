@@ -1,0 +1,63 @@
+// Name: Satellite Telemetry Anomalies
+// Description: Detects unexpected changes in satellite telemetry data, such as sudden power fluctuations or reboots.
+// Such anomalies could indicate non-kinetic physical attacks (e.g., high-powered microwave weapons) or cyberattacks.
+// This rule requires a custom data source ('SatelliteTelemetry') with fields for power levels and system status.
+// Tactic: Impact
+// Technique: T1529, T1565.001
+// Author: RW
+// Date: 2025-08-19
+
+// Define time windows for analysis. A longer baseline provides more accurate anomaly detection.
+let baseline_window = 24h;
+let recent_window = 1h;
+// Define thresholds. These are placeholders and MUST be tuned.
+// Threshold for power level deviation, in standard deviations. A value of 3 or higher is typically significant.
+let power_stdev_threshold = 3.0;
+// Threshold for reboots within the recent_window. Assumes reboots are rare.
+let reboot_threshold = 1;
+
+// This rule requires a custom table, named 'SatelliteTelemetry' for this example.
+// It is expected to contain fields like SatelliteID, PowerLevel_W (power in watts), and SystemStatus.
+let PowerBaseline =
+    SatelliteTelemetry
+    | where TimeGenerated between (ago(baseline_window) .. ago(recent_window))
+    // Calculate the normal operating power baseline (average and standard deviation) for each satellite.
+    | summarize AvgPower = avg(PowerLevel_W), StdevPower = stdev(PowerLevel_W) by SatelliteID
+    | where StdevPower > 0; // Exclude satellites with no power variance to avoid division by zero.
+let RecentTelemetry =
+    SatelliteTelemetry
+    | where TimeGenerated > ago(recent_window);
+let PowerAnomalies =
+    RecentTelemetry
+    | where isnotempty(PowerLevel_W)
+    | join kind=inner PowerBaseline on SatelliteID
+    // Calculate the Z-Score to measure how far the current power level deviates from the norm.
+    | extend ZScore = abs(PowerLevel_W - AvgPower) / StdevPower
+    | where ZScore > power_stdev_threshold
+    | project
+        TimeGenerated,
+        SatelliteID,
+        DetectionMethod = "Power Fluctuation Anomaly",
+        Description = strcat("Power level of ", PowerLevel_W, "W is ", round(ZScore, 2), " stdev from the norm."),
+        AvgPower,
+        StdevPower,
+        CurrentPower = PowerLevel_W;
+let UnexpectedReboots =
+    RecentTelemetry
+    // This assumes a status field indicates a reboot. This may need to be adjusted based on your data schema.
+    | where SystemStatus == "Rebooted"
+    | summarize RebootCount = count() by SatelliteID, bin(TimeGenerated, recent_window)
+    | where RebootCount >= reboot_threshold
+    | project
+        TimeGenerated,
+        SatelliteID,
+        DetectionMethod = "Unexpected Reboot",
+        Description = strcat(RebootCount, " reboot(s) detected in the last hour."),
+        AvgPower = double(null),
+        StdevPower = double(null),
+        CurrentPower = double(null);
+// Combine results from both detection methods.
+union PowerAnomalies, UnexpectedReboots
+| extend
+    timestamp = TimeGenerated,
+    customEntity = SatelliteID

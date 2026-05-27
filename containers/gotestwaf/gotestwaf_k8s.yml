@@ -1,0 +1,39 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gotestwaf-job-{{ item | hash('md5') }}
+  namespace: default
+spec:
+  parallelism: {{ parallel }}
+  backoffLimit: {{ retries }}
+  activeDeadlineSeconds: {{ timeout }}
+  template:
+    spec:
+      containers:
+      - name: gotestwaf
+        image: gotestwaf
+        command: ["/app/gotestwaf", "--url={{ item }}", "--noEmailReport"]
+        volumeMounts:
+        - name: reports
+          mountPath: /app/reports
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+        livenessProbe:
+          exec:
+            command: ["/bin/sh", "-c", "ps aux | grep gotestwaf | grep -v grep"]
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+      volumes:
+      - name: reports
+        hostPath:
+          path: "{{ output_dir }}"
+          type: Directory
+      restartPolicy: Never

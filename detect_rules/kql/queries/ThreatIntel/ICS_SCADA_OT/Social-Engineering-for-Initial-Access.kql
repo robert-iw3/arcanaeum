@@ -1,0 +1,48 @@
+// Rule Title: Suspicious Process Spawned by User-Facing Application
+// Description: This rule detects when a common user-facing application (like an email client, web browser, or office suite application) spawns a suspicious child process, such as a command shell or scripting engine. This behavior is a strong indicator of a successful social engineering or phishing attempt, where a user has been tricked into opening a malicious link or document, leading to code execution.
+// Author: RW
+// Date: 2025-08-17
+// References:
+// - https://www.porttechnology.org/news/maritime-cybersecurity-threats-and-challenges/
+// False Positive Sensitivity: Medium
+// - Legitimate add-ins, macros, or "open with" actions can sometimes cause this behavior.
+// - The rule includes basic filtering to reduce noise, but environment-specific command lines may need to be excluded.
+// - For example, a legitimate software installer launched from a browser might trigger this. Tuning may be required to exclude known good parent-child process relationships or command lines.
+// Detection Comment Level: Medium
+
+// Define parent processes often targeted in phishing attacks.
+let parent_processes = dynamic([
+    "outlook.exe", "winword.exe", "excel.exe", "powerpnt.exe",
+    "acrord32.exe", "acrordr32.exe", "chrome.exe", "msedge.exe",
+    "firefox.exe", "iexplore.exe"
+]);
+// Define suspicious child processes often used for initial access payloads.
+let child_processes = dynamic([
+    "powershell.exe", "pwsh.exe", "cmd.exe", "wscript.exe",
+    "cscript.exe", "mshta.exe", "rundll32.exe"
+]);
+DeviceProcessEvents
+| where TimeGenerated > ago(1d)
+// Core Logic: A user-facing application spawns a suspicious process.
+| where InitiatingProcessFileName in~ (parent_processes) and FileName in~ (child_processes)
+// FP Reduction: Filter out some potentially benign rundll32 executions.
+// This is a placeholder; more specific command lines might need to be excluded based on environment specifics.
+| where not (FileName =~ "rundll32.exe" and ProcessCommandLine matches regex @"rundll32\.exe[""]?\s+[""]?C:\\Windows\\System32\\")
+// FP Reduction: Filter out very simple cmd.exe calls that might be legitimate.
+| where not (FileName =~ "cmd.exe" and ProcessCommandLine matches regex @"cmd.exe[""]?\s?\/c\s+exit")
+// Summarize the findings to create a concise alert.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    SuspiciousChildProcesses = make_set(FileName, 5),
+    SuspiciousCommandLines = make_set(ProcessCommandLine, 5),
+    ParentProcesses = make_set(InitiatingProcessFileName, 5)
+    by DeviceName, AccountName
+| extend
+    RuleTitle = "Suspicious Process Spawned by User-Facing Application",
+    Description = strcat(
+        "A user-facing application (", tostring(ParentProcesses),
+        ") spawned a suspicious child process (", tostring(SuspiciousChildProcesses),
+        ") on host '", DeviceName, "' by user '", AccountName,
+        "'. This is a strong indicator of a successful phishing attempt."
+    )

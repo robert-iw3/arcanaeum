@@ -1,0 +1,119 @@
+// Rule Title: MURKY PANDA Cloud and Endpoint TTPs
+// Author: RW
+// Date: 2025-08-21
+// References: https://www.crowdstrike.com/en-us/blog/murky-panda-trusted-relationship-threat-in-cloud/
+// Description: This rule detects a variety of Tactics, Techniques, and Procedures (TTPs) associated with the China-nexus adversary MURKY PANDA.
+// It covers cloud-based activities in Entra ID, such as tampering with Service Principal credentials and abuse of Cloud Solution Provider (CSP)
+// privileges, as well as endpoint activity related to their custom malware "CloudedHope" and potential web shell usage.
+// False Positive Sensitivity: Medium.
+// Some patterns, like abnormal Service Principal sign-ins or web server process behavior, may require tuning based on your environment's baseline.
+
+let lookback = 1d;
+
+// Pattern 1: Entra ID Service Principal Credential Tampering (T1098.001)
+// Detects when new credentials are added to a Service Principal, a technique used by MURKY PANDA for persistence.
+let sp_creds_added = AuditLogs
+| where TimeGenerated > ago(lookback)
+| where Category == "ApplicationManagement" and OperationName == "Add service principal credentials"
+| extend InitiatingUser = tostring(InitiatedBy.user.userPrincipalName)
+| extend InitiatingIp = tostring(InitiatedBy.user.ipAddress)
+| extend TargetPrincipalName = tostring(TargetResources[0].displayName)
+// FP Tuning: This can be a legitimate administrative action. Consider filtering for non-admin users or IPs that do not normally perform this action.
+| project
+    TimeGenerated,
+    DetectionPattern = "MURKY PANDA TTP: New Service Principal Credential",
+    Tactic = "Persistence, Privilege Escalation",
+    Technique = "T1098.001",
+    Actor = InitiatingUser,
+    Target = TargetPrincipalName,
+    SourceIP = InitiatingIp,
+    Description = strcat("User '", Actor, "' added new credentials to Service Principal '", Target, "' from IP '", SourceIP, "'.")
+    ;
+// Pattern 2: Cloud Solution Provider (CSP) New User Creation (T1078.004)
+// Detects when a user is created by a CSP account, which MURKY PANDA leveraged to create backdoor accounts in downstream tenants.
+let csp_user_added = AuditLogs
+| where TimeGenerated > ago(lookback)
+| where OperationName == "Add user"
+// The 'X' in the IP address indicates cross-tenant access by a partner/CSP.
+| where InitiatedBy.user.ipAddress has "X"
+| extend InitiatingUser = tostring(InitiatedBy.user.userPrincipalName)
+| extend InitiatingIp = tostring(InitiatedBy.user.ipAddress)
+| extend NewUserCreated = tostring(TargetResources[0].userPrincipalName)
+// FP Tuning: This is expected behavior for CSPs. This alert is best used to trigger a review of the new user's subsequent activity.
+| project
+    TimeGenerated,
+    DetectionPattern = "MURKY PANDA TTP: New User Added by Cloud Solution Provider",
+    Tactic = "Persistence",
+    Technique = "T1078.004",
+    Actor = InitiatingUser,
+    Target = NewUserCreated,
+    SourceIP = InitiatingIp,
+    Description = strcat("CSP user '", Actor, "' created a new user '", Target, "'.")
+    ;
+// Pattern 3: Abnormal Service Principal Sign-in to Access Email (T1078.004, T1114.002)
+// Detects Service Principals accessing email resources, a specific objective of MURKY PANDA.
+let sp_abnormal_signin = AADServicePrincipalSignInLogs
+| where TimeGenerated > ago(lookback)
+| where ResultType == 0 // Successful sign-ins
+// The intel notes that the actor accessed emails. This is often represented by the 'Office 365 Exchange Online' resource.
+| where ResourceDisplayName == "Office 365 Exchange Online"
+// FP Tuning: Some applications are expected to access mailboxes. Create an exclusion list of approved Service Principal App IDs or names.
+| project
+    TimeGenerated,
+    DetectionPattern = "MURKY PANDA TTP: Service Principal Accessed Email",
+    Tactic = "Collection",
+    Technique = "T1078.004, T1114.002",
+    Actor = tostring(ServicePrincipalName),
+    Target = tostring(ResourceDisplayName),
+    SourceIP = tostring(IPAddress),
+    Description = strcat("Service Principal '", Actor, "' signed in to access '", Target, "' from IP '", SourceIP, "'.")
+    ;
+// Pattern 4: CloudedHope Malware Execution (T1204.002)
+// Detects potential execution of the "CloudedHope" malware on Linux systems.
+let cloudedhope_malware = DeviceProcessEvents
+| where TimeGenerated > ago(lookback)
+| where DeviceOSPlatform == "Linux"
+// The intel mentions the malware name is "CloudedHope". Also check for execution from temp directories as a generic signal.
+| where FileName =~ "CloudedHope" or FolderPath in ("/tmp/", "/var/tmp/", "/dev/shm/")
+| extend HostName = tostring(DeviceName), Account = tostring(InitiatingProcessAccountName)
+// FP Tuning: Execution from /tmp can be common. Filter known benign processes or parent processes. Focus on alerts where FileName is 'CloudedHope'.
+| project
+    TimeGenerated,
+    DetectionPattern = "MURKY PANDA TTP: CloudedHope Malware Execution",
+    Tactic = "Execution",
+    Technique = "T1204.002",
+    Actor = Account,
+    Target = tostring(FileName),
+    Host = HostName,
+    Description = strcat("Potential CloudedHope malware execution on host '", Host, "'. Process: '", Target, "' in path '", FolderPath, "'.")
+    ;
+// Pattern 5: Web Server Spawning Shell (T1505.003)
+// Detects a common pattern for web shells where a web server process spawns a command shell.
+let webshell_process = DeviceProcessEvents
+| where TimeGenerated > ago(lookback)
+| where InitiatingProcessFileName in ("w3wp.exe", "httpd.exe", "nginx.exe", "tomcat.exe", "apache2")
+| where FileName in ("sh", "bash", "pwsh", "powershell.exe", "cmd.exe")
+| extend HostName = tostring(DeviceName), Account = tostring(AccountName)
+// FP Tuning: Some admin scripts or applications may legitimately perform this action. Investigate the full command line.
+| project
+    TimeGenerated,
+    DetectionPattern = "MURKY PANDA TTP: Potential Web Shell Activity",
+    Tactic = "Persistence, Command and Control",
+    Technique = "T1505.003",
+    Actor = Account,
+    Target = tostring(FileName),
+    Host = HostName,
+    Description = strcat("Web server process '", InitiatingProcessFileName, "' spawned a shell '", Target, "' on host '", Host, "'.")
+    ;
+// Union all detection patterns into a single view
+union isfuzzy=true
+    sp_creds_added,
+    csp_user_added,
+    sp_abnormal_signin,
+    cloudedhope_malware,
+    webshell_process
+| extend
+    timestamp = TimeGenerated,
+    AccountCustomEntity = Actor,
+    HostCustomEntity = Host,
+    IPCustomEntity = SourceIP

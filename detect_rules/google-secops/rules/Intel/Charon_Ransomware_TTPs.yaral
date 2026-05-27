@@ -1,0 +1,72 @@
+rule charon_ransomware_ttps {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects a combination of Tactics, Techniques, and Procedures (TTPs) associated with the Charon ransomware, including DLL sideloading, process injection, a specific mutex, and encryption artifacts."
+    false_positives = "The correlation of multiple specific behaviors significantly reduces the risk of false positives. However, individual components, if monitored in isolation, could be triggered by legitimate administrative or software behavior."
+    tags = "RANSOMWARE, CHARON, APT, EARTH_BAXIA, WINDOWS"
+    tactic = "TA0002, TA0005, TA0007, TA0040"
+    technique = "T1574.002, T1055, T1543.003, T1490, T1486"
+
+  events:
+    // T1574.002 & T1055: Detects Edge.exe (or its original name) launching svchost.exe for process injection.
+    $sideload_and_inject.metadata.event_type = "PROCESS_LAUNCH"
+    $sideload_and_inject.principal.hostname = $hostname
+    // The attack chain uses a legitimate binary to sideload a malicious DLL, which then injects into svchost.exe.
+    // We detect the final step of this chain: the parent process launching the injection target.
+    (
+      re.regex($sideload_and_inject.principal.process.file.full_path, `\\Edge\.exe$`) or
+      re.regex($sideload_and_inject.principal.process.file.full_path, `\\cookie_exporter\.exe$`)
+    )
+    re.regex($sideload_and_inject.target.process.file.full_path, `\\svchost\.exe$`)
+    // The report indicates injection into svchost.exe without parameters.
+    $sideload_and_inject.target.process.command_line = $sideload_and_inject.target.process.file.full_path
+
+    // T1543.003: Detects the unique mutex created by Charon ransomware.
+    $mutex.metadata.event_type = "MUTEX_CREATE"
+    $mutex.principal.hostname = $hostname
+    $mutex.target.mutex.name = "OopsCharonHere"
+
+    // T1486: Detects files being renamed with the ".Charon" extension.
+    $file_rename.metadata.event_type = "FILE_RENAME"
+    $file_rename.principal.hostname = $hostname
+    re.regex($file_rename.target.file.full_path, `\.Charon$`) nocase
+
+    // T1486: Detects the creation of the specific ransom note file.
+    $ransom_note.metadata.event_type = "FILE_CREATION"
+    $ransom_note.principal.hostname = $hostname
+    re.regex($ransom_note.target.file.full_path, `\\How To Restore Your Files\.txt$`) nocase
+
+    // T1490: Detects the command to delete shadow copies, a common ransomware precursor.
+    // Note: The report states Charon uses a COM interface, which may not generate this event. This is a proxy for the behavior.
+    $shadow_delete.metadata.event_type = "PROCESS_LAUNCH"
+    $shadow_delete.principal.hostname = $hostname
+    re.regex($shadow_delete.target.process.file.full_path, `\\vssadmin\.exe$`)
+    re.regex($shadow_delete.target.process.command_line, `delete shadows`) nocase
+
+  match:
+    // Correlate these behaviors on a single host over a 30-minute window.
+    $hostname over 30m
+
+  outcome:
+    // Set a high risk score due to the strong indicators of ransomware.
+    $risk_score = 90
+    $principal_hostname = $hostname
+    $sideload_parent_process = array_distinct($sideload_and_inject.principal.process.command_line)
+    $sideload_target_process = array_distinct($sideload_and_inject.target.process.command_line)
+    $mutex_name = array_distinct($mutex.target.mutex.name)
+    $renamed_file_samples = array_distinct($file_rename.target.file.full_path)
+    $ransom_note_paths = array_distinct($ransom_note.target.file.full_path)
+    $shadow_delete_command = array_distinct($shadow_delete.target.process.command_line)
+    // Count of distinct ransomware indicators.
+    $renamed_file_count = count_distinct($file_rename.metadata.id)
+    $ransom_note_count = count_distinct($ransom_note.metadata.id)
+
+  condition:
+    // The detection triggers on the unique mutex OR the sideload/injection pattern combined with widespread encryption activity.
+    $mutex or (
+      $sideload_and_inject and (
+        #file_rename > 20 or #ransom_note > 5
+      )
+    )
+}

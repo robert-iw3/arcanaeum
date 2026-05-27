@@ -1,0 +1,32 @@
+// Name: VTGuard Security Failure Detected
+// Author: RW
+// Date: 2025-08-02
+// Description: Detects the string '_report_securityfailure' in event data. This function is related to Control Flow Guard (CFG/VTGuard) and is invoked when a potential execution flow hijack is detected, such as corrupting a C++ object's virtual function table. This can be an indicator of exploitation for defense evasion.
+// False Positives: Medium. While a strong indicator of malicious activity, this can also be triggered by buggy or unstable legitimate software. Investigation is required to determine the root cause.
+// Tactic: Defense Evasion
+// Technique: T1211, Exploitation for Defense Evasion
+
+DeviceEvents
+// The string '_report_securityfailure' indicates a Control Flow Guard (CFG) or VTGuard failure.
+// Note: This string may appear in various fields; AdditionalFields is a common location for this type of data.
+| where AdditionalFields contains "_report_securityfailure"
+// The source article suggests correlating this finding with other system errors for higher fidelity.
+| summarize
+    FirstSeen = min(Timestamp),
+    LastSeen = max(Timestamp),
+    EventTypes = make_set(ActionType)
+    by DeviceId, DeviceName, InitiatingProcessFileName, InitiatingProcessId, FileName, ProcessId, AdditionalFields
+| project
+    Timestamp = FirstSeen,
+    LastSeen,
+    DeviceId,
+    DeviceName,
+    // The process that triggered the security failure.
+    ProcessName = FileName,
+    ProcessId,
+    // The parent or responsible process, if available.
+    InitiatingProcessName = InitiatingProcessFileName,
+    InitiatingProcessId,
+    EventTypes,
+    // The AdditionalFields will contain the call stack or other context with the failure string.
+    Details = AdditionalFields

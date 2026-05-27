@@ -1,0 +1,82 @@
+rule linux_multi_ttp_attack_pattern_koske {
+  meta:
+    author = "RW"
+    date = "2025-08-24"
+    description = "Detects a combination of TTPs associated with the Koske malware and similar threats, including polyglot file execution, in-memory execution, LD_PRELOAD abuse, and persistence via crontab or shell configuration files."
+    tactic = "TA0002, TA0003, TA0004, TA0005"
+    technique = "T1059.004, T1574.006, T1053.003, T1546.004"
+    tags = "KOSKE, LINUX, POLYGLOT, IN_MEMORY_EXECUTION, LD_PRELOAD, PERSISTENCE"
+    false_positives = "Legitimate administrative scripts may execute from /tmp or /dev/shm. Software installation or update scripts can trigger in-memory execution patterns. Use of LD_PRELOAD is common for system monitoring, debugging (e.g., jemalloc), or graphics driver hooks (e.g., MangoHud, Steam overlay). Administrators may edit crontab interactively (e.g., crontab -e) or modify their own shell configuration files."
+
+  events:
+    // Pattern 1: Polyglot Image Execution
+    $polyglot.metadata.event_type = "PROCESS_CREATION"
+    $polyglot.principal.hostname = $hostname
+    // Detects piping output from 'grep -a <image_file>' to a shell.
+    re.regex($polyglot.target.process.command_line, `\|`)
+    re.regex($polyglot.target.process.command_line, `grep\s+-a`)
+    re.regex($polyglot.target.process.command_line, `\.(jpg|jpeg|png|gif)`)
+    re.regex($polyglot.target.process.command_line, `\s(bash|sh)($|\s)`)
+
+    // Pattern 2: In-memory execution from temp directories
+    $in_memory_tmp.metadata.event_type = "PROCESS_CREATION"
+    $in_memory_tmp.principal.hostname = $hostname
+    // Detects a shell executing a file from a temporary, in-memory location.
+    re.regex($in_memory_tmp.principal.process.file.path, `/(sh|bash)$`)
+    ($in_memory_tmp.target.process.file.path startswith "/tmp/" or $in_memory_tmp.target.process.file.path startswith "/dev/shm/")
+
+    // Pattern 2b: In-memory execution via command line interpreter
+    $in_memory_cmd.metadata.event_type = "PROCESS_CREATION"
+    $in_memory_cmd.principal.hostname = $hostname
+    // Detects a shell being invoked with -c or -i to run commands directly.
+    re.regex($in_memory_cmd.target.process.command_line, `\s(bash|sh)\s+(-c|-i)\s`)
+
+    // Pattern 3: LD_PRELOAD abuse
+    $ld_preload.metadata.event_type = "PROCESS_CREATION"
+    $ld_preload.principal.hostname = $hostname
+    // Detects use of the LD_PRELOAD environment variable to hijack execution flow.
+    re.regex($ld_preload.target.process.command_line, `LD_PRELOAD=`)
+
+    // Pattern 4: Persistence via crontab modification
+    $cron.metadata.event_type = "PROCESS_CREATION"
+    $cron.principal.hostname = $hostname
+    // Detects crontab being used to edit or add jobs, excluding view/remove commands.
+    $cron.target.process.file.path endswith "/crontab"
+    not re.regex($cron.target.process.command_line, `\s-(l|r)($|\s)`)
+
+    // Pattern 5: Persistence via shell configuration file modification
+    $shell_config.metadata.event_type = "FILE_MODIFICATION"
+    $shell_config.principal.hostname = $hostname
+    // Detects modification of common shell startup files.
+    re.regex($shell_config.target.file.path, `/\.(bashrc|bash_profile|bash_logout|profile|zshrc)$`)
+
+  match:
+    $hostname over 1h
+
+  outcome:
+    // Risk score is elevated due to the suspicious nature of these TTPs.
+    $risk_score = 65
+    $principal_hostname = array_distinct($hostname)
+    // Collect command lines from all matching process events.
+    $command_lines = array_distinct(
+        $polyglot.target.process.command_line,
+        $in_memory_tmp.target.process.command_line,
+        $in_memory_cmd.target.process.command_line,
+        $ld_preload.target.process.command_line,
+        $cron.target.process.command_line
+    )
+    // Collect modified file paths.
+    $modified_files = array_distinct($shell_config.target.file.path)
+    // Identify which patterns were triggered.
+    $detection_patterns = array_distinct(
+        if($polyglot, "Polyglot Image Execution", ""),
+        if($in_memory_tmp, "In-Memory Execution (Temp Directory)", ""),
+        if($in_memory_cmd, "In-Memory Execution (Interpreter)", ""),
+        if($ld_preload, "LD_PRELOAD Abuse", ""),
+        if($cron, "Crontab Persistence", ""),
+        if($shell_config, "Shell Config Persistence", "")
+    )
+
+  condition:
+    $polyglot or $in_memory_tmp or $in_memory_cmd or $ld_preload or $cron or $shell_config
+}

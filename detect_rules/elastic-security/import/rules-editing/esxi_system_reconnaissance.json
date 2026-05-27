@@ -1,0 +1,18 @@
+{
+  "type": "detection-engine.rule",
+  "id": "esxi-system-reconnaissance",
+  "attributes": {
+    "risk_score": 80,
+    "enabled": true,
+    "name": "Suspicious ESXi Reconnaissance and Configuration Changes",
+    "description": "Detects various indicators of compromise on ESXi hosts, including system reconnaissance via `esxcli`, root logins, permission changes, SSH access, security configuration modifications, and suspicious file transfers.",
+    "rule_id": "esxi_system_reconnaissance",
+    "index": ["logs-esxi.*"],
+    "language": "kuery",
+    "query": "(message:\"*esxcli system*\" AND (message:\"* get*\" OR message:\"* list*\") AND NOT message:\"*filesystem*\") OR message:\"*root*logged in*\" OR (message:\"*esxcli system permission set*\" AND message:\"*role Admin*\") OR message:\"*esxcli software acceptance set*\" OR message:\"*SSH access has been enabled*\" OR (message:\"*system settings encryption set*\" AND (message:\"*--require-secure-boot=0*\" OR message:\"*--require-exec-installed-only=0*\" OR message:\"*execInstalledOnly=false*\")) OR (message:\"*File download from path*\" AND message:\"*was initiated from*\") OR message:\"*esxcli system auditrecords*\" OR (message:\"*syslog config set*\" AND message:\"*esxcli*\") OR (message:\"*Set called with key*\" AND (message:\"*Syslog.global.logHost*\" OR message:\"*Syslog.global.logdir*\")) OR (message:\"*NTPClock*\" AND message:\"*system clock stepped*\")",
+    "interval": "10m",
+    "severity": "high",
+    "type": "query",
+    "version": "1"
+  }
+}

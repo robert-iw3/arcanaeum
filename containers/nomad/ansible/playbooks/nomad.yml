@@ -1,0 +1,18 @@
+---
+- name: Deploy Nomad servers
+  hosts: nomad_servers
+  become: yes
+  roles:
+    - role: nomad
+      nomad_server_enabled: true
+      nomad_client_enabled: false
+  tags: [nomad, servers]
+
+- name: Deploy Nomad clients
+  hosts: nomad_clients
+  become: yes
+  roles:
+    - role: nomad
+      nomad_server_enabled: false
+      nomad_client_enabled: true
+  tags: [nomad, clients]

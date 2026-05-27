@@ -1,0 +1,60 @@
+// Name: Process Hollowing Indicators
+// Author: RW
+// Date: 2025-08-07
+// Description: Detects a sequence of events indicative of process hollowing, where a parent process
+//              creates a new process in a suspended state and then modifies its memory. This is a
+//              common technique used by malware to evade defenses by injecting malicious code into a legitimate process.
+// Mitre TTPs: T1055.012
+// False Positive Sensitivity: Medium
+
+// Define a time window for the correlation.
+let timeframe = 10m;
+
+// Find processes created in a suspended state.
+// The 'ProcessCreationFlags' containing '4' corresponds to the CREATE_SUSPENDED flag.
+let SuspendedProcessCreation =
+    DeviceProcessEvents
+    | where Timestamp > ago(timeframe)
+    | where ActionType == "ProcessCreated" and ProcessCreationFlags has "4"
+    | project SuspendedProcessCreationTime = Timestamp, DeviceId, DeviceName,
+              ParentProcessId = InitiatingProcessId,
+              ParentProcessName = InitiatingProcessFileName,
+              ParentProcessCommandLine = InitiatingProcessCommandLine,
+              SuspendedProcessId = ProcessId,
+              SuspendedProcessName = FileName,
+              SuspendedProcessCommandLine = ProcessCommandLine;
+
+// Find subsequent process access events with high-privilege access rights from the same parent.
+// This indicates potential memory modification of the suspended process.
+let MemoryModification =
+    DeviceEvents
+    | where Timestamp > ago(timeframe)
+    | where ActionType == "OpenProcessApiCall"
+    // Filter for high-privilege access rights often used in process hollowing.
+    // 0x1F0FFF is PROCESS_ALL_ACCESS, a strong indicator of malicious intent.
+    | where GrantedAccess in ("0x1F0FFF", "0x1FFFFF")
+    | project MemoryModificationTime = Timestamp, DeviceId,
+              ParentProcessId = InitiatingProcessId,
+              SuspendedProcessId = RemoteProcessId;
+
+// Correlate the suspended process creation with the memory access event.
+SuspendedProcessCreation
+| join kind=inner (
+    MemoryModification
+) on DeviceId, ParentProcessId, SuspendedProcessId
+// Ensure the memory modification happens shortly after the process is created.
+| where MemoryModificationTime between (SuspendedProcessCreationTime .. (SuspendedProcessCreationTime + 1m))
+// False Positive Tuning: Legitimate software like debuggers, updaters, or some security tools may use this technique.
+// Exclude known legitimate parent processes to reduce noise.
+// For example: where ParentProcessName !in ("updater.exe", "debugger.exe", "VsDebugConsole.exe")
+| project
+    Timestamp = SuspendedProcessCreationTime,
+    DeviceId,
+    DeviceName,
+    ParentProcessName,
+    ParentProcessCommandLine,
+    SuspendedProcessName,
+    SuspendedProcessCommandLine,
+    Tactic = "Defense Evasion",
+    Technique = "Process Hollowing",
+    MitreTTP = "T1055.012"

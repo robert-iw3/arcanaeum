@@ -1,0 +1,27 @@
+title: Suspicious AWS SSM Session Manager Activity
+id: 566245a6-d4f7-4d35-809b-8da39426ac66
+status: experimental
+description: Detects the start or resumption of an AWS Systems Manager (SSM) session. While a legitimate administrative feature, attackers can abuse SSM Session Manager to gain interactive shell access to EC2 instances, bypassing traditional network controls like security groups.
+references:
+  - https://unit42.paloaltonetworks.com/cloud-virtual-machine-attack-vectors/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.execution
+  - attack.lateral_movement
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+        # Events indicating an interactive session was started or resumed via SSM
+    eventSource: 'ssm.amazonaws.com'
+    eventName:
+      - StartSession
+      - ResumeSession
+  condition: selection
+falsepositives:
+  - Legitimate remote administration by system administrators, SREs, or support personnel using SSM Session Manager.
+  - Automated processes that use SSM for remote access or command execution.
+  - To reduce false positives, this rule should be tuned by creating an allowlist of trusted IAM users/roles or source IP addresses that are expected to use this functionality.
+level: medium

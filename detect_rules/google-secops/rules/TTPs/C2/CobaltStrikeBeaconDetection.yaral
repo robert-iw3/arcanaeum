@@ -1,0 +1,43 @@
+rule CobaltStrikeBeaconDetection {
+  meta:
+    author = "RW"
+    description = "Detects Cobalt Strike beacon activity by looking for named pipes with known patterns and suspicious cross-process injection."
+    mitre_attack = "T1071, T1055"
+    severity = "HIGH" // Setting severity to HIGH due to the nature of Cobalt Strike activity
+    false_positives = "Legitimate applications using similar named pipes or performing cross-process injection may cause false positives. Tune allowlists accordingly."
+
+  events:
+    // Detection 1: Cobalt Strike Named Pipe Creation
+    $pipe_event.metadata.event_type = "PROCESS_NAMED_PIPE_CREATION" // UDM event type for named pipe creation
+    // Check if the named pipe name matches known Cobalt Strike patterns
+    $pipe_event.target.process.file.full_path contains_any (
+        "\\pipe\\msagent_",
+        "\\pipe\\MSSE-",
+        "\\pipe\\postex_",
+        "\\pipe\\status_",
+        "\\pipe\\csexec_",
+        "\\pipe\\csrev_",
+        "\\pipe\\imposecost"
+    )
+
+    // Detection 2: Suspicious Cross-Process Injection
+    $injection_event.metadata.event_type = "PROCESS_CREATE_REMOTE_THREAD" // UDM event type for CreateRemoteThread
+    // Initiating process is one of the common beacon hosts
+    $injection_event.principal.process.file.full_path in (
+        "rundll32.exe",
+        "svchost.exe",
+        "regsvr32.exe",
+        "dllhost.exe",
+        "powershell.exe"
+    )
+    // Target process is not the same as the initiating process (excluding self-injection)
+    $injection_event.principal.process.product_id != $injection_event.target.process.product_id
+    // Target process is not a direct child of the initiating process (indicating injection, not just parent-child execution)
+    // UDM does not have a direct TargetProcessParentId for injection events, so we compare the target process's parent to the injecting process.
+    $injection_event.principal.process.product_id != $injection_event.target.process.parent_process.product_id //
+
+
+  condition:
+    // Trigger if either named pipe creation or suspicious process injection is detected
+    $pipe_event or $injection_event
+}

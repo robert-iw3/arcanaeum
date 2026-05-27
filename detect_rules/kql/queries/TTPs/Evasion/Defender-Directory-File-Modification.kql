@@ -1,0 +1,36 @@
+// Name: Defender Directory File Modification
+// Author: RW
+// Date: 2025-08-23
+// Description: Monitors for file creation or modification within Windows Defender directories by processes that are not legitimate Defender or system updaters.
+// This can indicate an attempt to tamper with or disable the antivirus solution, as seen with the abuse of ClipUp.exe.
+// False Positives: Legitimate third-party software installers or system updates might occasionally write to these directories.
+// Review the initiating process and add to the exclusion list if benign.
+// MITRE ATT&CK: T1562.001
+
+let defender_paths = dynamic([
+    @"\ProgramData\Microsoft\Windows Defender\",
+    @"\Program Files\Windows Defender\",
+    @"\Program Files (x86)\Windows Defender\"
+]);
+// A list of legitimate processes known to write to Defender directories during updates or normal operation.
+// This list may need to be tuned for your specific environment.
+let legitimate_processes = dynamic([
+    "MsMpEng.exe",
+    "NisSrv.exe",
+    "MsMpEngCP.exe",
+    "MpCmdRun.exe",
+    "TiWorker.exe",
+    "TrustedInstaller.exe",
+    "svchost.exe",
+    "setup.exe"
+]);
+DeviceFileEvents
+// Look for file creation events, which includes overwriting existing files.
+| where ActionType == "FileCreated"
+// Filter for events occurring within known Windows Defender directories.
+| where FolderPath has_any (defender_paths)
+// Exclude writes from known legitimate Defender and system update processes.
+| where InitiatingProcessFileName !in (legitimate_processes)
+// The intel specifically mentions ClipUp.exe, which is a strong indicator of this attack.
+| extend IsClipUpAbuse = iif(InitiatingProcessFileName =~ "clipup.exe", true, false)
+| project-reorder TimeGenerated, DeviceName, FileName, FolderPath, InitiatingProcessFileName, InitiatingProcessCommandLine, IsClipUpAbuse

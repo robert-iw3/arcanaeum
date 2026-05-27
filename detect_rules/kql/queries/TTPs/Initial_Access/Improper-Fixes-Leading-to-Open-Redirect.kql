@@ -1,0 +1,50 @@
+// Name: Potential Open Redirect via Unvalidated Post-Redirect Parameter
+// Author: RW
+// Date: 2025-08-14
+// Description: Detects a potential open redirect attack where a 'post-redirect' parameter in an OAuth authorization request points to a domain not on the allowlist for that application. This pattern can arise from improperly implemented session fixation defenses.
+// False Positive Sensitivity: Medium. A new, legitimate post-authentication destination for an application will trigger this alert until the allowlist is updated.
+// Triage Steps:
+// 1. Examine the 'Application', 'User', and the 'PostRedirectUrl'.
+// 2. Determine if the domain of the 'PostRedirectUrl' is a legitimate and expected destination for users after authenticating with this application.
+// 3. If the domain is legitimate, add it to the 'PostRedirectDomainAllowlist' for the corresponding 'ApplicationId' to prevent future alerts.
+// 4. If the domain is suspicious, it indicates a potential open redirect attempt. Investigate the user's activity for signs of phishing and consider blocking the malicious domain.
+
+let lookback = 1d;
+
+// This allowlist is CRITICAL for tuning. It must contain the application IDs and the legitimate domains they are allowed to redirect to post-authentication.
+let PostRedirectDomainAllowlist = datatable(ApplicationId:string, AllowedDomain:string) [
+    // Example entries:
+    "some-app-id-guid", "legit-app-dashboard.com",
+    "another-app-id", "portal.mycompany.com",
+    "00000003-0000-0000-c000-000000000000", "portal.azure.com"
+];
+
+// This query targets logs containing OAuth authorization requests.
+// You MUST adapt the table name, ActionType, and field parsing to your specific log source.
+CloudAppEvents
+| where TimeGenerated > ago(lookback)
+// Filter for events where an OAuth authorization flow is initiated.
+| where ActionType == "Authorize app" or ActionType == "OAuthFlowStart"
+// The full request URL or its parameters must be available in the logs.
+// We assume it's in a field like 'RawEventData' or 'AdditionalDetails'.
+| extend EventDetails = todynamic(RawEventData)
+// Extract the post-redirect URL. The parameter name ('post_redirect_url', 'post-redirect', 'final_destination') will vary.
+| extend PostRedirectUrl = tostring(EventDetails.post_redirect_url) // Adapt this parameter name
+| where isnotempty(PostRedirectUrl)
+// Extract the domain from the post-redirect URL.
+| extend PostRedirectDomain = tostring(parse_url(PostRedirectUrl).Host)
+| where isnotempty(PostRedirectDomain)
+// Join with the allowlist to find matches.
+| join kind=leftouter (
+    PostRedirectDomainAllowlist
+) on ApplicationId, $left.PostRedirectDomain == $right.AllowedDomain
+// The core detection logic: alert if the domain was NOT found in the allowlist for that app.
+| where isempty(AllowedDomain)
+| project
+    DetectionTime = TimeGenerated,
+    User = AccountDisplayName,
+    IPAddress,
+    Application,
+    ApplicationId,
+    PostRedirectUrl,
+    PostRedirectDomain

@@ -1,0 +1,81 @@
+name: Splunk Query Pipeline
+on:
+  push:
+    branches: [ release ]
+    paths:
+      - 'splunk/searches/*'
+  pull_request:
+    branches: [ release ]
+    paths:
+      - 'splunk/searches/*'
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: ./splunk
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: splunk/requirements.txt
+      - name: Check for .env and config.json files and required variables
+        run: |
+          if [ ! -f .env ]; then
+            echo "Error: .env file not found"
+            exit 1
+          fi
+          if [ ! -f config.json ]; then
+            echo "Error: config.json file not found"
+            exit 1
+          fi
+          required_vars=("SPLUNK_HOST" "SPLUNK_PORT" "SPLUNK_USER" "SPLUNK_PASSWORD" "APP_CONTEXT" "SPLUNK_SSL_VERIFY" "CLEANUP_JSON" "POOL_SIZE" "RATE_LIMIT_CALLS" "RATE_LIMIT_PERIOD" "API_TIMEOUT" "MAX_FILES" "VALIDATE_API" "CONFIG_PATH")
+          for var in "${required_vars[@]}"; do
+            if ! grep -q "^${var}=" .env; then
+              echo "Error: Required variable ${var} not found in .env"
+              exit 1
+            fi
+          done
+      - name: Build Docker
+        run: docker build -t splunk-pipeline -f pipeline.Dockerfile .
+      - name: Run Pipeline
+        env:
+          SPLUNK_HOST: ${{ vars.SPLUNK_HOST }}
+          SPLUNK_PORT: ${{ vars.SPLUNK_PORT }}
+          SPLUNK_USER: ${{ secrets.SPLUNK_USER }}
+          SPLUNK_PASSWORD: ${{ secrets.SPLUNK_PASSWORD }}
+          APP_CONTEXT: ${{ vars.APP_CONTEXT }}
+          SPLUNK_SSL_VERIFY: ${{ vars.SPLUNK_SSL_VERIFY }}
+          CLEANUP_JSON: ${{ vars.CLEANUP_JSON }}
+          POOL_SIZE: ${{ vars.POOL_SIZE }}
+          RATE_LIMIT_CALLS: ${{ vars.RATE_LIMIT_CALLS }}
+          RATE_LIMIT_PERIOD: ${{ vars.RATE_LIMIT_PERIOD }}
+          API_TIMEOUT: ${{ vars.API_TIMEOUT }}
+          MAX_FILES: ${{ vars.MAX_FILES }}
+          VALIDATE_API: ${{ vars.VALIDATE_API }}
+          CONFIG_PATH: ${{ vars.CONFIG_PATH }}
+        run: |
+          echo "SPLUNK_HOST=$SPLUNK_HOST" >> .env
+          echo "SPLUNK_PORT=$SPLUNK_PORT" >> .env
+          echo "SPLUNK_USER=$SPLUNK_USER" >> .env
+          echo "SPLUNK_PASSWORD=$SPLUNK_PASSWORD" >> .env
+          echo "APP_CONTEXT=$APP_CONTEXT" >> .env
+          echo "SPLUNK_SSL_VERIFY=$SPLUNK_SSL_VERIFY" >> .env
+          echo "CLEANUP_JSON=$CLEANUP_JSON" >> .env
+          echo "POOL_SIZE=$POOL_SIZE" >> .env
+          echo "RATE_LIMIT_CALLS=$RATE_LIMIT_CALLS" >> .env
+          echo "RATE_LIMIT_PERIOD=$RATE_LIMIT_PERIOD" >> .env
+          echo "API_TIMEOUT=$API_TIMEOUT" >> .env
+          echo "MAX_FILES=$MAX_FILES" >> .env
+          echo "VALIDATE_API=$VALIDATE_API" >> .env
+          echo "CONFIG_PATH=$CONFIG_PATH" >> .env
+          docker run --env-file .env -v $(pwd)/import:/import -v $(pwd):/import/src splunk-pipeline

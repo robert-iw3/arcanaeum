@@ -1,0 +1,58 @@
+rule salty_2fa_phishing_kit_detection {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects various web-based indicators of the Salty 2FA phishing kit. This rule identifies the unique landing page domain structure, Cloudflare evasion, anti-analysis techniques, and the specific data exfiltration pattern."
+    reference = "https://any.run/cybersecurity-blog/salty2fa-technical-analysis/"
+    // MITRE ATT&CK Tactics: Initial Access, Defense Evasion, Exfiltration
+    tactic = "TA0001, TA0005, TA0010"
+    // MITRE ATT&CK Techniques: Phishing, Debugger Evasion, Exfiltration Over C2 Channel
+    technique = "T1566, T1622, T1041"
+    false_positives = "The data exfiltration pattern is highly specific. The landing page detection may trigger on legitimate services using a similar domain structure with Cloudflare and Microsoft auth, but the combination reduces this risk."
+    severity = "HIGH"
+
+  events:
+    // Match on either a landing page or an exfiltration event from web proxy logs
+    $web.metadata.event_type = "NETWORK_HTTP"
+
+    // Flag for the highly specific data exfiltration pattern
+    $exfil = (
+        $web.network.http.method = "POST" and
+        strings.ends_with($web.target.url.hostname, ".ru") and
+        re.regex($web.target.url.path, `/\d{5,6}\.php$`) and
+        $web.network.http.request.body_bytes contains "request=" and
+        $web.network.http.request.body_bytes contains "session="
+    )
+
+    // Flag for the initial phishing landing page
+    $landing = (
+        // Unique domain pattern: a two-letter country code as a subdomain of a .com domain
+        re.regex($web.target.url.hostname, `\.[a-z]{2}\.com$`) and
+        (
+            // Landing page content with Cloudflare and Microsoft themes
+            (
+                $web.network.http.response.body_bytes contains "challenges.cloudflare.com/turnstile/" and
+                $web.network.http.response.body_bytes contains "Microsoft" and
+                $web.network.http.response.body_bytes contains "Sign in"
+            )
+            or
+            // Anti-analysis/debugging technique
+            (
+                $web.network.http.response.body_bytes contains "new Date()" and
+                $web.network.http.response.body_bytes contains "debugger"
+            )
+        )
+    )
+
+  outcome:
+    // Populate risk score and key fields for alert context
+    $risk_score = 85
+    $principal_ip = array_distinct($web.principal.ip)
+    $target_url = array_distinct($web.target.url)
+    $principal_hostname = array_distinct($web.principal.hostname)
+    // Identify which part of the logic triggered the detection
+    $detection_type = if($exfil, "Salty 2FA Exfiltration", "Salty 2FA Landing Page")
+
+  condition:
+    $web and ($exfil or $landing)
+}

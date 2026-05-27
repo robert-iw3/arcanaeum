@@ -1,0 +1,29 @@
+// Name: 7z Archive Creation in Temp Directory
+// Author: RW
+// Date: 2025-08-08
+// Description: Detects the use of 7z.exe to create a password-protected archive in the C:\Windows\Temp directory.
+                This technique is used by threat actors for staging data before exfiltration.
+// False Positive Sensitivity: Medium
+// Tactics: Collection
+// Techniques: T1560.001
+
+DeviceProcessEvents
+// Identifies the execution of 7-Zip
+| where FileName =~ "7z.exe" or ProcessVersionInfoOriginalFileName =~ "7z.exe"
+// Looks for the creation of a password-protected archive
+| where ProcessCommandLine has "a -p"
+// Checks if the archive is being created in the Windows Temp directory
+| where ProcessCommandLine has @"c:\windows\temp\"
+// FP Tuning: Legitimate scripts or users might use 7z to create password-protected archives in the temp folder for various reasons.
+// If this is noisy, consider filtering based on the parent process or the user account.
+// For example: where InitiatingProcessFileName !in ("legit_backup_script.ps1")
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    ProcessCommandLine,
+    InitiatingProcessCommandLine,
+    InitiatingProcessFileName,
+    ReportId,
+    ProcessId,
+    InitiatingProcessId

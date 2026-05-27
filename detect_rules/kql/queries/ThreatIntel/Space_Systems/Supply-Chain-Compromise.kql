@@ -1,0 +1,47 @@
+// Name: Execution of Unsigned Executable from Trusted Directory
+// Author: RW
+// Date: 2025-08-15
+// Tactic: Initial Access, Defense Evasion
+// Technique: T1195, Compromise Software Supply Chain
+// Description: This rule detects the execution of an unsigned executable from a trusted system or application directory.
+// Legitimate software installed in these locations should be digitally signed by the vendor.
+// An unsigned executable running from here could indicate a software supply chain compromise, where a malicious file has been
+// introduced into a legitimate installer or update package.
+// False Positive Sensitivity: Medium. Some legitimate third-party applications, open-source tools, or in-house developed utilities
+// may be unsigned. It is crucial to baseline your environment and add known good unsigned executables to the 'process_allowlist' to reduce noise.
+//
+// Data sources: DeviceProcessEvents
+
+let timeframe = 1d;
+// Key parameter: Define trusted directories where executables are expected to be signed.
+let trusted_dirs = dynamic([
+    'C:\\Program Files\\',
+    'C:\\Program Files (x86)\\',
+    'C:\\Windows\\System32\\',
+    'C:\\ProgramData\\'
+]);
+// Key parameter: Add legitimate unsigned executables to this list to avoid false positives.
+let process_allowlist = dynamic([
+    // 'legit_unsigned_app.exe',
+    // 'internal_tool.exe'
+]);
+
+DeviceProcessEvents
+| where TimeGenerated > ago(timeframe)
+// Focus on executable files.
+| where FileName endswith ".exe"
+// Filter for processes running from common installation or system directories.
+| where FolderPath has_any (trusted_dirs)
+// An empty 'Signer' field is a strong indicator that the file is not signed.
+| where isempty(Signer)
+// Exclude known and approved unsigned applications.
+| where not(FileName in~ (process_allowlist))
+// Summarize to reduce alert volume for noisy processes.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    ExecutionCount = count(),
+    Devices = make_set(DeviceName, 5),
+    InitiatingProcesses = make_set(InitiatingProcessFileName, 5)
+    by FileName, FolderPath, SHA256, ProcessCommandLine
+| where ExecutionCount > 0

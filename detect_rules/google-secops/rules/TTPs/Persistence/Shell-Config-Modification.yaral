@@ -1,0 +1,34 @@
+rule linux_shell_config_persistence {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects modification of common shell configuration files (e.g., .bashrc, .profile) to include commands indicative of a reverse shell. This is a common persistence technique used by adversaries to execute malicious code whenever a user starts a new shell session."
+    tactic = "TA0003"
+    technique = "T1546.004"
+    false_positives = "Legitimate administrative scripts might modify shell configuration files, but it is rare for them to add reverse shell-like commands. Tuning may be required to exclude known administrative tools or scripts if false positives occur."
+
+  events:
+    // Catches the process execution event, which provides command-line context.
+    $process.metadata.event_type = "PROCESS_LAUNCH"
+    $process.metadata.product_name = "Linux"
+
+    // The command line targets a common shell configuration file for modification.
+    // Other files like .zshrc, .cshrc, etc., could also be added here.
+    re.regex($process.target.process.command_line, `(\.bashrc|\.profile|\.bash_profile|\.zshrc|\.zprofile)`)
+
+    // The command line contains syntax commonly used for establishing a reverse shell.
+    re.regex($process.target.process.command_line, `(\/dev\/(tcp|udp)\/|nc\s|netcat\s|ncat\s|bash\s+-i|mkfifo\s)`)
+
+  outcome:
+    // A high risk score is assigned due to the strong indication of a persistence mechanism being installed.
+    $risk_score = 70
+    $principal_hostname = $process.principal.hostname
+    $principal_user = $process.principal.user.userid
+    $target_process_command_line = $process.target.process.command_line
+    $target_process_pid = $process.target.process.pid
+    $parent_process_command_line = $process.principal.process.command_line
+    $parent_process_pid = $process.principal.process.pid
+
+  condition:
+    $process
+}

@@ -1,0 +1,77 @@
+{
+  "name": "Water Curse Threat Actor - Multi-Stage",
+  "queries": [
+    {
+      "name": "watercurse_initial_execution_via_msbuild",
+      "query": "@process.parent.name:\"MSBuild.exe\" AND @process.name:\"cmd.exe\" AND @process.cmdline:(\"*/c*\" AND \"*.exec.cmd*\" AND \"*Temp\\\\MSBuildTemp*\")",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "watercurse_defense_evasion_via_powershell",
+      "query": "@process.name:\"powershell.exe\" AND @process.cmdline:(*\"Set-MpPreference\"*\\\\ -ExclusionPath*C:\\\\* OR *\"vssadmin\"*delete*shadows*/all* OR *\"Set-ItemProperty\"*HKLM:\\\\SOFTWARE\\\\Policies\\\\Microsoft\\\\Windows\\\\ NT\\\\SystemRestore*DisableSR*)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "watercurse_uac_bypass_via_ms_settings_hijack",
+      "query": "@registry.path:*\\\\Software\\\\Classes\\\\ms-settings\\\\shell\\\\open\\\\command* AND (@registry.value:\"(Default)\" OR @registry.value:\"DelegateExecute\")",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "watercurse_persistence_via_scheduled_task",
+      "query": "@process.name:\"schtasks.exe\" AND @process.cmdline:(\"*/create*\" AND (\"*/du 9999:59*\" OR \"*BitLocker Encrypt All Drives*\" AND \"*\\\\OneDriveCloud\\\\taskhostw.exe*\"))",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "watercurse_staging_and_reconnaissance",
+      "query": "@process.name:\"7z.exe\" AND @process.executable:\"C:\\\\ProgramData\\\\sevenZip\\\\*\" AND @process.cmdline:\"*-p*\" OR @process.parent.name:\"NVIDIA Control Panel.exe\" AND @process.parent.executable:*\\\\Microsoft\\\\Vault\\\\UserRoamingTiles\\\\NVIDIAContainer* AND @process.name:(curl.exe OR wmic.exe OR tasklist.exe)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "watercurse_malicious_file_artifact_creation",
+      "query": "@file.path:*\\\\.vs-script\\\\* AND @file.name:(antiDebug.ps1 OR disabledefender.ps1) OR @file.path:*\\\\AppData\\\\Local\\\\Temp\\\\* AND @file.name:\"SearchFilter.exe\" OR @file.path:*\\\\Microsoft\\\\Vault\\\\UserRoamingTiles\\\\NVIDIAContainer* AND @file.name:\"NVIDIA Control Panel.exe\"",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "watercurse_c2_exfiltration_network_connection",
+      "query": "@url:(*store-eu-par-2.gofile.io* OR *api.telegram.org* OR *popcorn-soft.glitch.me* OR *pastejustit.com* OR *pastesio.com*) OR @network.destination.ip:\"46.101.236.176\" OR @process.name:\"RegAsm.exe\"",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    }
+  ],
+  "cases": [
+    {
+      "name": "Water Curse Threat Actor - Multi-Stage",
+      "status": "high",
+      "condition": "event_count_0 >= 1 OR event_count_1 >= 1 OR event_count_2 >= 1 OR event_count_3 >= 1 OR event_count_4 >= 1 OR event_count_5 >= 1 OR event_count_6 >= 1"
+    }
+  ],
+  "options": {
+    "evaluation_window": 3600,
+    "keep_alive": 3600,
+    "max_signal_duration": 3600,
+    "correlation_based_signal": {
+      "correlation_inputs": [
+        {
+          "rule_id": "water_curse_correlation"
+        }
+      ],
+      "correlated_by_fields": [
+        "@host",
+        "@usr"
+      ],
+      "distinct_fields": [
+        "case_id"
+      ]
+    }
+  },
+  "message": "Water Curse Activity: {{distinct_count}} TTP(s) on host {{host}} by user {{usr}}: {{case_names}}",
+  "type": "correlation_based_signal",
+  "tags": [],
+  "is_enabled": true
+}

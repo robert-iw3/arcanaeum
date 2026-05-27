@@ -1,0 +1,66 @@
+// Name: Potential OSS Watering Hole Attack via AI Agent or Dev Tool
+// Author: RW
+// Date: 2025-08-15
+// Description: This rule detects activities associated with Open Source Software (OSS) watering hole attacks, where an
+// AI agent or development tool is tricked into executing a malicious payload from a compromised source. It looks for
+// suspicious package installations (e.g., from a git repository) and common payload execution patterns like PowerShell
+// download cradles, as demonstrated in the "From Prompts to Pwns" presentation.
+// False Positive Sensitivity: Medium
+// References:
+// - From Prompts to Pwns: Exploiting and Securing AI Agents (Black Hat USA 2025)
+// - https://developer.nvidia.com/blog/tag/ai-red-team/
+// Tactics: Initial Access, Execution
+// Techniques: T1195.001, T1059.001
+// Assumes a log source like DeviceProcessEvents that captures process creation and command lines.
+
+// Define patterns for PowerShell download cradles.
+let psDownloadIndicators = dynamic([
+    "Invoke-Expression", "IEX",
+    "DownloadString",
+    "Net.WebClient",
+    "Invoke-WebRequest", "IWR"
+]);
+
+// Define suspicious prefixes for package sources.
+let suspiciousSourcePrefixes = dynamic([
+    "git+", "http://", "https://"
+]);
+
+DeviceProcessEvents
+| where
+    // Condition 1: Direct execution of a PowerShell download cradle. This could be the result of an indirect prompt injection where an AI agent executes a command it found in untrusted data (e.g., a GitHub issue).
+    (
+        FileName in~ ("powershell.exe", "pwsh.exe") and
+        ProcessCommandLine has_all (psDownloadIndicators) and
+        ProcessCommandLine has_any ("http:", "https:")
+    )
+    or
+    // Condition 2: Installation of a Python package from a non-standard source, such as a git repository. This is a key tactic in supply chain attacks where a malicious dependency is added to a project.
+    (
+        FileName in~ ("pip.exe", "pip3.exe", "uv.exe") and
+        ProcessCommandLine has "install" and
+        ProcessCommandLine has_any (suspiciousSourcePrefixes) and
+        // Exclude installing from a requirements file, which is common. Focus on direct installs from a URL.
+        not (ProcessCommandLine has_any ("-r", "--requirement"))
+    )
+    or
+    // Condition 3: A Python script (like a malicious setup.py) spawning a PowerShell download cradle. This detects the payload execution during a compromised package installation.
+    (
+        InitiatingProcessFileName in~ ("python.exe", "python3.exe") and
+        FileName in~ ("powershell.exe", "pwsh.exe") and
+        ProcessCommandLine has_all (psDownloadIndicators) and
+        ProcessCommandLine has_any ("http:", "https:")
+    )
+// FP Tuning: Developers may legitimately install packages from git repositories or run scripts that download content.
+// Consider scoping this rule to specific user groups, host types (e.g., servers vs. developer workstations), or excluding known-good repositories or scripts.
+// Example: `| where not (ProcessCommandLine contains "github.com/trusted-org/")`
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    FileName,
+    ProcessCommandLine,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    ParentProcessId,
+    ProcessId

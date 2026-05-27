@@ -1,0 +1,36 @@
+// Name: In-Memory PowerShell Assembly Execution
+// Author: RW
+// Date: 2025-08-07
+// Description: Detects PowerShell commands that download a .NET assembly and execute it directly from memory
+//              using System.Reflection.Assembly.Load. This is a common fileless execution technique used by
+//              attackers to bypass disk-based detections. This detection requires AMSI or PowerShell Script Block Logging.
+// Mitre TTPs: T1059.001, T1622
+// False Positive Sensitivity: Medium
+
+DeviceEvents
+// This detection requires AMSI (AmsiScriptContent) or PowerShell Script Block Logging.
+| where ActionType == "AmsiScriptContent"
+// Pre-filter on the raw field for performance before parsing JSON.
+| where AdditionalFields has "System.Reflection.Assembly" and AdditionalFields has "Load" and AdditionalFields has "Net.WebClient" and (AdditionalFields has "DownloadData" or AdditionalFields has "DownloadString")
+| extend ParsedFields = parse_json(AdditionalFields)
+| extend ScriptContent = tostring(ParsedFields.Content)
+// Perform a more precise match on the extracted script content to identify the full pattern.
+| where ScriptContent has "System.Net.WebClient"
+    and (ScriptContent has ".DownloadData" or ScriptContent has ".DownloadString")
+    and ScriptContent has "[System.Reflection.Assembly]::Load"
+// Focus on PowerShell as the initiator.
+| where InitiatingProcessFileName in~ ("powershell.exe", "pwsh.exe")
+// False Positive Tuning: Legitimate automation, software deployment, or administrative scripts might use this functionality.
+// Consider excluding scripts signed by trusted publishers or originating from known-good management tools.
+// For example: | where InitiatingProcessSigner != "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
+| project
+    Timestamp,
+    DeviceId,
+    DeviceName,
+    ActionType,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    ScriptContent,
+    Tactic = "Execution, Defense Evasion",
+    Technique = "PowerShell, Reflective Code Loading",
+    MitreTTP = "T1059.001, T1622"

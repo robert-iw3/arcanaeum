@@ -1,0 +1,48 @@
+// title: Cloud Data Exfiltration
+// description: This rule detects high-volume data access from Amazon S3, which could indicate a data exfiltration attempt. Threat actors like Scattered Spider are known to target cloud platforms (S3, Snowflake) and services (MEGA.NZ) to exfiltrate large amounts of data rapidly. The rule identifies a single user identity accessing an unusually high number of S3 objects within a short timeframe, a pattern indicative of T1567.002. Investigation should focus on the legitimacy of the user identity and the source IP address, especially for newly created accounts or roles.
+// author: RW
+// date: 2025-07-31
+// references:
+//   - https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-320a
+// tags:
+//   - attack.t1567.002
+//   - attack.exfiltration
+//   - group.scattered_spider
+
+// -- KQL query for AWS CloudTrail --
+
+// --_comment: Define the timeframe and thresholds for what constitutes "high volume". These values are starting points and must be tuned to your environment's baseline to avoid false positives from legitimate data access patterns (e.g., ETL jobs, backups).
+let timeframe = 1h;
+let object_access_threshold = 1000;
+
+// --_comment: To reduce false positives, populate this list with user/role ARNs that are expected to perform high-volume read operations (e.g., service accounts for backup, ETL, or data analytics applications).
+let service_principals_allowlist = dynamic([]);
+
+AWSCloudTrail
+| where TimeGenerated > ago(timeframe)
+// --_comment: Filter for successful S3 object retrieval events, which indicate data is being read/downloaded.
+| where EventSource == "s3.amazonaws.com" and EventName == "GetObject" and isempty(ErrorCode) and isempty(ErrorMessage)
+// --_comment: Exclude known legitimate service principals. This is a critical step for tuning.
+| where UserIdentityArn !in~ (service_principals_allowlist)
+// --_comment: Aggregate access activity by the user identity and source IP address.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    EventCount = count(),
+    DistinctObjectCount = dcount(Resources_ObjectName_s),
+    BucketsAccessed = make_set(Resources_BucketName_s),
+    UserAgents = make_set(UserAgent)
+    by UserIdentityArn, UserIdentityType, UserIdentityUserName, SourceIpAddress
+// --_comment: Alert when the number of objects accessed by a single identity from a single IP exceeds the defined threshold.
+| where EventCount > object_access_threshold
+| project-reorder
+    StartTime,
+    EndTime,
+    UserIdentityArn,
+    UserIdentityType,
+    UserIdentityUserName,
+    SourceIpAddress,
+    EventCount,
+    DistinctObjectCount,
+    BucketsAccessed,
+    UserAgents

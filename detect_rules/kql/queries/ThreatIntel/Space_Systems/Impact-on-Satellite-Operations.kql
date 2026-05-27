@@ -1,0 +1,51 @@
+// Name: Anomalous Satellite Telemetry Reading
+// Author: RW
+// Date: 2025-08-18
+// Description: Detects significant deviations from historical baselines in critical satellite sensor telemetry.
+// This could indicate manipulation of on-board values or mission disruption, as described in the CYSAT demo analysis where attackers modified imagery data.
+// This rule uses time-series anomaly detection to identify values that are inconsistent with past behavior.
+// Data Source: This rule requires a custom log table (e.g., 'SatelliteTelemetry_CL') with time-series data from satellite sensors.
+// The table name, field names, and sensor list must be customized.
+// False Positives: Legitimate operational events, such as attitude adjustments, safe-mode entry, or sensor calibration, can cause telemetry values to deviate from the baseline.
+// Tuning the anomaly threshold and the list of critical sensors is essential.
+// Correlating alerts with a command log can help validate legitimacy.
+// Tags: Impact, Space, Satellite, Telemetry, Anomaly Detection
+
+// Define the time window for analysis and for building the baseline model.
+let analysis_period = 1h;
+let baseline_period = 7d;
+
+// Define the list of critical sensors to monitor. This list is crucial and MUST be customized for the specific mission.
+let critical_sensors = dynamic([
+    "AttitudeControl_GyroX",
+    "PowerSystem_BusVoltage",
+    "Camera_Gimbal_Angle",
+    "Propulsion_TankPressure",
+    "Payload_Temperature"
+]);
+
+// Define the anomaly detection sensitivity. A higher value makes the detection less sensitive. Tune this based on sensor characteristics.
+let anomaly_sensitivity = 1.5;
+
+// This rule assumes a custom table 'SatelliteTelemetry_CL' with telemetry data.
+// The table should contain fields like TimeGenerated, DeviceName, SensorName, and SensorValue.
+SatelliteTelemetry_CL
+| where TimeGenerated > ago(baseline_period)
+| where SensorName in (critical_sensors)
+// Create a time series for each critical sensor on each device.
+| make-series SensorValue=avg(SensorValue) on TimeGenerated from ago(baseline_period) to now() step 1m by DeviceName, SensorName
+// Apply KQL's built-in time series anomaly detection function.
+| extend (anomalies, score, baseline) = series_decompose_anomalies(SensorValue, anomaly_sensitivity, -1, 'linefit')
+// Expand the anomalies array to get individual anomalous events.
+| mv-expand i=range(0, array_length(SensorValue)-1) to typeof(long)
+| where anomalies[i] == 1
+| extend AnomalyTime = TimeGenerated[i], AnomalyValue = SensorValue[i], AnomalyScore = score[i], ExpectedValue = baseline[i]
+// Only show recent anomalies that occurred within the defined analysis period.
+| where AnomalyTime > ago(analysis_period)
+| project
+    AnomalyTime,
+    DeviceName,
+    SensorName,
+    AnomalyValue,
+    ExpectedValue,
+    AnomalyScore

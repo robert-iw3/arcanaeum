@@ -1,0 +1,29 @@
+// Name: Regedit Export Critical Keys
+// Author: RW
+// Date: 2025-08-08
+// Description: Detects the use of regedit.exe to export critical registry hives like SAM, SYSTEM, and SECURITY.
+//              This is a common credential dumping technique used by threat actors to obtain credential material for offline cracking.
+// False Positive Sensitivity: Medium
+// Tactics: Credential Access
+// Techniques: T1003
+
+DeviceProcessEvents
+// Identifies the execution of the Registry Editor
+| where FileName =~ "regedit.exe"
+// Looks for the command-line switch to export a registry file
+| where ProcessCommandLine has_any (" /E ", " -E ")
+// Checks for the export of critical hives containing credential material
+| where ProcessCommandLine has_any ("hklm\\sam", "hklm\\system", "hklm\\security", "hkey_local_machine\\sam", "hkey_local_machine\\system", "hkey_local_machine\\security")
+// FP Tuning: This activity can be legitimate for system backups or administrative tasks.
+// To reduce false positives, investigate the context of the execution.
+// Consider excluding known administrative accounts or processes if this is a common practice in your environment.
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    ProcessCommandLine,
+    InitiatingProcessCommandLine,
+    InitiatingProcessFileName,
+    ReportId,
+    ProcessId,
+    InitiatingProcessId

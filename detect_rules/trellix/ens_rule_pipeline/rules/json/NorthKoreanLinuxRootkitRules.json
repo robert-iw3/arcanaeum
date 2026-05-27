@@ -1,0 +1,41 @@
+[
+  {
+    "type": "expert",
+    "name": "Detect North Korean Linux Rootkit Artifacts (tracker-fs & pcicard)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match FILE {\n         Include OBJECT_NAME { -v \"/usr/lib64/tracker-fs\" -v \"/usr/include/tracker-fs/tracker-efs\" -v \"/etc/init.d/tracker-fs\" -v \"/etc/rc2.d/S55tracker-fs\" -v \"/etc/rc3.d/S55tracker-fs\" -v \"/etc/rc5.d/S55tracker-fs\" -v \"/proc/acpi/pcicard\" }\n         Include -access \"CREATE,EXECUTE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "Critical",
+    "enabled": true,
+    "description": "Detects creation or execution of files/paths directly tied to the North Korean Linux rootkit leaked in Phrack #72 (August 2025, attributed to Kimsuky/APT43). Includes hidden kernel module (/usr/lib64/tracker-fs), backdoor (/usr/include/tracker-fs/tracker-efs), init scripts, and magic-packet socket (/proc/acpi/pcicard). Extremely high-fidelity IOCs; very low false positives. Tune only if legitimate software uses identical paths (rare)."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Kernel Taint by Unsigned Module Load",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match FILE {\n         Include OBJECT_NAME { -v \"/proc/sys/kernel/tainted\" }\n         Include -access \"READ\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects read access to /proc/sys/kernel/tainted — indicates loading of unsigned kernel modules (e.g., the Kimsuky rootkit loads as unsigned vmwfxs). Common in advanced Linux rootkits. Note: May trigger on legitimate out-of-tree modules (nvidia, vboxdrv, zfs); add environment-specific exclusions or correlate with dmesg logs for taint value changes."
+  },
+  {
+    "type": "firewall",
+    "name": "Detect Network Connections Without Associated Process (Rootkit Hiding)",
+    "application": "**",
+    "direction": "out",
+    "protocol": "TCP,UDP",
+    "port": "1-65535",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects outbound network connections from Linux systems lacking associated process info — strong indicator of rootkit-level process/network hiding (core capability of the leaked Kimsuky rootkit). Exclude internal IPs; requires EDR/endpoint correlation to confirm missing process linkage. High value for kernel-mode stealth detection."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Anti-Forensic Command History Disabling",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"sh\" -v \"bash\" -v \"dash\" -v \"zsh\" -v \"ksh\" -v \"csh\" -v \"tcsh\" -v \"ln\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*--noprofile*\"\n         Include -command_line \"*--norc*\"\n         Include -command_line \"*HISTFILE=/dev/null*\"\n         Include -command_line \"*HISTORY=/dev/null*\"\n         Include -command_line \"*BASH_HISTORY=/dev/null*\"\n         Include -command_line \"*unset HISTFILE*\"\n         Include -command_line \"*unset HISTORY*\"\n         Include -command_line \"*TMOUT=0*\"\n         Include -command_line \"*-sf*/dev/null*.bash_history*\"\n         Include -command_line \"*-sf*/dev/null*.zsh_history*\"\n         Include -command_line \"*-sf*/dev/null*.zhistory*\"\n         Include -command_line \"*-sf*/dev/null*.history*\"\n         Include -command_line \"*-sf*/dev/null*.sh_history*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects shell processes or ln commands disabling shell history logging (HISTFILE=/dev/null, unset HISTFILE, --norc, etc.) — anti-forensic technique used by advanced actors (including North Korean rootkit operators) to evade audit trails. Tune for legitimate scripts using --noprofile/--norc or history redirection."
+  }
+]

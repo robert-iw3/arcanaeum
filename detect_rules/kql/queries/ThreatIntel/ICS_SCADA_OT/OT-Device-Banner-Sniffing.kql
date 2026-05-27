@@ -1,0 +1,62 @@
+// Name: OT Protocol Scanning (Banner Sniffing)
+// Description: Detects potential reconnaissance activity where a single source IP address attempts to connect to multiple distinct devices on common Operational Technology (OT) ports. This behavior is indicative of an adversary performing "banner sniffing" or enumeration to gather information about OT assets, which often precedes a targeted attack. This rule identifies scanning from both internal and external sources.
+// Author: RW
+// Date: 2025-08-17
+// MITRE ATT&CK:
+// - T1595: Active Scanning
+// - T1590: Gather Victim Network Information
+// False Positive Sensitivity: Medium
+// - Legitimate systems such as vulnerability scanners, network management tools, or data historians may exhibit this behavior.
+// - To reduce false positives, add the IP addresses of any authorized scanning systems to the 'scanner_ip_allowlist' below.
+// - The 'device_scan_threshold' may need to be adjusted based on your environment's baseline activity.
+
+let lookback = 1h;
+
+// --- CONFIGURATION START ---
+// Define the OT ports to monitor for scanning activity.
+let ot_ports = dynamic([
+    502,    // Modbus
+    20000,  // DNP3
+    44818,  // EtherNet/IP
+    2222    // EtherNet/IP (alt)
+]);
+
+// Define the threshold for the number of distinct devices scanned by a single source to trigger an alert.
+let device_scan_threshold = 3;
+
+// Define an allowlist for legitimate scanners or management systems that are expected to connect to multiple OT devices.
+let scanner_ip_allowlist = dynamic([
+    "192.168.1.100", // Example: Vulnerability Scanner
+    "10.10.0.50"     // Example: Network Management System
+]);
+// --- CONFIGURATION END ---
+
+DeviceNetworkEvents
+| where TimeGenerated > ago(lookback)
+// A scanning attempt may result in a success or failure, so we don't filter on ActionType.
+// Focus on connection attempts to the specified OT ports.
+| where LocalPort in (ot_ports)
+// Exclude authorized scanners to reduce false positives.
+| where RemoteIP !in (scanner_ip_allowlist)
+// Summarize connection attempts by the source IP address.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    DistinctOTDevicesScanned = dcount(LocalIP),
+    ScannedOT_IPs = make_set(LocalIP),
+    ScannedPorts = make_set(LocalPort),
+    TotalConnections = count()
+    by ScannerIP = RemoteIP
+// Filter for sources that have scanned more devices than the defined threshold.
+| where DistinctOTDevicesScanned > device_scan_threshold
+// Add context about the location of the scanning source.
+| extend ScannerLocation = iif(ipv4_is_private(ScannerIP), "Internal", "External")
+| project-reorder
+    StartTime,
+    EndTime,
+    ScannerIP,
+    ScannerLocation,
+    DistinctOTDevicesScanned,
+    TotalConnections,
+    ScannedOT_IPs,
+    ScannedPorts

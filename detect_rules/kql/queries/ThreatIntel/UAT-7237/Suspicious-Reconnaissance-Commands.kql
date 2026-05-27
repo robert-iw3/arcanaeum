@@ -1,0 +1,36 @@
+// Name: UAT-7237 Suspicious Reconnaissance Activity
+// Author: RW
+// Date: 2025-08-15
+// Description: Detects a pattern of multiple reconnaissance commands being executed via the command prompt (cmd.exe) in a short period.
+// This behavior is consistent with the initial discovery phase of intrusions by the UAT-7237 threat actor.
+// False Positive Sensitivity: Medium
+// References: https://blog.talosintelligence.com/uat-7237-targets-web-hosting-infra/
+// MITRE TTPs: T1082, T1016, T1033, T1049, T1057
+
+let timeframe = 15m;
+// Define the list of reconnaissance tools and their specific command line patterns.
+let recon_commands = datatable(ProcessName:string, Arguments:string, Tactic:string) [
+    "systeminfo.exe", "", "System Information Discovery",
+    "tasklist.exe", "", "Process Discovery",
+    "ipconfig.exe", "/all", "Network Configuration Discovery",
+    "netstat.exe", "-ano", "Network Connection Discovery",
+    "net.exe", "user /domain", "User Discovery",
+    "net1.exe", "user /domain", "User Discovery",
+    "whoami.exe", "/priv", "User Discovery",
+    "quser.exe", "", "User Discovery",
+    "nslookup.exe", "", "Network Service Discovery",
+    "ping.exe", "8.8.8.8", "Network Service Discovery",
+    "curl.exe", "", "Network Service Discovery" // Note: curl.exe can be used for legitimate purposes. Consider tuning if this is noisy in your environment.
+];
+DeviceProcessEvents
+| where TimeGenerated > ago(timeframe)
+// Filter for reconnaissance processes spawned by the command prompt.
+| where InitiatingProcessFileName =~ "cmd.exe"
+| join kind=inner (recon_commands) on $left.FileName == $right.ProcessName
+// Further validate that the command line contains the expected arguments for higher fidelity.
+| where ProcessCommandLine has Arguments
+// Group the activity by host, user, and the parent cmd process.
+| summarize StartTime = min(TimeGenerated), EndTime = max(TimeGenerated), ReconCommands = make_set(strcat(ProcessName, " ", ProcessCommandLine)), DistinctReconCommands = dcount(Tactic) by DeviceName, AccountName, InitiatingProcessId, bin(TimeGenerated, timeframe)
+// Alert when multiple distinct types of reconnaissance commands are observed from a single parent process.
+// The threshold can be adjusted based on your environment's baseline activity.
+| where DistinctReconCommands > 2

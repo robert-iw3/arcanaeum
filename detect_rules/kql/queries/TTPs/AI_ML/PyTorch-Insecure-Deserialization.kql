@@ -1,0 +1,37 @@
+// Name: PyTorch Insecure Deserialization Leading to Suspicious File Creation
+// Author: RW
+// Date: 2025-08-14
+// Description: Detects a Python process writing to sensitive files commonly used for establishing persistence or remote access.
+// This behavior can be an indicator of an exploited insecure deserialization vulnerability in a library like PyTorch
+// (e.g., CVE-2025-32434), where a malicious model file triggers arbitrary code execution.
+// False Positive Sensitivity: Medium
+
+let suspicious_files = dynamic([
+    "authorized_keys",
+    ".bashrc",
+    ".zshrc",
+    ".profile",
+    "crontab"
+]);
+let suspicious_paths = dynamic([
+    "/.ssh/",
+    "/etc/cron",
+    "/var/spool/cron"
+]);
+DeviceFileEvents
+| where ActionType in ("FileCreated", "FileRenamed")
+// Look for file writes initiated by a Python interpreter.
+| where InitiatingProcessFileName has_any ("python", "python3", "python.exe", "python3.exe")
+// Check if the file name or path is suspicious. These are common targets for establishing persistence.
+| where FileName has_any (suspicious_files) or FolderPath has_any (suspicious_paths)
+// FP Tuning: Legitimate configuration scripts (e.g., Ansible, Salt, Chef) or administrative scripts may write to these files.
+// Exclude known safe scripts by filtering on InitiatingProcessCommandLine.
+// For example: | where InitiatingProcessCommandLine !has "ansible-playbook"
+| project
+    Timestamp = TimeGenerated,
+    DeviceName,
+    ActionType,
+    SuspiciousFileWritten = FullName,
+    InitiatingProcess = InitiatingProcessFileName,
+    InitiatingProcessCommandLine = InitiatingProcessCommandLine,
+    InitiatingProcessId

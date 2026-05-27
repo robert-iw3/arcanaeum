@@ -1,0 +1,42 @@
+rule dns_over_non_standard_port {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects DNS protocol traffic over UDP ports other than the standard 53, 5353 (mDNS), or 5355 (LLMNR). This requires a log source with Deep Packet Inspection (DPI) capabilities to identify the application protocol regardless of the port. This behavior is a strong indicator of C2 communication or data exfiltration attempting to evade standard firewall rules."
+    tags = "DNS, C2, EXFILTRATION, EVASION"
+    tactic = "TA0011, TA0010"
+    technique = "T1071.004"
+    false_positives = "Custom applications, peer-to-peer (P2P) software, or misconfigured services that might legitimately use DNS-like protocols on non-standard ports."
+    severity = "MEDIUM"
+
+  events:
+    // This rule requires a log source like a Next-Gen Firewall (NGFW) or network sensor
+    // that can identify the application-layer protocol via Deep Packet Inspection (DPI).
+    $e.metadata.event_type = "NETWORK_CONNECTION"
+    $e.network.application_protocol = "DNS"
+    $e.network.ip_protocol = "UDP"
+
+    // Core detection logic: check for non-standard ports.
+    $e.target.port != 53
+    and $e.target.port != 5353 // mDNS
+    and $e.target.port != 5355 // LLMNR
+
+    // Potential for false positives:
+    // Some custom applications or P2P software might use DNS-like protocols on non-standard ports.
+    // Consider adding process or IP allowlists if legitimate activity is found.
+
+  outcome:
+    $risk_score = 45
+    $principal_ip = $e.principal.ip
+    $principal_hostname = $e.principal.hostname
+    $principal_process_path = $e.principal.process.file.full_path
+    $principal_process_command_line = $e.principal.process.command_line
+    $target_ip = $e.target.ip
+    $target_port = $e.target.port
+    $target_hostname = $e.target.hostname
+    $network_protocol = $e.network.ip_protocol
+    $application_protocol = $e.network.application_protocol
+
+  condition:
+    $e
+}

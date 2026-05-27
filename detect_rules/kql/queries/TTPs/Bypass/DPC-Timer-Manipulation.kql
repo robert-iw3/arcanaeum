@@ -1,0 +1,37 @@
+// Name: DPC Watchdog Violation Indicative of Kernel Tampering
+// Author: RW
+// Date: 2025-08-14
+// Description: Detects a DPC watchdog violation bugcheck (0x133). This event indicates that a Deferred Procedure Call (DPC) has
+// run for too long without yielding. While often caused by legitimate driver or hardware issues, it can also be a symptom of malicious
+// kernel-level manipulation. Adversaries may hook or modify DPC routines used by security mechanisms like PatchGuard, and a flawed
+// implementation of this hook could lead to a system hang detected by the DPC watchdog.
+// False Positive Sensitivity: Medium. This can be triggered by buggy drivers. Analysis of the bugcheck parameters, especially the DPC
+// routine address (Parameter 2), is necessary to determine the source.
+
+DeviceEvents
+// Filter for BugCheck events, which indicate a system crash (BSOD).
+| where ActionType == "BugCheck"
+// Parse the bugcheck information from the AdditionalInfo field.
+| extend BugCheckInfo = parse_json(AdditionalInfo)
+| extend BugCheckCode = tostring(BugCheckInfo.BugCheckCode)
+// The bugcheck code for a DPC_WATCHDOG_VIOLATION is 0x133.
+| where BugCheckCode == "0x133"
+| extend
+    // Parameter 1: The address of the DPC object.
+    BugCheckParameter1 = tostring(BugCheckInfo.BugCheckParameter1),
+    // Parameter 2: The address of the DPC routine that is suspected to have hung.
+    BugCheckParameter2 = tostring(BugCheckInfo.BugCheckParameter2),
+    // Parameter 3: The address of the processor's PRCB.
+    BugCheckParameter3 = tostring(BugCheckInfo.BugCheckParameter3),
+    // Parameter 4: The DPC tick count.
+    BugCheckParameter4 = tostring(BugCheckInfo.BugCheckParameter4)
+| project
+    Timestamp,
+    DeviceName,
+    ActionType,
+    BugCheckCode,
+    BugCheckParameter1,
+    BugCheckParameter2,
+    BugCheckParameter3,
+    BugCheckParameter4,
+    ReportId

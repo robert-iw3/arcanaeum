@@ -1,0 +1,63 @@
+name: YARA-L Rules Pipeline
+
+on:
+  push:
+    branches: [ release ]
+    paths:
+      - 'google-secops/rules/*'
+  pull_request:
+    branches: [ release ]
+    paths:
+      - 'google-secops/rules/*'
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: ./google-secops
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+        cache-dependency-path: google-secops/requirements.txt
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run unit tests
+      run: python -m unittest test_yaral_pipeline.py
+
+    - name: Build Docker image
+      run: docker build -t yara-l-pipeline .
+
+    - name: Run pipeline
+      env:
+        CHRONICLE_API_URL: ${{ secrets.CHRONICLE_API_URL }}
+        GOOGLE_CLOUD_CREDENTIALS: ${{ secrets.GOOGLE_CLOUD_CREDENTIALS }}
+      run: |
+        echo "$GOOGLE_CLOUD_CREDENTIALS" > service-account.json
+        docker run --rm \
+          -e CHRONICLE_API_URL=$CHRONICLE_API_URL \
+          -e CREDENTIALS_FILE=/import/service-account.json \
+          -e AUTH_SCOPE=https://www.googleapis.com/auth/chronicle-backstory \
+          yara-l-pipeline
+
+    - name: Upload logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: pipeline-logs
+        path: yara_pipeline.log
+        retention-days: 7

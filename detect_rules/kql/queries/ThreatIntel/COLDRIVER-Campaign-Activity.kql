@@ -1,0 +1,84 @@
+// Title: COLDRIVER Campaign Activity (BAITSWITCH/SIMPLEFIX)
+// Description: This detection rule identifies multiple Tactics, Techniques, and Procedures (TTPs) associated with a COLDRIVER campaign active in September 2025. The campaign utilizes a downloader named BAITSWITCH and a PowerShell backdoor named SIMPLEFIX. This rule combines several detection opportunities into a single query, including initial execution via rundll32, persistence through logon scripts, storing payloads in the registry, C2 communications, and PowerShell-based reconnaissance.
+// Author: RW
+// Date: 2025-09-27
+// References:
+// - https://www.zscaler.com/blogs/security-research/coldriver-updates-arsenal-baitswitch-and-simplefix
+// False Positive Sensitivity: Medium
+// Detection Comment Level: Medium
+
+let C2Domains = dynamic(["captchanom.top", "southprovesolutions.com"]);
+let C2UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edge/133.0.0.0";
+let PayloadCLSID = "{53121F47-8C52-44A7-89A5-5595BB2B32BE}";
+
+(union isfuzzy=true
+    (
+        // Tactic 1: ClickFix rundll32.exe execution from a network share.
+        DeviceProcessEvents
+        | where FileName =~ "rundll32.exe"
+        // comment: Detects rundll32 loading a DLL from a network share path like \\server\share\file.dll
+        | where ProcessCommandLine matches regex @'\\\\\\\\[^\\]+\\[^\\]+\.dll'
+        | extend Tactic = "COLDRIVER - ClickFix Rundll32 Execution"
+        | project-rename host = DeviceName, user = InitiatingProcessAccountName
+    ),
+    (
+        // Tactic 2: Persistence via UserInitMprLogonScript registry key.
+        DeviceProcessEvents
+        | where FileName =~ "reg.exe" and ProcessCommandLine has_all ("add", @"HKCU\Environment", "UserInitMprLogonScript")
+        | extend Tactic = "COLDRIVER - Persistence via UserInitMprLogonScript"
+        | project-rename host = DeviceName, user = InitiatingProcessAccountName
+    ),
+    (
+        DeviceRegistryEvents
+        | where RegistryKey has @"\Environment\UserInitMprLogonScript" and isnotempty(RegistryValue) and RegistryValue has "powershell"
+        | extend Tactic = "COLDRIVER - Persistence via UserInitMprLogonScript"
+        | project-rename host = DeviceName, user = InitiatingProcessAccountName
+    ),
+    (
+        // Tactic 3: Storing encrypted payloads in the registry.
+        DeviceProcessEvents
+        | where FileName =~ "powershell.exe" and ProcessCommandLine has PayloadCLSID and (ProcessCommandLine has "EnthusiastMode" or ProcessCommandLine has "QatItems")
+        | extend Tactic = "COLDRIVER - Registry Payload Storage"
+        | project-rename host = DeviceName, user = InitiatingProcessAccountName
+    ),
+    (
+        DeviceRegistryEvents
+        | where RegistryKey has PayloadCLSID and RegistryKey has @"\DefaultIcon" and (RegistryValueName in~ ("EnthusiastMode", "QatItems"))
+        | extend Tactic = "COLDRIVER - Registry Payload Storage"
+        | project-rename host = DeviceName, user = InitiatingProcessAccountName
+    ),
+    (
+        // Tactic 4: C2 Communication with specific domains or User-Agent.
+        DeviceNetworkEvents
+        | where RemoteUrl has_any (C2Domains) or (InitiatingProcessFileName in~ ("rundll32.exe", "powershell.exe") and AdditionalFields has C2UserAgent)
+        // comment: User-Agent data in AdditionalFields can be inconsistent. For higher fidelity, use dedicated proxy logs if available.
+        | extend Tactic = "COLDRIVER - C2 Communication"
+        | project-rename host = DeviceName, user = InitiatingProcessAccountName
+    ),
+    (
+        // Tactic 5: Extensive PowerShell reconnaissance.
+        DeviceProcessEvents
+        | where FileName =~ "powershell.exe"
+            and (
+                ProcessCommandLine has_all ("whoami", "/all", "ipconfig", "systeminfo")
+                or (ProcessCommandLine has_all ("EnumerateFiles", "EnumerateDirectories") and ProcessCommandLine has_any (".pdf", ".doc", ".xls"))
+            )
+        // comment: False Positive Tuning: The PowerShell reconnaissance logic is broad. Consider adding exclusions for known admin scripts or user accounts.
+        // | where InitiatingProcessAccountName !in ("known_admin_account1", "known_admin_account2")
+        | extend Tactic = "COLDRIVER - PowerShell Reconnaissance"
+        | project-rename host = DeviceName, user = InitiatingProcessAccountName
+    )
+)
+| project-reorder
+    TimeGenerated,
+    Tactic,
+    host,
+    user,
+    FileName,
+    ProcessCommandLine,
+    InitiatingProcessFileName,
+    RegistryKey,
+    RegistryValueName,
+    RegistryValue,
+    RemoteUrl,
+    AdditionalFields

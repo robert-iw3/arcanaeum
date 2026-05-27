@@ -1,0 +1,79 @@
+rule comprehensive_container_security_threat_detection {
+  meta:
+    author = "RW"
+    date = "2025-08-23"
+    description = "This rule combines multiple detection logics to identify various threats in a containerized environment, including vulnerable images, runtime escape attempts, insecure API usage, and supply chain risks. UDM field mappings may need to be adjusted based on specific log source parsers."
+    tactic = "TA0001, TA0004, TA0005"
+    technique = "T1190, T1611, T1078, T1195"
+    false_positives = "Legitimate administrative actions, such as creating privileged containers for valid purposes or using internal container registries not in the trusted list, may trigger this rule. Use the reference lists to tune for your environment."
+    tags = "Container, Kubernetes, Docker, Cloud"
+
+  events:
+    // Part 1: Detect high/critical severity vulnerabilities in container images.
+    // This requires vulnerability scan data mapped to UDM VULNERABILITY events.
+    $vuln.metadata.event_type = "VULNERABILITY"
+    $vuln.target.resource.type = "CONTAINER"
+    ($vuln.vulnerability.severity = "CRITICAL" or $vuln.vulnerability.severity = "HIGH")
+
+    // Part 2a: Detect insecure container configurations - privileged containers.
+    // This requires Kubernetes audit logs.
+    $priv_container.metadata.event_type = "KUBERNETES_AUDIT"
+    $priv_container.additional.request_object.spec.containers[0].securityContext.privileged = true
+    // FP Tuning: Add trusted service accounts or admin users to the %trusted_actors list.
+    not $priv_container.principal.user.userid in %trusted_actors
+
+    // Part 2b: Detect runtime escape attempts - suspicious processes.
+    // This requires EDR logs with process parent-child relationships.
+    $escape_proc.metadata.event_type = "PROCESS_LAUNCH"
+    re.regex($escape_proc.principal.process.file.path, "(/runc|/containerd-shim)$")
+    $escape_proc.target.process.file.name in ("nsenter", "insmod", "modprobe", "chroot")
+
+    // Part 3: Detect insecure API access patterns in Kubernetes.
+    // This requires Kubernetes audit logs.
+    $cluster_role.metadata.event_type = "KUBERNETES_AUDIT"
+    $cluster_role.metadata.product_event_type = "create"
+    $cluster_role.target.resource.resource_subtype = "clusterrolebindings"
+    $cluster_role.additional.request_object.roleRef.name in ("cluster-admin", "admin")
+    // FP Tuning: Add trusted service accounts or admin users to the %trusted_actors list.
+    not $cluster_role.principal.user.userid in %trusted_actors
+
+    // Part 4: Detect supply chain threats from untrusted registries.
+    // This logic assumes container creation events are logged as PROCESS_LAUNCH.
+    $untrusted_image.metadata.event_type = "PROCESS_LAUNCH"
+    $registry = re.capture($untrusted_image.target.process.file.path, `^([a-zA-Z0-9.-]+)/`)
+    $registry != ""
+    // FP Tuning: Add your organization's private or sanctioned registries to the %trusted_registries list.
+    not $registry in %trusted_registries
+
+  outcome:
+    // Risk score is set based on the severity of the detected event.
+    $risk_score = if($escape_proc, 80, if($priv_container, 75, if($cluster_role, 70, if($vuln, 50, 40))))
+
+    // The following outcomes are conditionally populated based on which event triggered the rule.
+    $tactic = if($vuln, "Initial Access", if($priv_container, "Privilege Escalation", if($escape_proc, "Privilege Escalation", if($cluster_role, "Privilege Escalation", "Initial Access"))))
+    $technique = if($vuln, "Exploit Public-Facing Application", if($priv_container, "Escape to Host", if($escape_proc, "Escape to Host", if($cluster_role, "Valid Accounts", "Supply Chain Compromise"))))
+    $detection_source = if($vuln, "Vulnerability Scan", if($priv_container, "Kubernetes Audit", if($escape_proc, "EDR", if($cluster_role, "Kubernetes Audit", "Container Inventory"))))
+    $principal_user = if($priv_container, $priv_container.principal.user.userid, if($cluster_role, $cluster_role.principal.user.userid, ""))
+    $principal_hostname = if($escape_proc, $escape_proc.principal.hostname, if($untrusted_image, $untrusted_image.principal.hostname, ""))
+    $target_image = if($vuln, $vuln.target.resource.name, if($untrusted_image, $untrusted_image.target.process.file.path, ""))
+
+    $description = if($vuln,
+        strings.concat("High/Critical severity vulnerability '", $vuln.vulnerability.id, "' detected in image '", $vuln.target.resource.name, "'."),
+        if($priv_container,
+            strings.concat("Privileged container '", $priv_container.additional.request_object.spec.containers[0].name, "' created by user '", $priv_container.principal.user.userid, "' in namespace '", $priv_container.target.resource.namespace, "'."),
+            if($escape_proc,
+                strings.concat("Suspicious process '", $escape_proc.target.process.file.name, "' with command line '", $escape_proc.target.process.command_line, "' executed from a container context on host '", $escape_proc.principal.hostname, "'."),
+                if($cluster_role,
+                    strings.concat("User '", $cluster_role.principal.user.userid, "' created a cluster role binding to a privileged role '", $cluster_role.additional.request_object.roleRef.name, "'."),
+                    if($untrusted_image,
+                        strings.concat("Container started from untrusted registry: '", $untrusted_image.target.process.file.path, "' on host '", $untrusted_image.principal.hostname, "'."),
+                        "Unknown container threat detected."
+                    )
+                )
+            )
+        )
+    )
+
+  condition:
+    $vuln or $priv_container or $escape_proc or $cluster_role or $untrusted_image
+}

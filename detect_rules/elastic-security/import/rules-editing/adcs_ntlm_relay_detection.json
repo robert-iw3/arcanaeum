@@ -1,0 +1,77 @@
+{
+  "rule_id": "adcs_ntlm_relay_detection",
+  "name": "NTLM Relay From AD CS Server Detected",
+  "description": "Detects successful NTLM authentication requests (Event ID 4776) originating from an AD CS server for a machine account that does not match the source workstation name. This behavior can be indicative of an NTLM relay attack.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "from winlogbeat-* | where winlog.channel = 'Security' and winlog.event_id = '4776' and winlog.event_data.Status = '0x0' and winlog.event_data.AccountName RLIKE '.*\\\\$$' | eval adcs_machine_account = UPPER(winlog.event_data.SourceWorkstation) + '$' | where UPPER(winlog.event_data.AccountName) != adcs_machine_account | STATS count = COUNT(*) BY host.name, winlog.event_data.AccountName, winlog.event_data.SourceWorkstation, source.ip | keep host.name, winlog.event_data.AccountName, winlog.event_data.SourceWorkstation, source.ip, count",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0008",
+        "name": "Lateral Movement",
+        "reference": "https://attack.mitre.org/tactics/TA0008/"
+      },
+      "technique": [
+        {
+          "id": "T1557",
+          "name": "Adversary-in-the-Middle",
+          "reference": "https://attack.mitre.org/techniques/T1557/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0006",
+        "name": "Credential Access",
+        "reference": "https://attack.mitre.org/tactics/TA0006/"
+      },
+      "technique": [
+        {
+          "id": "T1003",
+          "name": "OS Credential Dumping",
+          "reference": "https://attack.mitre.org/techniques/T1003/"
+        }
+      ]
+    }
+  ],
+  "interval": "5m",
+  "from": "now-5m",
+  "max_signals": 100,
+  "risk_score": 95,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://www.specterops.io/assets/resources/Certified_Pre-Owned.pdf"
+  ],
+  "tags": [
+    "Active Directory",
+    "NTLM Relay",
+    "AD CS",
+    "Credential Access"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "exemptions": [
+    {
+      "name": "adcs_servers_exemption",
+      "description": "Filters NTLM relay activity to only include requests originating from AD CS servers.",
+      "conditions": [
+        {
+          "field": "source.ip",
+          "operator": "included",
+          "type": "list",
+          "list_id": "adcs_servers"
+        }
+      ],
+      "enabled": true
+    }
+  ],
+  "custom_query_fields": [],
+  "event_group": "winlog.event_data.AccountName, winlog.event_data.SourceWorkstation, source.ip"
+}

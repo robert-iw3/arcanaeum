@@ -1,0 +1,36 @@
+//    Economic Denial of Sustainability (EDoS) Attack
+//    The EDoS attack drains a host's outgoing bandwidth, incurring unexpected financial costs or service disruptions, particularly
+//    for cloud-based services. Detecting this pattern is essential to prevent economic impact and maintain service availability.
+//    Tactics = "Denial of Service"
+//    Techniques = "Network Denial of Service"
+//    Author = "RW"
+//    Date = "2025-08-14"
+
+let timeframe = 30m;
+// Set a threshold for traffic volume in bytes. 1GB is a starting point.
+// This is a critical tuning parameter. Adjust based on your environment's baseline for egress traffic.
+// High-traffic servers (e.g., file servers, web servers) may require a higher threshold or exclusion.
+let volume_threshold_bytes = 1000000000; // 1 GB
+
+// This query uses the VMConnection table, populated by the Azure Dependency Agent.
+// If using firewall logs (e.g., CommonSecurityLog), adapt the query to use equivalent fields for source, destination, and bytes transferred.
+VMConnection
+| where TimeGenerated > ago(timeframe)
+// Summarize both inbound and outbound traffic for each internal host (Computer).
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    TotalBytesSent = sum(BytesSent),
+    TotalBytesReceived = sum(BytesReceived),
+    PeerIPs = make_set(RemoteIp, 20) // Collect up to 20 peer IPs for investigation context.
+    by Computer
+// The core of the detection: identify hosts with both high inbound AND high outbound traffic.
+// This pattern is characteristic of a host being used as a relay in a Ping-Pong attack.
+| where TotalBytesSent > volume_threshold_bytes and TotalBytesReceived > volume_threshold_bytes
+| project
+    StartTime,
+    EndTime,
+    AbusedHost = Computer,
+    TotalBytesSent,
+    TotalBytesReceived,
+    PeerIPs

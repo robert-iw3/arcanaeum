@@ -1,0 +1,45 @@
+title: Modbus or DNP3 Traffic To or From External Network
+status: experimental
+description: >-
+  Detects Modbus (TCP/502) or DNP3 (TCP/20000) traffic where at least one of the endpoints (source or destination) is a non-private (external) IP address.
+  Such traffic can indicate unauthorized access, remote reconnaissance, or data tampering attempts against critical OT/ICS systems, which often lack strong authentication and encryption.
+references:
+  - https://isc.sans.edu/diary/lt+appears+that+the+number+of+industrial+devices+accessible+from+the+internet+has+risen+by+30+thousand+over+the+past+three+years/30860
+author: RW
+date: 2025-08-18
+tags:
+  - attack.t1071
+  - attack.t1090
+  - attack.t1572
+  - attack.initial_access
+  - attack.ics.t0885
+logsource:
+  category: network_traffic
+  product: zeek
+detection:
+  # Selects traffic using standard Modbus or DNP3 ports
+  selection_protocols:
+    destination.port:
+      - 502 # Modbus TCP/IP
+      - 20000 # DNP3
+  # Filters for traffic that is purely internal (both source and destination are private IPs)
+  filter_internal_traffic:
+    source.ip|cidr:
+      - '10.0.0.0/8'
+      - '172.16.0.0/12'
+      - '192.168.0.0/16'
+      - '127.0.0.0/8'
+      - '169.254.0.0/16'
+    destination.ip|cidr:
+      - '10.0.0.0/8'
+      - '172.16.0.0/12'
+      - '192.168.0.0/16'
+      - '127.0.0.0/8'
+      - '169.254.0.0/16'
+  # The condition triggers if the traffic uses the specified protocols AND is NOT purely internal
+  condition: selection_protocols and not filter_internal_traffic
+falsepositives:
+  - Legitimate remote access by vendors or partners to OT systems. These connections should be documented and their source IPs can be added to an exclusion list.
+  - Cloud-based SCADA or management platforms that communicate with on-premise devices.
+  - Misconfigured network segments or assets that are not correctly identified as internal.
+level: high

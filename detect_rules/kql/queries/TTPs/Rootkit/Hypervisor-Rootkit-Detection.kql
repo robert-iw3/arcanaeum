@@ -1,0 +1,53 @@
+// Name: Hypervisor Configuration Modified or Suspicious VM Created
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects command-line activity used to create or modify virtual machines (VMs) or hypervisor settings.
+//              Hypervisor rootkits may use these tools to create malicious VM environments or alter configurations
+//              to gain control and persist below the guest operating system.
+// Tactic: Defense Evasion, Persistence
+// Technique: T1542.001, T1542.003
+// False Positive Sensitivity: Medium
+
+// Define hypervisor management tools.
+let hypervisor_tools = dynamic([
+    "powershell.exe",
+    "VBoxManage.exe",
+    "vmrun.exe"
+]);
+
+// Define suspicious commands for creating or modifying VMs and their settings.
+let suspicious_vm_commands = dynamic([
+    "New-VM",           // Hyper-V: Create new VM
+    "Set-VM",           // Hyper-V: Modify VM settings
+    "Set-VMFirmware",   // Hyper-V: Modify VM firmware settings
+    "Set-VMBios",       // Hyper-V: Modify VM BIOS settings
+    "createvm",         // VirtualBox: Create new VM
+    "modifyvm",         // VirtualBox: Modify VM settings
+    "storageattach"     // VirtualBox: Attach storage, could be a malicious VHD
+]);
+
+DeviceProcessEvents
+// Look for executions of common hypervisor management tools.
+| where ProcessFileName in~ (hypervisor_tools)
+// Filter for command lines that contain VM creation or modification commands.
+| where ProcessCommandLine has_any (suspicious_vm_commands)
+// FP Reduction: VM management is a normal administrative task. This detection is best used to audit for *unauthorized* or *unexpected* activity.
+// Exclude known administrator accounts or service accounts that legitimately perform these actions.
+// For example: | where AccountName !in~ ("domain\\vmadmin", "NT AUTHORITY\\SYSTEM")
+// Exclude known legitimate parent processes, such as orchestration or management tools.
+// For example: | where InitiatingProcessFileName !in~ ("SystemCenterManagement.exe")
+| summarize
+    count(),
+    make_set(ProcessCommandLine, 5),
+    StartTime = min(Timestamp),
+    EndTime = max(Timestamp)
+    by DeviceName, AccountName, InitiatingProcessFileName, InitiatingProcessCommandLine
+| project
+    StartTime,
+    EndTime,
+    DeviceName,
+    AccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    SuspiciousVMCommands = set_ProcessCommandLine,
+    EventCount = count_

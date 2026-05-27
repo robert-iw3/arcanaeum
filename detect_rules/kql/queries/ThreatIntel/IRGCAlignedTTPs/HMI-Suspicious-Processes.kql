@@ -1,0 +1,73 @@
+// Name: Unusual Process Execution from ICS/SCADA Application
+// Author: RW
+// Date: 2025-08-08
+// Description: Detects suspicious child processes spawned by common Industrial Control System (ICS) or
+//              SCADA Human-Machine Interface (HMI) applications. This activity can indicate that a malicious
+//              project file has been opened or that the HMI software has been exploited to gain execution on
+//              an engineering workstation or HMI terminal. This technique is used by threat actors like
+//              Cyber Av3ngers to gain an initial foothold in an OT environment.
+// False Positive Sensitivity: Medium
+// MITRE ATT&CK for Enterprise: T1059.001, T1059.003, T1105
+// MITRE ATT&CK for ICS: T0853, T0883
+
+// FP Tuning: This list is critical and MUST be customized for your specific OT environment.
+// Add the process names of HMI/SCADA/Engineering software used in your organization.
+let ics_parent_processes = dynamic([
+    // Rockwell / Allen-Bradley
+    "FTView.exe",
+    "rsview32.exe",
+    "Studio.exe",
+    // Siemens
+    "CCWinCCRT.exe",
+    "HMIRT.exe",
+    // Wonderware / AVEVA
+    "view.exe",
+    "wwview.exe",
+    "intouch.exe",
+    // GE
+    "Proficy.Cimplicity.CimView.exe",
+    // Schneider Electric
+    "Citect32.exe",
+    // Generic
+    "hmi.exe"
+]);
+
+// Define suspicious child processes used for reconnaissance, lateral movement, or payload execution.
+let suspicious_child_processes = dynamic([
+    "cmd.exe",
+    "powershell.exe",
+    "pwsh.exe",
+    "wscript.exe",
+    "cscript.exe",
+    "rundll32.exe",
+    "certutil.exe",
+    "bitsadmin.exe",
+    "psexec.exe",
+    "mstsc.exe",
+    "net.exe",
+    "net1.exe",
+    "ipconfig.exe",
+    "whoami.exe",
+    "hostname.exe",
+    "nslookup.exe"
+]);
+
+DeviceProcessEvents
+// Focus on suspicious child processes being spawned by a known ICS/HMI parent process.
+| where InitiatingProcessFileName in~ (ics_parent_processes)
+  and FileName in~ (suspicious_child_processes)
+// FP Tuning: Exclude known legitimate command lines used by administrators or the HMI software itself.
+// For example, if your HMI legitimately calls a specific script:
+// | where not (InitiatingProcessFileName == "view.exe" and ProcessCommandLine has "C:\\Scripts\\legit_script.bat")
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    FileName,
+    ProcessCommandLine,
+    ProcessId,
+    InitiatingProcessId,
+    InitiatingProcessVersionInfo,
+    FolderPath

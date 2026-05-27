@@ -1,0 +1,89 @@
+rule ConnectionsToDGAOrNRD {
+  meta:
+    name = "Connections to DGA or Newly Registered Domains"
+    author = "RW"
+    description = "Detects potential C2 activity by identifying outbound connections to domains that are either algorithmically generated (DGA) or have been recently registered (NRD), using heuristics and threat intelligence."
+    tags = "T1568.002, T1071"
+    severity = "MEDIUM"
+    false_positives = "Legitimate services (CDNs, parking), NRD TI quality, DGA heuristics. Tune DomainAllowList and DGA thresholds."
+
+  // Define thresholds for DGA heuristics (adjust as needed in your environment)
+  strings:
+    $dga_length_threshold = 20
+    $dga_digit_ratio_threshold = 0.3
+    $dga_vowel_ratio_low_threshold = 0.2
+    $dga_vowel_ratio_high_threshold = 0.6
+
+  events:
+    // Event 1: DNS Activity - Filtering and extracting parent domain for DGA heuristics
+    $dns_event.metadata.event_type = "NETWORK_DNS"
+    $dns_event.network.dns.questions.name != ""
+    not $dns_event.network.dns.questions.name in %dns_domain_allowlist // Use a Chronicle reference list
+    not $dns_event.network.dns.questions.name contains "localhost"
+    not $dns_event.network.dns.questions.name contains "in-addr.arpa"
+    not $dns_event.network.dns.questions.name contains "ip6.arpa"
+
+    // Parent domain extraction using strings.extract_domain
+    $dns_event.network.dns.questions.name = $full_domain_name
+    strings.extract_domain($full_domain_name) = $parent_domain
+    not $parent_domain in %dns_domain_allowlist // Exclude parent domains that are allowlisted
+
+    // Event 2: Threat Intelligence for Newly Registered Domains (NRD)
+    $ti_nrd.metadata.event_type = "THREAT_INDICATOR"
+    $ti_nrd.security_result.category = "Newly Registered Domain" or $ti_nrd.metadata.description contains "newly registered domain" nocase
+    $ti_nrd.indicator.domain_name != ""
+
+    // Correlate DNS events with NRD indicators based on domain name
+    $dns_event.network.dns.questions.name = $ti_nrd.indicator.domain_name
+
+  match:
+    // This aggregates events based on Client IP and the (suspicious) domain over a 1-day window.
+    $dns_event.principal.ip, $dns_event.network.dns.questions.name
+    group by $dns_event.principal.ip, $dns_event.network.dns.questions.name
+    // A sliding window could be added if you want to explicitly restrict aggregation to a shorter period,
+    // e.g., 'window 1h' or 'window 1d'. For now, the default behavior of `group by` is often sufficient
+    // for this type of aggregation unless specific time-based counting/averaging is needed.
+
+  outcome:
+    // Extract domain name for DGA heuristics (within the UDM event)
+    $current_domain_name = $dns_event.network.dns.questions.name
+
+    // Calculate DGA-like features using YARA-L string functions
+    $domain_length = strlen($current_domain_name)
+    $name_lower = tolower($current_domain_name)
+    $vowel_count = count($name_lower, /[aeiou]/)
+    $consonant_count = count($name_lower, /[bcdfghjklmnpqrstvwxyz]/)
+    $digit_count = count($name_lower, /[0-9]/)
+
+    $letter_count = $vowel_count + $consonant_count
+    $digit_ratio = if($domain_length > 0, todouble($digit_count) / $domain_length, 0.0)
+    $vowel_ratio = if($letter_count > 0, todouble($vowel_count) / $letter_count, 0.0)
+
+    // DGA detection logic
+    $is_dga_heuristic_1 = $domain_length > $dga_length_threshold and $digit_ratio > $dga_digit_ratio_threshold
+    $is_dga_heuristic_2 = $domain_length > 15 and $letter_count > 5 and ($vowel_ratio < $dga_vowel_ratio_low_threshold or $vowel_ratio > $dga_vowel_ratio_high_threshold)
+    $is_dga_detected = $is_dga_heuristic_1 or $is_dga_heuristic_2
+
+    // NRD detection flag
+    $is_nrd_detected = $ti_nrd.metadata.event_type = "THREAT_INDICATOR" // True if NRD TI matched
+
+    $start_time = min($dns_event.metadata.event_timestamp)
+    $end_time = max($dns_event.metadata.event_timestamp)
+    $client_ip = $dns_event.principal.ip
+    $suspicious_domain = $dns_event.network.dns.questions.name
+    $total_events = count($dns_event.metadata.event_id)
+
+    // Aggregate detection types and result codes
+    $detection_types = array_distinct(if($is_dga_detected, "DGA Heuristics", ""), if($is_nrd_detected, "Newly Registered Domain", ""))
+    $result_codes = array_distinct($dns_event.network.dns.response_code)
+
+  condition:
+    // Trigger if either DGA heuristics indicate suspicion or the domain is an NRD based on TI
+    ($is_dga_detected or $is_nrd_detected)
+}
+
+// Reference Lists:
+// 1.  **dns_domain_allowlist:** Create a Chronicle Reference List named `dns_domain_allowlist` and populate it with the allowed domains:
+//     google.com, microsoft.com, apple.com, windows.com, live.com, office.com,
+//     msftncsi.com, windowsupdate.com, g.doubleclick.net, googlesyndication.com,
+//     amazonaws.com, cloudfront.net, akamai.net, azure.com, msedge.net

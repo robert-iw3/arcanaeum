@@ -1,0 +1,44 @@
+rule gcp_etc_hosts_modified_for_metadata_hijack {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects modifications to the /etc/hosts file where an entry for 'metadata.google.internal' is added or changed to point to a non-standard IP address. This is a key indicator of a DHCP hijacking attack or other Man-in-the-Middle (MitM) techniques aimed at intercepting communications with the GCP metadata service for privilege escalation."
+    false_positives = "Legitimate but unusual network configurations, testing environments, or custom DNS setups might use alternative IPs for metadata services. Exclusions for known safe IP addresses or specific hosts might be necessary."
+    tags = "GCP, LINUX, MITM, PRIVILEGE_ESCALATION, T1557"
+    tactic = "TA0004"
+    technique = "T1557"
+
+  events:
+    // Monitor for processes being launched that modify /etc/hosts.
+    $proc.metadata.event_type = "PROCESS_LAUNCH"
+
+    // Filter for commands that are modifying the /etc/hosts file.
+    re.regex($proc.target.process.command_line, `\/etc\/hosts`)
+
+    // The command line must contain the GCP metadata server hostname.
+    re.regex($proc.target.process.command_line, `metadata\.google\.internal`)
+
+    // Capture the IP address being written to the hosts file for the metadata server.
+    $ip = re.capture($proc.target.process.command_line, `(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+.*metadata\.google\.internal`)
+
+    // Capture the hostname for correlation.
+    $proc.principal.hostname = $hostname
+
+  match:
+    // Group events by hostname over a 5 minute window.
+    $hostname over 5m
+
+  outcome:
+    // High risk score as this is a strong indicator of a MitM attack.
+    $risk_score = 80
+    $principal_hostname = array_distinct($hostname)
+    $principal_user = array_distinct($proc.principal.user.user_display_name)
+    $command_lines = array_distinct($proc.target.process.command_line)
+    $process_paths = array_distinct($proc.target.process.file.full_path)
+    $malicious_ips_written = array_distinct($ip)
+    $event_count = count_distinct($proc.metadata.id)
+
+  condition:
+    // Trigger if an IP address is captured and it is not the legitimate GCP metadata server IP.
+    $proc and $ip != "169.254.169.254"
+}

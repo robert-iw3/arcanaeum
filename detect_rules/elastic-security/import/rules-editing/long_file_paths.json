@@ -1,0 +1,18 @@
+{
+  "type": "detection-engine.rule",
+  "id": "long-file-paths",
+  "attributes": {
+    "risk_score": 50,
+    "enabled": true,
+    "name": "Long File Paths Detection",
+    "description": "Detects events related to long file paths (over 260 characters) for process creation, module loading, and file creation. This can be an indicator of malicious obfuscation or techniques like DLL side-loading.",
+    "rule_id": "long_file_paths_detection",
+    "index": ["logs-endpoint.events.*"],
+    "language": "kuery",
+    "query": "(event.category:(\"process\" OR \"library\" OR \"file\") AND event.action:(\"start\" OR \"load\" OR \"creation\") AND (process.executable:/.{261,}/ OR dll.path:/.{261,}/ OR file.path:/.{261,}/))",
+    "interval": "1h",
+    "severity": "medium",
+    "type": "query",
+    "version": "1"
+  }
+}

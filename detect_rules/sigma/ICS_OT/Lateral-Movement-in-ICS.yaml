@@ -1,0 +1,67 @@
+title: Lateral Movement in Segmented ICS Environment
+status: experimental
+description: >-
+  Detects potential lateral movement activities within or between segmented network zones, specifically focusing on
+  traffic patterns that violate typical ICS/OT network segmentation policies. This rule identifies two primary suspicious patterns:
+  1) Direct communication between IT and OT zones that bypasses designated DMZ/jump hosts.
+  2) Use of common administrative protocols (e.g., RDP, SMB, SSH) for peer-to-peer communication between assets within the OT zone, which is often anomalous.
+author: RW
+date: 2025-08-18
+tags:
+  - attack.lateral_movement
+  - attack.t0864
+  - attack.t0865
+  - ics
+logsource:
+  category: firewall
+  product: zeek
+detection:
+  # comment: Pattern 1: Detects direct communication between IT and OT zones, which should typically be routed through a DMZ or jump host.
+  cross_segment_comm:
+    - source.ip:
+        # CRITICAL: Replace with your corporate IT network ranges.
+        - '192.168.0.0/16'
+        - '10.0.0.0/8'
+      destination.ip:
+        # CRITICAL: Replace with your critical OT/ICS network ranges.
+        - '10.200.0.0/16'
+        - '172.16.0.0/12'
+    - source.ip:
+        # CRITICAL: Replace with your critical OT/ICS network ranges.
+        - '10.200.0.0/16'
+        - '172.16.0.0/12'
+      destination.ip:
+        # CRITICAL: Replace with your corporate IT network ranges.
+        - '192.168.0.0/16'
+        - '10.0.0.0/8'
+
+  # comment: Pattern 2: Detects anomalous peer-to-peer communication within the OT zone using administrative protocols.
+  intra_ot_admin_comm:
+    source.ip:
+      # CRITICAL: Replace with your critical OT/ICS network ranges.
+      - '10.200.0.0/16'
+      - '172.16.0.0/12'
+    destination.ip:
+      # CRITICAL: Replace with your critical OT/ICS network ranges.
+      - '10.200.0.0/16'
+      - '172.16.0.0/12'
+    destination.port:
+      - 22    # SSH
+      - 135   # RPC
+      - 445   # SMB
+      - 3389  # RDP
+      - 5985  # WinRM (HTTP)
+      - 5986  # WinRM (HTTPS)
+
+  # comment: This filter is critical. Populate it with hosts authorized to initiate cross-segment or administrative connections (e.g., EWS, Jump Hosts, HMIs).
+  filter_authorized_source:
+    source.ip:
+      - '10.100.1.10'      # Placeholder for an Engineering Workstation
+      - '192.168.50.25'    # Placeholder for a Jump Host
+
+  condition: (1 of cross_segment_comm or intra_ot_admin_comm) and not filter_authorized_source
+falsepositives:
+  - Misconfigured network segment definitions in the rule.
+  - Legitimate, but unlisted, administrative or maintenance activity from a new or temporary system.
+  - Network discovery or vulnerability scans that have not been filtered out.
+level: high

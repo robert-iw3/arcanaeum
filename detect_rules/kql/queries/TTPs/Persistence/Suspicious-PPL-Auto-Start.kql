@@ -1,0 +1,32 @@
+// Name: Suspicious CreateProcessAsPPL Auto-Start Service Creation
+// Author: RW
+// Date: 2025-08-23
+// Description: Detects the creation of an auto-start Windows service using sc.exe where the executable path is suspicious.
+// Suspicious paths include non-standard locations like user profiles or temp directories, or the use of command interpreters.
+// This is a common persistence technique (T1543.003).
+// The triggering intel specifically notes the use of 'CreateProcessAsPPL.exe' in a service path to disable security products at startup.
+// False Positives: Some legitimate software installers or updaters may create services that run from ProgramData or other writable locations.
+// These should be reviewed and can be added to an exclusion list if they are determined to be benign.
+// MITRE ATT&CK: T1543.003
+
+DeviceProcessEvents
+// Look for service creation via the command-line tool sc.exe
+| where FileName =~ "sc.exe" and ProcessCommandLine has "create" and ProcessCommandLine has "start=auto"
+// Use parse-kv to reliably extract the binPath argument from the command line
+| parse-kv ProcessCommandLine as (commandOptions) with (pair_delimiter=' ' kv_delimiter='=')
+| extend binPath = tostring(commandOptions.binpath)
+| where isnotempty(binPath)
+// Check for suspicious ImagePath (binPath) contents
+| where
+    // The specific tool mentioned in the research for PPL abuse
+    binPath has "CreateProcessAsPPL.exe"
+    // Services executing from non-standard, world-writable, or user-specific locations
+    or binPath has_any (
+        @"\Users\",
+        @"\ProgramData\",
+        @"\Windows\Temp\",
+        @"\Temp\"
+        )
+    // Services that launch command interpreters, often to run scripts or other commands
+    or binPath matches regex @"(cmd|powershell|pwsh)\.exe"
+| project-reorder TimeGenerated, DeviceName, InitiatingProcessFileName, FileName, ProcessCommandLine, binPath

@@ -1,0 +1,27 @@
+// Name: Impacket Wmiexec Activity
+// Author: RW
+// Date: 2025-08-08
+// Description: Detects command execution patterns characteristic of Impacket's wmiexec.py script.
+//              This tool is often used by threat actors for lateral movement and remote code execution via WMI.
+// False Positive Sensitivity: Medium
+// Tactics: Execution, Lateral Movement
+// Techniques: T1047, T1021.006
+
+DeviceProcessEvents
+// Detects cmd.exe spawned by the WMI Provider Host process, a common parent for WMI-based execution
+| where InitiatingProcessFileName =~ "WmiPrvSE.exe"
+| where FileName =~ "cmd.exe"
+// Looks for the specific command-line pattern used by wmiexec to redirect command output to a file on the ADMIN$ share
+| where ProcessCommandLine has_all ("/Q", "/c", "1>", "2>&1") and ProcessCommandLine contains @"\\127.0.0.1\ADMIN$\__"
+// FP Tuning: This pattern is highly specific to Impacket's wmiexec. False positives are unlikely.
+// However, if custom or other admin tools replicate this behavior, they may need to be excluded.
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    ProcessCommandLine,
+    InitiatingProcessCommandLine,
+    InitiatingProcessFileName,
+    ReportId,
+    ProcessId,
+    InitiatingProcessId

@@ -1,0 +1,54 @@
+rule DomainFrontingDetectedViaSNIHostMismatch {
+  meta:
+    name = "Domain Fronting Detected via SNI/Host Mismatch"
+    author = "RW"
+    description = "Detects potential domain fronting by identifying discrepancies between the Server Name Indication (SNI) in the TLS handshake and the Host header in the subsequent HTTP request."
+    tags = "T1071.001, T1102"
+    severity = "MEDIUM"
+    false_positives = "CDNs, multi-tenant cloud services. Tuning the 'FrontDomainAllowList' is critical."
+
+  events:
+    // This detection requires a log source with SSL/TLS inspection capabilities.
+    // Assuming 'COMMON_SECURITY_LOG' and specific UDM field mappings.
+    $e.metadata.log_type = "FIREWALL_SSL_PROXY" // Or "COMMON_SECURITY_LOG" if that's how it's mapped in UDM
+    $e.network.tls.server_name != ""          // Equivalent to isnotempty(SSLServerName)
+    $e.network.http.hostname != ""            // Equivalent to isnotempty(DestinationHostName)
+    $e.network.tls.server_name != $e.network.http.hostname // SNI and Host header must differ
+
+    // Exclude known legitimate fronting domains to reduce false positives.
+    // Use a Chronicle reference list for FrontDomainAllowList.
+    not strings.extract_domain($e.network.tls.server_name) in %front_domain_allowlist // Extract registrable domain for SNI
+    not strings.extract_domain($e.network.http.hostname) in %front_domain_allowlist // Extract registrable domain for Host header
+
+    // Core detection logic: The registrable domains of the SNI and Host header do not match.
+    strings.extract_domain($e.network.tls.server_name) != strings.extract_domain($e.network.http.hostname)
+
+  match:
+    // Aggregate by the "front" domain (SNI) and the "true" destination (Host header), along with other network details.
+    $e.network.tls.server_name, $e.network.http.hostname, strings.extract_domain($e.network.tls.server_name), strings.extract_domain($e.network.http.hostname), $e.target.ip, $e.target.port
+    group by $e.network.tls.server_name, $e.network.http.hostname, strings.extract_domain($e.network.tls.server_name), strings.extract_domain($e.network.http.hostname), $e.target.ip, $e.target.port
+    // For historical hunting, you'd specify the timeframe in the search query.
+
+  outcome:
+    $start_time = min($e.metadata.event_timestamp)
+    $end_time = max($e.metadata.event_timestamp)
+    $event_count = count($e.metadata.event_id)
+    $distinct_sources = count_distinct($e.principal.ip)
+    $sni_server_name = $e.network.tls.server_name
+    $host_header = $e.network.http.hostname
+    $destination_ip = $e.target.ip
+    $destination_port = $e.target.port
+    $source_ips = array_distinct($e.principal.ip) limit 5 // Sample source IPs
+
+    $sni_domain = strings.extract_domain($sni_server_name)
+    $host_domain = strings.extract_domain($host_header)
+
+  condition:
+    $event_count > 0 // Trigger if any events match the criteria
+}
+
+// Reference Lists:
+// 1.  **front_domain_allowlist:** Create a Chronicle Reference List named `front_domain_allowlist` and populate it with the allowed domains:
+//     akamai.net, akamaiedge.net, cloudflare.net, fastly.net, cloudfront.net,
+//     azurewebsites.net, appspot.com, herokuapp.com, aspnetcdn.com, windows.net,
+//     google.com, live.com, office.com, sharepoint.com

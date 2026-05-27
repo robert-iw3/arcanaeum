@@ -1,0 +1,64 @@
+{
+  "rule_id": "adcs_editflags_modification",
+  "name": "AD CS EditFlags Registry Key Modified",
+  "description": "Detects changes to the 'EditFlags' registry key in the Certificate Services configuration via Sysmon Event ID 13. This modification can indicate an attempt to abuse Active Directory Certificate Services (AD CS) misconfigurations, as seen in ESC8 attacks.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "from logs-endpoint.events-* | where event.module = 'sysmon' and event.code = '13' and winlog.event_data.TargetObject RLIKE '.*\\\\SYSTEM\\\\CurrentControlSet\\\\Services\\\\CertSvc\\\\Configuration\\\\.*\\\\PolicyModules\\\\CertificateAuthority_MicrosoftDefault\\.Policy\\\\EditFlags' | eval ca_name = REGEXP_EXTRACT(winlog.event_data.TargetObject, 'Configuration\\\\([^\\\\]+)\\\\PolicyModules') | keep host.name, user.name, process.name, ca_name, winlog.event_data.TargetObject, winlog.event_data.Details",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0004",
+        "name": "Privilege Escalation",
+        "reference": "https://attack.mitre.org/tactics/TA0004/"
+      },
+      "technique": [
+        {
+          "id": "T1649",
+          "name": "Credentials in Registry",
+          "reference": "https://attack.mitre.org/techniques/T1649/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0003",
+        "name": "Persistence",
+        "reference": "https://attack.mitre.org/tactics/TA0003/"
+      },
+      "technique": [
+        {
+          "id": "T1546",
+          "name": "Event Triggered Execution",
+          "reference": "https://attack.mitre.org/techniques/T1546/"
+        }
+      ]
+    }
+  ],
+  "interval": "10m",
+  "from": "now-10m",
+  "max_signals": 100,
+  "risk_score": 90,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://www.rbtsec.com/blog/active-directory-certificate-attack-esc8-adcs-web-enrollment/",
+    "https://www.specterops.io/assets/resources/Certified_Pre-Owned.pdf"
+  ],
+  "tags": [
+    "AD CS",
+    "Registry",
+    "Sysmon",
+    "Privilege Escalation",
+    "ESC8"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "host.name, user.name, process.name"
+}

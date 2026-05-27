@@ -1,0 +1,72 @@
+{
+  "rule_id": "evil_winrm_activity_via_powershell",
+  "name": "Evil-WinRM Activity via PowerShell",
+  "description": "Detects the use of the Evil-WinRM hacking tool by identifying specific script block text patterns in PowerShell module logging (Event ID 4104), often used to alter the PowerShell prompt during a remote session.",
+  "severity": "high",
+  "enabled": true,
+  "language": "esql",
+  "query": "from winlogbeat-* | where winlog.channel == 'Microsoft-Windows-PowerShell/Operational' and winlog.event_id == '4104' and winlog.event_data.ScriptBlockText RLIKE '.*function\\s+prompt.*' and winlog.event_data.ScriptBlockText RLIKE '.*Evil-WinRM.*' and NOT (winlog.event_data.ScriptBlockText RLIKE '.*grep.*' OR winlog.event_data.ScriptBlockText RLIKE '.*select-string.*') | stats count() by host.name, user.name, winlog.event_data.ScriptBlockText | keep host.name, user.name, winlog.event_data.ScriptBlockText, count",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0008",
+        "name": "Lateral Movement",
+        "reference": "https://attack.mitre.org/tactics/TA0008/"
+      },
+      "technique": [
+        {
+          "id": "T1021",
+          "name": "Remote Services",
+          "reference": "https://attack.mitre.org/techniques/T1021/"
+        },
+        {
+          "id": "T1021.006",
+          "name": "Windows Remote Management",
+          "reference": "https://attack.mitre.org/techniques/T1021/006/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0003",
+        "name": "Persistence",
+        "reference": "https://attack.mitre.org/tactics/TA0003/"
+      },
+      "technique": [
+        {
+          "id": "T1059",
+          "name": "Command and Scripting Interpreter",
+          "reference": "https://attack.mitre.org/techniques/T1059/"
+        },
+        {
+          "id": "T1059.001",
+          "name": "PowerShell",
+          "reference": "https://attack.mitre.org/techniques/T1059/001/"
+        }
+      ]
+    }
+  ],
+  "interval": "5m",
+  "from": "now-5m",
+  "max_signals": 100,
+  "risk_score": 75,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://detect.fyi/detection-of-evil-winrm-8941eedc586d"
+  ],
+  "tags": [
+    "Powershell",
+    "WinRM",
+    "Lateral Movement",
+    "Hacking Tool"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "user.name, host.name, winlog.event_data.ScriptBlockText"
+}

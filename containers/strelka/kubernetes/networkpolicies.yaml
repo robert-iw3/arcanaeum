@@ -1,0 +1,169 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-redis
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: backend
+    - podSelector:
+        matchLabels:
+          app: frontend
+    ports:
+    - port: 6379
+      protocol: TCP
+  egress: []  # Allow all outbound if needed
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-filestore
+spec:
+  podSelector:
+    matchLabels:
+      app: filestore
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: backend
+    ports:
+    - port: 9000
+      protocol: TCP
+    - port: 9001
+      protocol: TCP
+  egress: []
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend
+spec:
+  podSelector:
+    matchLabels:
+      app: frontend
+  ingress:
+  - from: []  # External via LoadBalancer; restrict if needed
+    ports:
+    - port: 8732
+      protocol: TCP
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: backend
+    ports:
+    - port: 57314
+      protocol: TCP
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - port: 6379
+      protocol: TCP
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-backend
+spec:
+  podSelector:
+    matchLabels:
+      app: backend
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: frontend
+    ports:
+    - port: 57314
+      protocol: TCP
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: redis
+    ports:
+    - port: 6379
+      protocol: TCP
+  - to:
+    - podSelector:
+        matchLabels:
+          app: filestore
+    ports:
+    - port: 9000
+      protocol: TCP
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-suricata
+spec:
+  podSelector:
+    matchLabels:
+      app: suricata
+  ingress: []  # No inbound needed
+  egress: []  # Allow outbound for traffic capture
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-integrator
+spec:
+  podSelector:
+    matchLabels:
+      app: integrator
+  ingress: []  # No inbound
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: frontend
+    ports:
+    - port: 8732
+      protocol: TCP
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-watcher
+spec:
+  podSelector:
+    matchLabels:
+      app: watcher
+  ingress: []  # No inbound
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: frontend
+    ports:
+    - port: 8732
+      protocol: TCP
+  - to: []  # Allow SIEM outbound (external)
+    ports:
+    - port: 9200  # Example for Elastic; adjust
+      protocol: TCP

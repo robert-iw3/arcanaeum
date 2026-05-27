@@ -1,0 +1,51 @@
+//
+// Name: Storm-2603 Ransomware DLL Side-Loading
+//
+// Author: RW
+//
+// Date: 2025-07-31
+//
+// Description: Detects potential DLL side-loading used by Storm-2603 to deploy ransomware. The rule identifies when legitimate applications, known to be abused by this actor, are executed from unusual locations and load a corresponding DLL from the same path.
+//
+// Tactic: Defense Evasion, Execution, Impact
+//
+// Technique: T1574.002 - Hijack Execution Flow: DLL Side-Loading, T1486 - Data Encrypted for Impact
+//
+// False Positive Sensitivity: Medium
+//
+// Detection Comment Level: Medium
+//
+let SuspiciousPairs = datatable(ProcessName:string, DllName:string) [
+    "7z.exe", "7z.dll",
+    "MpCmdRun.exe", "Mpclient.dll",
+    "clink_x86.exe", "clink_dll_x86.dll"
+];
+// Define common non-standard execution paths used by attackers for staging tools.
+let SuspiciousFolders = dynamic([
+    @"C:\Users\Public\",
+    @"C:\ProgramData\",
+    @"C:\Windows\Temp\",
+    @"C:\Temp\",
+    @"C:\PerfLogs\"
+]);
+DeviceImageLoadEvents
+// Look for DLL load events where the initiating process is in a suspicious folder.
+| where InitiatingProcessFolderPath has_any (SuspiciousFolders)
+    // FP Tuning: Exclude legitimate Microsoft Defender updates, which run from C:\ProgramData.
+    // This is a known good path for MpCmdRun.exe.
+    and not (InitiatingProcessFileName =~ "MpCmdRun.exe" and InitiatingProcessFolderPath startswith @"C:\ProgramData\Microsoft\Windows Defender\Platform\")
+// Join with the list of known abused process/DLL pairs.
+| join kind=inner (SuspiciousPairs) on $left.InitiatingProcessFileName == $right.ProcessName and $left.FileName == $right.DllName
+// A key indicator of side-loading is when the malicious DLL is loaded from the same directory as the hijacked executable.
+| where InitiatingProcessFolderPath == FolderPath
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessFolderPath,
+    InitiatingProcessCommandLine,
+    InitiatingProcessSHA256,
+    FileName,
+    FolderPath,
+    SHA256

@@ -1,0 +1,66 @@
+// Name: WinReg RPC Downgrade Attack
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects a potential NTLM relay attack exploiting the Windows Remote Registry (WinReg) client's transport
+//              fallback mechanism. The rule looks for a failed RPC-over-SMB connection to the 'winreg' named pipe, immediately
+//              followed by an RPC-over-TCP connection from the same process with a downgraded authentication level
+//              (RPC_C_AUTHN_LEVEL_CONNECT). This specific sequence is indicative of an attacker forcing a fallback
+//              to a less secure protocol to relay credentials.
+// Tactic: Credential Access
+// Technique: T1557.001 (NTLM Relaying)
+// False Positive Sensitivity: Medium. Legitimate network issues could cause a similar fallback, though it's uncommon.
+// Review the initiating process and target machine for legitimacy.
+// Consider tuning by excluding known administrative tools or source/destination pairs if benign activity is observed.
+// Data Source: Microsoft 365 Defender (DeviceEvents, DeviceFileEvents)
+
+let timeframe = 5m;
+let winreg_uuid = "338cd001-2244-31f1-aaaa-900038001003";
+
+// Find anomalous WinReg RPC calls over TCP with downgraded authentication. This is the core indicator.
+let downgraded_tcp_rpc =
+DeviceEvents
+| where TimeGenerated > ago(timeframe)
+| where ActionType == "RpcClientCall"
+// Note: The fields within AdditionalFields are based on expected MDE sensor data for RPC calls.
+// These field names (InterfaceUuid, Protocol, AuthenticationLevel) might need adjustment based on the actual live schema.
+| extend RpcFields = todynamic(AdditionalFields)
+| where isnotempty(RpcFields)
+| extend InterfaceUuid = tostring(RpcFields.InterfaceUuid)
+| extend Protocol = tostring(RpcFields.Protocol)
+| extend AuthnLevel = tostring(RpcFields.AuthenticationLevel)
+| where InterfaceUuid =~ winreg_uuid
+  and Protocol =~ "ncacn_ip_tcp" // Connection over TCP
+  and AuthnLevel == "2"; // RPC_C_AUTHN_LEVEL_CONNECT (downgraded authentication)
+
+// Find preceding failed attempts to connect to the WinReg named pipe over SMB.
+let failed_smb_rpc =
+DeviceFileEvents
+| where TimeGenerated > ago(timeframe)
+| where IsSuccess == false
+| where FolderPath contains "\\pipe\\winreg" and FolderPath startswith "\\\\"
+| extend TargetMachineFromPath = tostring(split(FolderPath, '\\')[2])
+| where isnotempty(TargetMachineFromPath);
+
+// Correlate the failed SMB attempt with the subsequent downgraded TCP call from the same process.
+downgraded_tcp_rpc
+| join kind=inner (
+    failed_smb_rpc
+) on DeviceId, InitiatingProcessId
+// Ensure the TCP call happens shortly after the SMB failure.
+| where (TimeGenerated - SMBAttemptTime) between (0s .. 1m)
+// Correlate the target machine to increase fidelity.
+// This checks if the target from the SMB path is mentioned in the command line of the process making the TCP call.
+| where InitiatingProcessCommandLine contains TargetMachineFromPath
+| project
+    StartTime = SMBAttemptTime,
+    EndTime = TimeGenerated,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RemoteIP,
+    TargetMachineFromPath,
+    Description = "Process failed to connect to Remote Registry via SMB, then fell back to TCP with downgraded authentication."
+| extend
+    AccountCustomEntity = AccountName,
+    HostCustomEntity = DeviceName,
+    IPCustomEntity = RemoteIP

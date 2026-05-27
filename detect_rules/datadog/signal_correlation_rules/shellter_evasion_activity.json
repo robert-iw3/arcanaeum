@@ -1,0 +1,59 @@
+{
+  "name": "SHELLTER Evasion Framework Activity",
+  "queries": [
+    {
+      "name": "known_shellter_related_hash",
+      "query": "@process.hash:(\"c865f24e4b9b0855b8b559fc3769239b0aa6e8d680406616a13d9a36fbbc2d30\" OR \"7d0c9855167e7c19a67f800892e974c4387e1004b40efb25a2a1d25a99b03a10\" OR \"b3e93bfef12678294d9944e61d90ca4aa03b7e3dae5e909c3b2166f122a14dad\" OR \"da59d67ced88beae618b9d6c805f40385d0301d412b787e9f9c9559d00d2c880\" OR \"70ec2e65f77a940fd0b2b5c0a78a83646dec175836552622ad17fb974f1\" OR \"263ab8c9ec821ae573979ef2d5ad98cda5009a39e17398cd31b0fad98d862892\")",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "known_shellter_related_c2",
+      "query": "@network.destination.ip:(\"185.156.72.80\" OR \"94.141.12.182\") OR @network.destination.domain:\"eaglekl.digital\"",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "behavioral_ntdll_remapping_for_hook_evasion",
+      "query": "@winlog.event_id:10 AND @winlog.event_data.TargetImage:*\\\\ntdll.dll",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "behavioral_suspicious_module_preloading",
+      "query": "@dll.name:(wininet.dll OR crypt32.dll OR advapi32.dll OR urlmon.dll)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    }
+  ],
+  "cases": [
+    {
+      "name": "SHELLTER Evasion Framework Activity",
+      "status": "high",
+      "condition": "event_count_0 >= 1 OR event_count_1 >= 1 OR event_count_2 >= 1 OR event_count_3 >= 1"
+    }
+  ],
+  "options": {
+    "evaluation_window": 3600,
+    "keep_alive": 3600,
+    "max_signal_duration": 3600,
+    "correlation_based_signal": {
+      "correlation_inputs": [
+        {
+          "rule_id": "shellter_evasion_correlation"
+        }
+      ],
+      "correlated_by_fields": [
+        "@host",
+        "@usr"
+      ],
+      "distinct_fields": [
+        "case_id"
+      ]
+    }
+  },
+  "message": "SHELLTER Activity: {{distinct_count}} method(s) on host {{host}} by user {{usr}}: {{case_names}}",
+  "type": "correlation_based_signal",
+  "tags": [],
+  "is_enabled": true
+}

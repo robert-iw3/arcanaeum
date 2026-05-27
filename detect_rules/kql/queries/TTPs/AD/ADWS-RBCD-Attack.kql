@@ -1,0 +1,40 @@
+// Name: Malicious Modification of msDS-AllowedToActOnBehalfOfOtherIdentity (RBCD)
+// Author: RW
+// Date: 2025-08-07
+// Description: Detects the setup phase of a Resource-Based Constrained Delegation (RBCD) attack.
+// This is achieved by monitoring for modifications to the 'msDS-AllowedToActOnBehalfOfOtherIdentity' attribute on an Active Directory object.
+// Adversaries can abuse this to impersonate users on the target computer/account. Tools like SoaPy can perform this action over ADWS.
+//
+// False Positive Sensitivity: Medium
+// False positives may occur from legitimate administrative activities, such as Exchange server configurations or actions by Identity and Access Management (IAM) solutions.
+// It is crucial to populate the account_allowlist with any service or administrative accounts that are authorized to perform this action.
+//
+// Prerequisites:
+// This detection requires a System Access Control List (SACL) to be configured on sensitive AD objects (e.g., Domain Controllers, admin accounts, high-value servers).
+// The SACL must be set to audit 'WriteProperty' actions for the 'Everyone' or 'Authenticated Users' principal to generate Event ID 4662 for this activity.
+//
+// MITRE ATT&CK: T1136.001, T1558.003, T1098
+
+let timeframe = 1d;
+// GUID for the msDS-AllowedToActOnBehalfOfOtherIdentity attribute.
+let rbcd_attribute_guid = "3f78c3e5-f79a-46bd-a0b8-9d18116ddc79";
+// Add service or administrative accounts that are authorized to modify this attribute.
+let account_allowlist = dynamic([]);
+SecurityEvent
+| where TimeGenerated > ago(timeframe)
+// Event ID 4662 indicates an operation was performed on an object, requiring a SACL to be configured.
+| where EventID == 4662
+// Filter for write operations.
+| where Accesses has "WriteProperty"
+// The Properties field contains the GUID of the attribute being modified.
+| where Properties has rbcd_attribute_guid
+// Exclude modifications by the SYSTEM account and other allowlisted accounts.
+| where SubjectAccount !~ "SYSTEM" and SubjectAccount !in (account_allowlist)
+| project
+    TimeGenerated,
+    Computer,
+    SubjectAccount,
+    ObjectName,
+    ObjectType,
+    IpAddress,
+    Properties

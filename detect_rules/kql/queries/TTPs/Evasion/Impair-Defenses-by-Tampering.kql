@@ -1,0 +1,86 @@
+// Name: Impair Defenses by Tampering with Security Software
+// Author: RW
+// Date: 2025-08-20
+// Description: Detects attempts to disable or tamper with common security software by stopping services, killing processes, or modifying registry keys.
+// This behavior is a common defense evasion technique used by adversaries, as noted in the SolarWinds attack, to operate undetected.
+// Tactic: Defense Evasion
+// Technique: T1562 - Impair Defenses
+// False Positive Sensitivity: Medium
+
+// Define a list of keywords related to security products (service names, process names, etc.).
+// This list should be customized and expanded for your specific environment.
+let security_product_keywords = dynamic([
+    "MsMpEng", "WinDefend", "Sense", "MsSense", // Microsoft Defender / MDE
+    "Sophos", "SAVService", // Sophos
+    "CrowdStrike", "Falcon", // CrowdStrike
+    "CarbonBlack", "CbDefense", // Carbon Black
+    "SentinelAgent", "SentinelOne", // SentinelOne
+    "Tanium", // Tanium
+    "Sysmon", // Sysinternals Sysmon
+    "MBAMService", "Malwarebytes" // Malwarebytes
+]);
+
+// Detect attempts to stop or disable security services using command-line tools.
+DeviceProcessEvents
+| where ActionType == "ProcessCreated"
+| where FileName in~ ("net.exe", "sc.exe")
+// Look for commands to stop, configure to disabled, or delete a service.
+| where ProcessCommandLine has_any ("stop", "start= disabled", "delete")
+// Check if the command line targets any of the security product keywords.
+| where ProcessCommandLine has_any (security_product_keywords)
+| project
+    Timestamp,
+    DeviceName,
+    Tactic = "Defense Evasion",
+    Technique = "T1562 - Impair Defenses",
+    Action = "Security Service Tampering Attempt",
+    CommandLine = ProcessCommandLine,
+    AccountName,
+    ParentProcessName = InitiatingProcessFileName,
+    ParentProcessCommandLine = InitiatingProcessCommandLine,
+    ReportId,
+    DeviceId
+| union (
+    // Detect attempts to kill security processes.
+    DeviceProcessEvents
+    | where ActionType == "ProcessCreated"
+    | where FileName =~ "taskkill.exe"
+    // Check if the command line targets any of the security product keywords.
+    | where ProcessCommandLine has_any (security_product_keywords)
+    | project
+        Timestamp,
+        DeviceName,
+        Tactic = "Defense Evasion",
+        Technique = "T1562 - Impair Defenses",
+        Action = "Security Process Kill Attempt",
+        CommandLine = ProcessCommandLine,
+        AccountName,
+        ParentProcessName = InitiatingProcessFileName,
+        ParentProcessCommandLine = InitiatingProcessCommandLine,
+        ReportId,
+        DeviceId
+), (
+    // Detect attempts to disable security products via the registry.
+    DeviceRegistryEvents
+    | where ActionType == "RegistryValueSet"
+    // Look for registry keys commonly used to disable security tools.
+    | where RegistryKey has_any (security_product_keywords) and (RegistryKey endswith @"\DisableAntiSpyware" or RegistryKey endswith @"\DisableAntiVirus" or RegistryKey contains "TamperProtection")
+    // Check for a value that indicates disabling the feature.
+    | where RegistryValueData in ("1", "4")
+    | project
+        Timestamp,
+        DeviceName,
+        Tactic = "Defense Evasion",
+        Technique = "T1562 - Impair Defenses",
+        Action = "Security Registry Tampering Attempt",
+        CommandLine = strcat("Registry key '", RegistryKey, "' set to '", RegistryValueData, "' by process '", InitiatingProcessFileName, "'"),
+        AccountName = InitiatingProcessAccountName,
+        ParentProcessName = InitiatingProcessFileName,
+        ParentProcessCommandLine = InitiatingProcessCommandLine,
+        ReportId,
+        DeviceId
+)
+// Potential for False Positives: Legitimate administrators or uninstallers may perform these actions.
+// However, such activity is highly suspicious and warrants investigation, especially if not part of a planned maintenance window.
+// Filter out known administrative scripts or uninstaller processes if necessary.
+// For example: | where not (ParentProcessName == "uninstaller.exe")

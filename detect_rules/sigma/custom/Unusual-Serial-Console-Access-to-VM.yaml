@@ -1,0 +1,49 @@
+title: Unusual Serial Console Access to VM
+id: 67d24ced-8681-44d0-9103-027b56e250e5
+status: experimental
+description: Detects attempts to enable or use serial console access on a Virtual Machine (VM) across AWS, Azure, and GCP. Attackers can abuse this feature to bypass network-based controls (like firewalls and security groups) and gain direct, unauthorized access to a VM's operating system.
+references:
+  - https://unit42.paloaltonetworks.com/cloud-virtual-machine-attack-vectors/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.initial_access
+  - attack.execution
+logsource:
+  category: cloud
+detection:
+  aws_serial_console_activity:
+        # Detects enabling serial console access or pushing an SSH key via the serial console in AWS.
+    logsource:
+      product: aws
+      service: cloudtrail
+    eventName:
+      - EnableSerialConsoleAccess
+      - SendSerialConsoleSSHPublicKey
+  azure_connect_console:
+        # Detects successful connection attempts to a VM's serial console in Azure.
+    logsource:
+      product: azure
+      service: activitylogs
+    operation_name: 'Microsoft.SerialConsole/serialPorts/connect/action'
+    status: 'Succeeded'
+  gcp_enable_console:
+        # Detects enabling of serial port access via instance or project metadata in GCP.
+    logsource:
+      product: gcp
+      service: gcp.audit
+    methodName:
+      - 'v1.compute.instances.setMetadata'
+      - 'v1.compute.projects.setCommonInstanceMetadata'
+    resource:
+      request:
+        metadata:
+          items:
+            key: 'serial-port-enable'
+            value: 'true'
+  condition: aws_serial_console_activity or azure_connect_console or gcp_enable_console
+falsepositives:
+  - Legitimate troubleshooting of boot or network issues by system administrators or cloud support engineers.
+  - Emergency "break-glass" procedures to access an unresponsive VM.
+  - To reduce false positives, consider creating an allowlist of trusted administrative users or roles who are authorized to perform this action. Correlating this activity with other suspicious actions can also increase fidelity.
+level: medium

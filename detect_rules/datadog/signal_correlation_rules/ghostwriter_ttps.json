@@ -1,0 +1,135 @@
+{
+  "name": "UAC-0057 (Ghostwriter) Activity",
+  "message": "UAC-0057 Activity: {{distinct_count}} detection(s) on host {{@host}} by user {{@user.name}}: {{case_names}}. Reason: {{@detection_reason}}",
+  "isEnabled": true,
+  "type": "signal_correlation",
+  "tags": [
+    "security:attack",
+    "tactic:TA0001",
+    "tactic:TA0003",
+    "tactic:TA0005",
+    "tactic:TA0007",
+    "tactic:TA0011"
+  ],
+  "options": {
+    "evaluationWindow": 3600,
+    "keepAlive": 10800,
+    "maxSignalDuration": 21600
+  },
+  "queries": [
+    {
+      "name": "File Creation by Hash IOC",
+      "query": "source:(sysmon OR xmlwineventlog OR microsoft-windows-sysmon) @winlog.event_id:11 AND @winlog.event_data.sha256:(f6fec3722a8c98c29c5de10969b8f70962dbb47ba53dcbcd4a3bbc63996d258d OR deaa3f807de097c3bfff37a41e97af5091b2df0e3a6d01a11a206732f9c6e49c OR aac430127c438224ec61a6c02ea59eb3308eb54297daac985a7b26a75485e55f OR 06380c593d122fc4987e9d4559a9573a74803455809e89dd04d476870a427cbe OR 082877e6f8b28f6cf96d3498067b0c404351847444ebc9b886054f96d85d55d4 OR 082903a8bec2b0ef7c7df3e75871e70c996edcca70802d100c7f68414811c804 OR 69636ddc0b263c93f10b00000c230434febbd49ecdddf5af6448449ea3a85175 OR a2a2f0281eed6ec758130d2f2b2b5d4f578ac90605f7e16a07428316c9f6424e OR 8a057d88a391a89489697634580e43dbb14ef8ab1720cb9971acc418b1a43564 OR 707a24070bd99ba545a4b8bab6a056500763a1ce7289305654eaa3132c7cbd36 OR 5fa19aa32776b6ab45a99a851746fbe189f7a668daf82f3965225c1a2f8b9d36 OR 3b5980c758bd61abaa4422692620104a81eefbf151361a1d8afe8e89bf38579d OR c7e44bba26c9a57d8d0fa64a140d58f89d42fd95638b8e09bc0d2020424b640e OR 7c77d1ba7046a4b47aec8ec0f2a5f55c73073a026793ca986af22bbf38dc948c OR 559ee2fad8d16ecaa7be398022aa7aa1adbd8f8f882a34d934be9f90f6dcb90b)",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name"
+      ]
+    },
+    {
+      "name": "File Creation by Path IOC",
+      "query": "source:(sysmon OR xmlwineventlog OR microsoft-windows-sysmon) @winlog.event_id:11 AND @winlog.event_data.TargetFilename:(*\\Temp\\DefenderProtectionScope.log OR *\\Microsoft\\System\\ProtectedCertSystem.dll OR *\\Serv\\0x00bac729fe.log OR *\\Microsoft\\Windows\\Protection\\ overview.lnk OR *\\Temp\\sdw9gobh0n OR *\\Microsoft\\Windows\\Protection\\ overview\\ past.lnk OR *\\Logs\\sdw9gobh0n.log OR *\\SDXHelp\\SDXHelp.dll OR *\\Runtime\\RuntimeBroker.dll OR *\\MSDE\\mrasp86.dll OR *\\DiagnosticComponents\\DiagnosticComponents.dll OR *\\ProgramData\\OfficeRuntimeBroker.xlam OR *\\ProgramData\\OfficeRuntimeBroker.lnk OR *\\ProgramData\\~OfficeRuntimeBroker.dat OR *\\ProgramData\\ssh\\ssh.pif.pif.pif OR *\\ProgramData\\~DF20BC61C6277A354A.dat)",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name"
+      ]
+    },
+    {
+      "name": "Persistence via Run Key",
+      "query": "source:(sysmon OR xmlwineventlog OR microsoft-windows-sysmon) @winlog.event_id:13 AND @winlog.event_data.TargetObject:*SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run AND @winlog.event_data.Details:(SytemProtectionService OR MicrosoftDefender OR SytemProtectService OR Audio\\ Driver)",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name"
+      ]
+    },
+    {
+      "name": "Suspicious Rundll32 Execution",
+      "query": "source:(sysmon OR xmlwineventlog OR microsoft-windows-sysmon) @winlog.event_id:1 AND @process.executable:*\\rundll32.exe AND (@process.cmdline:* ,#1 OR @process.cmdline:* ,TS_STATUS_INFO_get0_status OR @process.cmdline:*shell32.dll,ShellExec_RunDLL)",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name"
+      ]
+    },
+    {
+      "name": "Suspicious Expand.exe Execution",
+      "query": "source:(sysmon OR xmlwineventlog OR microsoft-windows-sysmon) @winlog.event_id:1 AND @process.parent.executable:*\\excel.exe AND @process.executable:*\\expand.exe AND @process.cmdline:*.xlam AND @process.cmdline:*.dat AND @process.cmdline:*ProgramData*",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name"
+      ]
+    },
+    {
+      "name": "Network C2 Domain IOC",
+      "query": "source:(sysmon OR xmlwineventlog OR microsoft-windows-sysmon OR stream_http OR paloalto OR zscaler) (@winlog.event_id:3 OR source:(stream_http OR paloalto OR zscaler)) AND (@dns.question.name:(sweetgeorgiayarns.online OR kitchengardenseeds.icu OR punandjokes.icu OR taskandpurpose.icu OR medpagetoday.icu OR pesthacks.icu OR curseforge.icu) OR @destination.domain:(sweetgeorgiayarns.online OR kitchengardenseeds.icu OR punandjokes.icu OR taskandpurpose.icu OR medpagetoday.icu OR pesthacks.icu OR curseforge.icu))",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name"
+      ]
+    },
+    {
+      "name": "Network C2 User-Agent IOC",
+      "query": "source:(stream_http OR paloalto OR zscaler) @http.user_agent:(Mozilla/5.0\\ (Windows\\ NT\\ 10.0;\\ Win64;\\ x64)\\ AppleWebKit/537.36\\ (KHTML,\\ like\\ Gecko)\\ Chrome/98.0.4758.80\\ Safari/537.36 OR Mozilla/5.0\\ (iPhone;\\ CPU\\ iPhone\\ OS\\ 18_4_1\\ like\\ Mac\\ OS\\ X)\\ AppleWebKit/605.1.15\\ (KHTML,\\ like\\ Gecko)\\ CriOS/133.0.6943.84\\ Mobile/15E148\\ Safari/604.1) AND @destination.domain:(sweetgeorgiayarns.online OR kitchengardenseeds.icu OR punandjokes.icu OR taskandpurpose.icu OR medpagetoday.icu OR pesthacks.icu OR curseforge.icu)",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name"
+      ]
+    },
+    {
+      "name": "Network C2 via Slack Webhook",
+      "query": "source:(stream_http OR paloalto OR zscaler) @http.url:*hooks.slack.com/services/* -@process.executable:(*\\slack.exe OR *\\chrome.exe OR *\\firefox.exe OR *\\msedge.exe OR *\\iexplore.exe) -@process.name:(slack.exe OR chrome.exe OR firefox.exe OR msedge.exe OR iexplore.exe)",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name"
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "status": "high",
+      "condition": "event_count(\"File Creation by Hash IOC\") >= 1"
+    },
+    {
+      "status": "high",
+      "condition": "event_count(\"File Creation by Path IOC\") >= 1"
+    },
+    {
+      "status": "medium",
+      "condition": "event_count(\"Persistence via Run Key\") >= 1"
+    },
+    {
+      "status": "high",
+      "condition": "event_count(\"Suspicious Rundll32 Execution\") >= 1"
+    },
+    {
+      "status": "high",
+      "condition": "event_count(\"Suspicious Expand.exe Execution\") >= 1"
+    },
+    {
+      "status": "critical",
+      "condition": "event_count(\"Network C2 Domain IOC\") >= 1"
+    },
+    {
+      "status": "critical",
+      "condition": "event_count(\"Network C2 User-Agent IOC\") >= 1"
+    },
+    {
+      "status": "critical",
+      "condition": "event_count(\"Network C2 via Slack Webhook\") >= 1"
+    }
+  ]
+}

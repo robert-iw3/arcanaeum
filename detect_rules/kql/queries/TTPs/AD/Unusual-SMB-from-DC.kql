@@ -1,0 +1,55 @@
+// Rule Title: Unusual Outbound SMB from Domain Controller
+// Author: RW
+// Date: 2025-08-12
+//
+// References:
+// - https://www.synacktiv.com/publications/gpoddity-exploiting-active-directory-gpos-through-ntlm-relaying-and-more
+//
+// MITRE ATT&CK: T1021.002 - SMB/Windows Admin Shares, T1070.004 - Indicator Removal on Host: File Deletion
+//
+// Description:
+// Detects a Domain Controller (DC) initiating an outbound SMB connection to an external (non-private) IP address.
+// This is highly anomalous behavior. A primary cause for this is an NTLM relay attack where an attacker
+// modifies a GPO's 'gPCFileSysPath' attribute to point to an attacker-controlled, external SMB share.
+// When the DC attempts to fetch the Group Policy Template (GPT) from this malicious share, it triggers this alert.
+//
+// False Positives:
+// This activity is rare. However, some environments might have legitimate reasons for a DC to connect to an external SMB share (e.g., specific cloud services).
+// Such known-good destinations should be added to the 'TrustedExternalSmbDestinations' list to prevent false positives.
+//
+// Triage Steps:
+// 1. Confirm the source device ('DeviceName') is a Domain Controller.
+// 2. Investigate the destination IP ('RemoteIP'). Is this a known and trusted business partner or cloud service?
+// 3. On the Domain Controller, look for recent Directory Service Changes events (Event ID 5136) for modifications to the 'gPCFileSysPath' attribute on any GPO.
+// 4. Examine the 'InitiatingProcessFileName' to understand what process on the DC made the connection. For GPO updates, this is typically 'svchost.exe'.
+// 5. Correlate this activity with any recent NTLM relay or forced authentication alerts.
+
+let timeframe = 1d;
+// Create and populate a watchlist with the hostnames of your Domain Controllers for accuracy.
+// Example: _GetWatchlist("DomainControllers") | project SearchKey
+let DomainControllers_watchlist = dynamic([]);
+// Create and populate a watchlist with any known-good external SMB destinations.
+let TrustedExternalSmbDestinations = dynamic([]);
+
+DeviceNetworkEvents
+| where TimeGenerated > ago(timeframe)
+// Filter for successful outbound SMB connections.
+| where RemotePort == 445 and ActionType == "ConnectionSuccess"
+// Focus on connections originating from Domain Controllers.
+// Using a watchlist is preferred. A naming convention filter is provided as a fallback if the watchlist is empty.
+| where DeviceName in (DomainControllers_watchlist) or (isempty(DomainControllers_watchlist) and toupper(DeviceName) has "DC")
+// The key logic: the destination IP is not a private RFC 1918 address.
+| where not(ipv4_is_private(RemoteIP))
+// Further exclude any specifically trusted external IPs.
+| where RemoteIP !in (TrustedExternalSmbDestinations)
+| project
+    TimeGenerated,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RemoteIP,
+    RemoteUrl
+| extend
+    timestamp = TimeGenerated,
+    HostCustomEntity = DeviceName,
+    IpCustomEntity = RemoteIP

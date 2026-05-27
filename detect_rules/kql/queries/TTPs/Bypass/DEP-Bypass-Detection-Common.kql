@@ -1,0 +1,95 @@
+// Name: Memory Exploitation and DEP Bypass Detection
+// Author: RW
+// Date: 2025-08-09
+// Description: This query unifies multiple detection strategies for memory-based exploits, including Data Execution Prevention
+//              (DEP) bypass, Return-Oriented Programming (ROP) chains, and suspicious memory allocations. It combines four
+//              distinct checks: direct DEP violations, RWX memory allocation on the stack/heap, generic RWX memory allocation,
+//              and unusual sequences of memory API calls.
+// Mitre ATT&CK: T1055.001, T1055.009, T1190, T1203
+
+let knownGoodProcesses = dynamic([
+    // FP/Tuning: Exclude common processes known to perform these actions legitimately (e.g., JIT compilers, browsers, development tools).
+    "chrome.exe",
+    "firefox.exe",
+    "msedge.exe",
+    "iexplore.exe",
+    "powershell.exe",
+    "pwsh.exe",
+    "csc.exe",
+    "cvtres.exe",
+    "MSBuild.exe",
+    "devenv.exe",
+    "javaw.exe",
+    "java.exe",
+    "node.exe"
+]);
+
+// Part 1: Direct DEP Violation
+let depViolations =
+DeviceEvents
+| where ActionType in ("ExploitGuardDepViolationAudited", "ExploitGuardDepViolationBlocked")
+// FP/Tuning: Some legitimate applications, particularly older or poorly-coded ones, may inadvertently trigger DEP.
+// If specific applications are causing noise, they can be excluded from this rule.
+// For example: | where InitiatingProcessFileName !~ "known_buggy_app.exe"
+| project
+    Timestamp,
+    DeviceId,
+    DeviceName,
+    InitiatingProcessFileName = FileName, // Normalize field name for union
+    InitiatingProcessCommandLine = ProcessCommandLine, // Normalize field name for union
+    InitiatingProcessId,
+    DetectionTechnique = "DEP Violation",
+    Details = todynamic(AdditionalFields);
+
+// Part 2 & 3: RWX Memory Allocation (Generic, and specific to Stack/Heap)
+let rwxAllocations =
+DeviceEvents
+| where ActionType in ("AllocateVirtualMemoryApiCall", "ProtectVirtualMemoryApiCall")
+| where InitiatingProcessFileName !in~ (knownGoodProcesses)
+| extend ParsedFields = todynamic(AdditionalFields)
+| where ParsedFields.Protection == 64 // PAGE_EXECUTE_READWRITE
+// Further tuning: To increase fidelity, focus on processes that are common targets for exploitation.
+// For example: | where InitiatingProcessFileName in~ ("winword.exe", "excel.exe", "powerpnt.exe", "outlook.exe", "acrord32.exe")
+| extend DetectionTechnique = case(
+    ActionType == "ProtectVirtualMemoryApiCall" and ParsedFields.RegionType in ("Stack", "Heap"), "RWX Memory on Stack/Heap",
+    "RWX Memory Allocation"
+  )
+| project
+    Timestamp,
+    DeviceId,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessId,
+    DetectionTechnique,
+    Details = todynamic(AdditionalFields);
+
+// Part 4: Unusual Sequence of Memory API Calls (ROP Chain pattern)
+let timeWindow = 2m;
+let callThreshold = 5;
+let memoryApiSequences =
+DeviceEvents
+| where ActionType in ("ProtectVirtualMemoryApiCall", "AllocateVirtualMemoryApiCall", "WriteVirtualMemoryApiCall")
+| where InitiatingProcessFileName !in~ (knownGoodProcesses)
+| extend ParsedFields = todynamic(AdditionalFields)
+| extend IsRwx = ParsedFields.Protection == 64
+| summarize
+    StartTime = min(Timestamp),
+    EndTime = max(Timestamp),
+    ApiCallCount = count(),
+    RwxCallCount = countif(IsRwx),
+    ApiCallSequence = make_list(ActionType, 100)
+    by DeviceId, DeviceName, InitiatingProcessId, InitiatingProcessFileName, InitiatingProcessCommandLine, bin(Timestamp, timeWindow)
+| where ApiCallCount > callThreshold and RwxCallCount > 0
+| project
+    Timestamp = StartTime,
+    DeviceId,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessId,
+    DetectionTechnique = "Unusual Memory API Sequence",
+    Details = pack("StartTime", StartTime, "EndTime", EndTime, "ApiCallCount", ApiCallCount, "RwxCallCount", RwxCallCount, "ApiCallSequence", ApiCallSequence);
+
+// Union all detection parts into a single result set
+union depViolations, rwxAllocations, memoryApiSequences

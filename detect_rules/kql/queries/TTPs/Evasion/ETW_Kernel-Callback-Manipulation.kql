@@ -1,0 +1,34 @@
+// Name: Suspicious Driver Load for Potential Kernel Tampering
+// Author: RW
+// Date: 2025-08-02
+// Description: Detects the loading of an unsigned driver or a driver from a non-standard file path. This activity is a common prerequisite for kernel-level attacks, such as manipulating kernel callbacks or ETW provider registrations to evade EDR and other security monitoring tools.
+// Tactic: Defense Evasion
+// Technique: T1547.006 - Kernel Modules and Extensions
+// False Positive Sensitivity: Medium
+
+let standard_driver_paths = dynamic([
+    @"C:\Windows\System32\drivers\",
+    @"C:\Windows\System32\DriverStore\FileRepository\"
+]);
+DeviceImageLoadEvents
+// Focus on driver files (.sys).
+| where FileName endswith ".sys"
+// A driver is suspicious if it's unsigned OR loaded from a non-standard path.
+| where IsSigned == false or not(FolderPath has_any (standard_driver_paths))
+// FP Mitigation: Exclude drivers from known legitimate software vendors that might use custom installers.
+// Also, exclude common system processes that manage drivers. This list will require tuning for your environment.
+| where not(
+    Signer has_any ("Microsoft", "NVIDIA", "Intel", "Advanced Micro Devices") or
+    InitiatingProcessFileName in~ ("TiWorker.exe", "svchost.exe", "System", "msiexec.exe")
+)
+| project
+    TimeGenerated,
+    DeviceName,
+    FileName,
+    FolderPath,
+    SHA1,
+    Signer,
+    IsSigned,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    ReportId

@@ -1,0 +1,89 @@
+// Name: Anomalous Grid Fluctuations in ICS/OT Environments
+// Description: This detection identifies anomalous voltage or frequency fluctuations in an Industrial Control System (ICS) or
+// Operational Technology (OT) environment. Such anomalies can be early indicators of a cyber-physical attack aiming to destabilize
+// the power grid, as seen in historical grid outage events. The query establishes a baseline for normal voltage and frequency for
+// each sensor and then flags significant deviations or oscillations.
+// Author: RW
+// Date: 2025-08-17
+//
+// MITRE ATT&CK for ICS Information:
+// Tactic: Impair Process Control (TA0103)
+// Technique: Disturbing the State (T0816)
+//
+// False Positive Sensitivity: Medium
+//
+// Comments:
+// False positives may occur due to non-malicious events such as equipment malfunction, scheduled maintenance, or normal grid load balancing operations.
+// To reduce false positives, consider the following tuning steps:
+// 1. Adjust the thresholds below based on your environment's specific operational characteristics.
+// 2. Exclude known maintenance windows or specific devices that are expected to be noisy from the query.
+// 3. Increase the 'lookback' period for a more stable baseline calculation.
+
+let lookback = 24h; // The time window for establishing a baseline.
+let analysis_bin = 5m; // The time window for analyzing for anomalies.
+let ot_telemetry_table = "OT_Telemetry"; // The table containing OT/ICS sensor data.
+let device_id_field = "DeviceId"; // The field representing the unique sensor or device ID.
+let metric_name_field = "MetricName"; // The field containing the name of the metric (e.g., 'Voltage', 'Frequency').
+let metric_value_field = "MetricValue"; // The field containing the sensor's value.
+let voltage_metric_name = "Voltage_V"; // The name of the voltage metric in your data.
+let frequency_metric_name = "Frequency_Hz"; // The name of the frequency metric in your data.
+
+// --- Thresholds for Anomaly Detection ---
+// These thresholds are critical for tuning and may need adjustment.
+let voltage_stddev_threshold = 2.5; // Minimum standard deviation for a voltage oscillation alert.
+let frequency_stddev_threshold = 0.5; // Minimum standard deviation for a frequency oscillation alert.
+let voltage_spike_threshold_factor = 1.05; // Factor for spike detection (e.g., 1.05 = 5% above baseline average).
+let voltage_dip_threshold_factor = 0.95; // Factor for dip detection (e.g., 0.95 = 5% below baseline average).
+
+// Calculate a baseline average and standard deviation for each device over the lookback period.
+let baseline = materialize (
+    table(ot_telemetry_table)
+    | where TimeGenerated > ago(lookback)
+    | where column_ifexists(metric_name_field, "") in (voltage_metric_name, frequency_metric_name)
+    | summarize
+        BaselineAvg = avg(todouble(column_ifexists(metric_value_field, 0))),
+        BaselineStdev = stdev(todouble(column_ifexists(metric_value_field, 0)))
+        by DeviceId=tostring(column_ifexists(device_id_field, "UnknownDevice")), MetricName=tostring(column_ifexists(metric_name_field, ""))
+);
+// Analyze recent data in short time bins and compare against the baseline.
+table(ot_telemetry_table)
+| where TimeGenerated > ago(analysis_bin * 2) // Analyze the most recent data.
+| where column_ifexists(metric_name_field, "") in (voltage_metric_name, frequency_metric_name)
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    StdevValue = stdev(todouble(column_ifexists(metric_value_field, 0))),
+    MaxValue = max(todouble(column_ifexists(metric_value_field, 0))),
+    MinValue = min(todouble(column_ifexists(metric_value_field, 0))),
+    ValueCount = count()
+    by bin(TimeGenerated, analysis_bin), DeviceId=tostring(column_ifexists(device_id_field, "UnknownDevice")), MetricName=tostring(column_ifexists(metric_name_field, ""))
+// Join with the baseline data for comparison.
+| join kind=inner (baseline) on DeviceId, MetricName
+// Identify anomalies based on oscillations (high stdev) or spikes/dips.
+| extend
+    IsOscillating = case(
+        MetricName == voltage_metric_name and StdevValue > voltage_stddev_threshold and StdevValue > (BaselineStdev * 2), true,
+        MetricName == frequency_metric_name and StdevValue > frequency_stddev_threshold and StdevValue > (BaselineStdev * 2), true,
+        false
+    ),
+    IsSpike = MaxValue > (BaselineAvg * voltage_spike_threshold_factor),
+    IsDip = MinValue < (BaselineAvg * voltage_dip_threshold_factor)
+| where IsOscillating or (MetricName == voltage_metric_name and (IsSpike or IsDip))
+// Format the output for alerting.
+| project
+    StartTime,
+    EndTime,
+    DeviceId,
+    MetricName,
+    AnomalyType = case(
+        IsOscillating, "High Oscillation",
+        IsSpike, "Anomalous Spike",
+        IsDip, "Anomalous Dip",
+        "Unknown"
+    ),
+    StdevValue,
+    MaxValue,
+    MinValue,
+    BaselineAvg,
+    BaselineStdev,
+    ValueCount

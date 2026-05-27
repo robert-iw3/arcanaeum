@@ -1,0 +1,28 @@
+title: AWS S3 Buckets Created With Ransom Note Naming Convention
+id: d62fff87-fdad-44f0-862e-742cacd6f203
+status: experimental
+description: Detects the creation of AWS S3 buckets with names that resemble a ransom note. This tactic was used by the threat actor group Bling Libra (ShinyHunters) as part of an extortion campaign, often after deleting the victim's original buckets.
+references:
+  - https://unit42.paloaltonetworks.com/shinyhunters-ransomware-extortion/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.impact
+  - attack.execution
+  - attack.t1485
+  - attack.ta0040
+  - attack.ta0002
+  - cloud
+  - aws
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+    # Detects the creation of an S3 bucket with a name pattern used by Bling Libra
+  selection:
+    EventName: 'CreateBucket'
+    RequestParameters.bucketName|startswith: 'contact-shinycorp-tutanota-com'
+  condition: selection
+falsepositives:
+  - Highly unlikely due to the specific naming convention. A bucket created with this name pattern is a strong indicator of compromise.
+level: high

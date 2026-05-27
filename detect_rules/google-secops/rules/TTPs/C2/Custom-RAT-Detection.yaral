@@ -1,0 +1,50 @@
+rule custom_rat_execution_from_unusual_location {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects an unsigned process executing from a user-writable or temporary directory that establishes an external network connection. This behavior is common for custom-built Remote Access Trojans (RATs) that evade signature-based detection, as mentioned in the threat intelligence."
+    tactic = "TA0002, TA0011"
+    technique = "T1219, T1059"
+    false_positives = "Legitimate software installers, updaters (e.g., Chrome, Teams), or portable applications may execute from user directories and connect to the internet. Tuning by adding known legitimate processes to an exclusion list is recommended."
+
+  events:
+    // Event 1: Process launch from a suspicious, user-writable directory
+    $process.metadata.event_type = "PROCESS_LAUNCH"
+    $process.principal.hostname = $hostname
+    $process.target.process.pid = $pid
+    // Tuning: This regex covers common user-writable and temp paths often abused by malware.
+    re.regex($process.target.process.file.path, `(?i)^C:\\(Users\\|ProgramData|PerfLogs|Windows\\Temp)`)
+    // Strengthening condition: Unsigned executables are more likely to be malicious.
+    $process.target.process.file.is_signed = false
+    // Tuning: Exclude known legitimate software that runs from these locations to reduce noise.
+    not re.regex($process.target.process.file.path, `(?i)(teams\.exe|onedrive\.exe|chrome\.exe|msedge\.exe|slack\.exe|zoom\.exe|gupdate\.exe)$`)
+
+    // Event 2: The same process makes an outbound network connection
+    $network.metadata.event_type = "NETWORK_CONNECTION"
+    $network.principal.hostname = $hostname
+    $network.principal.process.pid = $pid
+    // Filter for connections to public IP addresses, ignoring private/internal ranges.
+    not net.ip_in_range_cidr($network.target.ip, "10.0.0.0/8")
+    and not net.ip_in_range_cidr($network.target.ip, "172.16.0.0/12")
+    and not net.ip_in_range_cidr($network.target.ip, "192.168.0.0/16")
+    and not net.ip_in_range_cidr($network.target.ip, "127.0.0.0/8")
+
+  match:
+    // Correlate the process launch and network connection by hostname and PID over 5 minutes.
+    $hostname, $pid over 5m
+
+  outcome:
+    $risk_score = 65
+    $principal_hostname = $hostname
+    $principal_user = array_distinct($process.principal.user.userid)
+    $process_pid = $pid
+    $process_path = array_distinct($process.target.process.file.path)
+    $process_commandline = array_distinct($process.target.process.command_line)
+    $process_sha256 = array_distinct($process.target.process.file.sha256)
+    $remote_ips = array_distinct($network.target.ip)
+    $remote_ports = array_distinct($network.target.port.number)
+    $event_count = count_distinct($process.metadata.id) + count_distinct($network.metadata.id)
+
+  condition:
+    $process and $network
+}

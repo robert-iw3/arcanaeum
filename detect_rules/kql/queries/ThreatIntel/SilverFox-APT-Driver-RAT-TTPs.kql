@@ -1,0 +1,98 @@
+// Name: Silver Fox APT Activity - Vulnerable Driver Abuse for ValleyRAT Deployment
+//
+// Description: This query detects multiple tactics, techniques, and procedures (TTPs) associated with the Silver Fox APT group, as detailed in the Check Point Research report.
+// The campaign involves using a loader to drop and execute vulnerable drivers (amsdk.sys, wamsdk.sys, ZAM.exe) to terminate security products before deploying the ValleyRAT backdoor.
+// This query combines multiple detection methods to identify different stages of the attack chain.
+//
+// Author: RW
+// Date: 2025-08-30
+//
+// False Positive Sensitivity: Medium
+//
+// References:
+// - https://research.checkpoint.com/2025/silver-fox-apt-vulnerable-drivers/
+//
+
+let lookback = 7d;
+// Define IOCs from the report for easier management
+let suspiciousFileNames = dynamic(["RuntimeBroker.exe", "Amsdk_Service.sys"]);
+let suspiciousFolderPath = "\\Program Files\\RunTime\\";
+let suspiciousServiceNames = dynamic(["Termaintor", "Amsdk_Service"]);
+let vulnerableDriverHashes = dynamic([
+    "12b3d8bc5cc1ea6e2acd741d8a80f56cf2a0a7ebfa0998e3f0743fcf83fabb9e", // amsdk.sys v1.0.600
+    "0be8483c2ea42f1ce4c90e84ac474a4e7017bc6d682e06f96dc1e31922a07b10", // wamsdk.sys v1.1.100 (modified)
+    "9c394dcab9f711e2bf585edf0d22d2210843885917d409ee56f22a4c24ad225e"  // ZAM.exe v3.0.0.000
+]);
+let suspiciousDeviceName = "amsdk";
+let suspiciousIoctlCodes = dynamic(["0x80002010", "0x80002048"]); // IOCTL_REGISTER_PROCESS and IOCTL_TERMINATE_PROCESS
+let c2ips = dynamic([
+    "47.239.197.97",
+    "8.217.38.238",
+    "156.234.58.194",
+    "156.241.144.66",
+    "1.13.249.217"
+]);
+let c2ports = dynamic([52116, 52117, 8888, 52110, 52111, 52139, 52160, 9527, 9528]);
+union isfuzzy=true
+(
+    // Detection 1: Persistence via file creation in a suspicious folder
+    DeviceFileEvents
+    | where Timestamp > ago(lookback)
+    | where ActionType == "FileCreated"
+    | where FolderPath has suspiciousFolderPath and FileName in (suspiciousFileNames)
+    // The folder 'RunTime' under Program Files is unusual. 'RuntimeBroker.exe' is a known masquerading target.
+    // Tuning opportunity: Filter for processes that are not legitimate installers if false positives occur.
+    | extend
+        DetectionMethod = "Persistence: Suspicious File Creation",
+        Indicator = FileName,
+        Description = strcat("File '", FileName, "' created in suspicious path '", FolderPath, "'.")
+    | project-reorder Timestamp, DeviceName, DetectionMethod, Indicator, Description, InitiatingProcessFileName, InitiatingProcessCommandLine, SHA1, SHA256
+),
+(
+    // Detection 2: Persistence via suspicious service creation
+    DeviceEvents
+    | where Timestamp > ago(lookback)
+    | where ActionType == "ServiceInstalled" and ServiceName in (suspiciousServiceNames)
+    // 'Termaintor' is a likely typo for 'Terminator'. 'Amsdk_Service' is used to load the vulnerable driver.
+    | extend
+        DetectionMethod = "Persistence: Suspicious Service Creation",
+        Indicator = ServiceName,
+        Description = strcat("Suspicious service installed: '", ServiceName, "' with image path '", ServiceFileName, "'.")
+    | project-reorder Timestamp, DeviceName, DetectionMethod, Indicator, Description, InitiatingProcessFileName, InitiatingProcessCommandLine
+),
+(
+    // Detection 3: Loading of known vulnerable drivers by hash
+    DeviceImageLoadEvents
+    | where Timestamp > ago(lookback)
+    | where SHA256 in (vulnerableDriverHashes)
+    | extend
+        DetectionMethod = "Execution: Vulnerable Driver Loaded",
+        Indicator = SHA256,
+        Description = strcat("Known vulnerable driver '", FileName, "' loaded.")
+    | project-reorder Timestamp, DeviceName, DetectionMethod, Indicator, Description, InitiatingProcessFileName, InitiatingProcessCommandLine, SHA1, SHA256
+),
+(
+    // Detection 4: Communication with vulnerable driver to terminate processes
+    DeviceEvents
+    | where Timestamp > ago(lookback)
+    | where ActionType == "DeviceIoControl"
+    | where FileName has suspiciousDeviceName and IOControlCode in (suspiciousIoctlCodes)
+    // These IOCTL codes are used to register a process and then terminate another process via the vulnerable driver.
+    | extend
+        DetectionMethod = "Defense Evasion: Vulnerable Driver IOCTL",
+        Indicator = IOControlCode,
+        Description = strcat("Process '", InitiatingProcessFileName, "' sent IOCTL '", IOControlCode, "' to vulnerable driver device '", FileName, "'.")
+    | project-reorder Timestamp, DeviceName, DetectionMethod, Indicator, Description, InitiatingProcessFileName, InitiatingProcessCommandLine
+),
+(
+    // Detection 5: C2 communication to known ValleyRAT servers
+    DeviceNetworkEvents
+    | where Timestamp > ago(lookback)
+    | where ActionType == "NetworkConnectionSuccess"
+    | where RemoteIP in (c2ips) and RemotePort in (c2ports)
+    | extend
+        DetectionMethod = "C2: ValleyRAT Communication",
+        Indicator = RemoteIP,
+        Description = strcat("Network connection to known ValleyRAT C2 server '", RemoteIP, ":", RemotePort, "'.")
+    | project-reorder Timestamp, DeviceName, DetectionMethod, Indicator, Description, InitiatingProcessFileName, InitiatingProcessCommandLine, RemoteIP, RemotePort
+)

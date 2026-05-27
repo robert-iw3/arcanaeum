@@ -1,0 +1,28 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'nomad'
+    static_configs:
+      - targets: ['${nomad_lb_address}:4646']
+        labels:
+          group: 'nomad'
+
+  - job_name: 'consul'
+    static_configs:
+      - targets: [${join(",", consul_ips)}]
+        labels:
+          group: 'consul'
+
+  - job_name: 'vault'
+    static_configs:
+      - targets: [${join(",", vault_ips)}]
+        labels:
+          group: 'vault'
+
+  - job_name: 'fluent-bit'
+    static_configs:
+      - targets: ['${nomad_lb_address}:2021']
+        labels:
+          group: 'fluent-bit'

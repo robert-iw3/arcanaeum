@@ -1,0 +1,44 @@
+// Name: FileJacking via Browser Mass File Access
+// Author: RW
+// Date: 2025-08-13
+// Description: Detects a browser process reading an unusually high number of files from a network share or a non-system drive.
+//              This behavior is indicative of the FileJacking technique, where a malicious website or HTML attachment uses
+//              Chromium File System APIs to enumerate and exfiltrate data from mapped drives.
+// MITRE ATT&CK: T1189, T1027, T1041
+// False Positives: Medium. Legitimate web applications that interact with the local file system
+// (e.g., cloud storage sync, large file uploaders) might trigger this rule. Tuning the
+// file_access_threshold or excluding trusted domains/applications may be necessary.
+
+let timeframe = 10m;
+// The threshold for the number of unique files accessed. Adjust based on environment.
+let file_access_threshold = 50;
+let browser_processes = dynamic(['msedge.exe', 'chrome.exe', 'firefox.exe', 'brave.exe', 'opera.exe']);
+
+DeviceFileEvents
+| where Timestamp > ago(timeframe)
+// The 'FileCreated' action can indicate a handle being opened to a file for reading.
+| where ActionType == "FileCreated"
+// Filter for activity initiated by common web browsers.
+| where InitiatingProcessFileName in~ (browser_processes)
+// Core logic: Focus on access to network shares (UNC paths) or non-system local drives, which are the primary targets for this technique.
+| where FolderPath startswith @"\\" or (FolderPath matches regex @"^[a-zA-Z]:\\" and not(FolderPath startswith_cs "C:"))
+// Exclude common noisy paths that are unlikely to be targeted for mass exfiltration.
+| where FolderPath !has_any ("AppData", "Cache", "Temp")
+| summarize
+    StartTime = min(Timestamp),
+    EndTime = max(Timestamp),
+    AccessedFilePaths = make_set(strcat(FolderPath, FileName), 100),
+    UniqueFileCount = dcount(strcat(FolderPath, FileName))
+    by DeviceId, DeviceName, AccountName, AccountDomain, InitiatingProcessFileName, InitiatingProcessId
+// Trigger an alert if the number of unique files accessed exceeds the defined threshold.
+| where UniqueFileCount > file_access_threshold
+| project
+    StartTime,
+    EndTime,
+    DeviceName,
+    AccountName,
+    AccountDomain,
+    InitiatingProcessFileName,
+    InitiatingProcessId,
+    UniqueFileCount,
+    AccessedFilePaths

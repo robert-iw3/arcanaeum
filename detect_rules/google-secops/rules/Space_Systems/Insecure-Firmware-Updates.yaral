@@ -1,0 +1,59 @@
+rule insecure_satellite_firmware_update {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects a potential insecure firmware update sequence on a satellite control system. This pattern involves a control application receiving a network connection from an unauthorized source, writing a new firmware file, and then executing a command to apply the update. This aligns with the 'Unsecured Software Updates' vulnerability discussed in the 'Space Odyssey' report, where telecommands can be used to persistently compromise a satellite."
+    tactic = "TA0003"
+    technique = "T1542.001"
+    false_positives = "Legitimate, authorized firmware updates may trigger this rule. It is critical to populate the list of authorized IP addresses and ensure that legitimate update processes are understood. If updates are performed manually by an administrator on the console, this rule is less likely to be triggered."
+    tags = "SATELLITE, ICS, OT, FIRMWARE, PERSISTENCE"
+
+  events:
+    // Event 1: Inbound network connection from an unauthorized IP to a satellite control app.
+    $net_conn.metadata.event_type = "NETWORK_CONNECTION"
+    $net_conn.target.hostname = $hostname
+    $net_conn.target.process.pid = $pid
+    // Placeholder: Add paths to your satellite control applications.
+    re.regex($net_conn.target.process.file.full_path, `(?i)(\\program files\\satellite control\\|/opt/sat_control/)(tc_handler|sat_control_app|obsw_main)`)
+    $net_conn.principal.ip = $remote_ip
+    // Filter for external, non-authorized IPs.
+    not net.is_private($remote_ip)
+    // Placeholder: Add authorized ground station / admin IP ranges to this list to reduce false positives.
+    not net.ip_in_range_cidr($remote_ip, "203.0.113.0/24", "198.51.100.0/24")
+
+    // Event 2: The same process writes a new firmware file.
+    $firmware_write.metadata.event_type = "FILE_CREATION"
+    $firmware_write.principal.hostname = $hostname
+    $firmware_write.principal.process.pid = $pid
+    // Placeholder: Add known firmware storage directories.
+    re.regex($firmware_write.target.file.full_path, `(?i)(\\firmware\\|/boot/|/opt/satellite/firmware/)`)
+    // Filter for common firmware file extensions.
+    re.regex($firmware_write.target.file.full_path, `(?i)\.(bin|img|fw|hex)$`)
+
+    // Event 3: The same process executes a command to apply the firmware update.
+    $config_change.metadata.event_type = "PROCESS_LAUNCH"
+    $config_change.principal.hostname = $hostname
+    $config_change.principal.process.pid = $pid
+    // Placeholder: Add names of legitimate firmware update utilities.
+    re.regex($config_change.target.process.file.full_path, `(?i)(boot_config|fw_setenv|update_utility|fup)`)
+    $config_change.target.process.command_line = $update_command_line
+
+  match:
+    // Correlate events by hostname and the parent process ID over 15 minutes.
+    $hostname, $pid over 15m
+    // The events must occur in a specific sequence.
+    $net_conn before $firmware_write before $config_change
+
+  outcome:
+    // High risk, as this indicates a potential device takeover.
+    $risk_score = 90
+    $principal_hostname = $hostname
+    $unauthorized_source_ip = array_distinct($remote_ip)
+    $control_application = array_distinct($net_conn.target.process.file.full_path)
+    $new_firmware_image = array_distinct($firmware_write.target.file.full_path)
+    $update_command = array_distinct($update_command_line)
+    $user = array_distinct($firmware_write.principal.user.userid)
+
+  condition:
+    $net_conn and $firmware_write and $config_change
+}

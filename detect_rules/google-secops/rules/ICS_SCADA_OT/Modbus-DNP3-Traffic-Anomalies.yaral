@@ -1,0 +1,38 @@
+rule modbus_or_dnp3_traffic_to_or_from_external_network {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects Modbus (TCP/502) or DNP3 (TCP/20000) traffic where at least one of the endpoints (source or destination) is a non-private (external) IP address. Such traffic can indicate unauthorized access, remote reconnaissance, or data tampering attempts against critical OT/ICS systems, which often lack strong authentication and encryption."
+    false_positives = "Legitimate remote access by vendors or partners to OT systems. These connections should be documented and their source/destination IPs can be added to an exclusion list., Cloud-based SCADA or management platforms that communicate with on-premise devices., Misconfigured network segments or assets that are not correctly identified as internal."
+    reference = "https://isc.sans.edu/diary/lt+appears+that+the+number+of+industrial+devices+accessible+from+the+internet+has+risen+by+30+thousand+over+the+past+three+years/30860"
+    tactic = "TA0001, TA0011"
+    technique = "T1071.004, T1090, T1572"
+    tags = "OT, ICS, MODBUS, DNP3"
+
+  events:
+    // Event represents a network connection over Modbus or DNP3 ports.
+    $conn.metadata.event_type = "NETWORK_CONNECTION"
+    $conn.target.port = 502 or $conn.target.port = 20000
+
+    // This condition filters out traffic that is purely internal (private to private).
+    // An alert is generated if the traffic is not between two private IP addresses.
+    // Note: Consider adding your organization's specific external IP ranges to an allowlist here if needed.
+    not (
+      net.ip_in_range_cidr($conn.principal.ip, ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16"]) and
+      net.ip_in_range_cidr($conn.target.ip, ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16"])
+    )
+
+  outcome:
+    // Risk score is set to medium-high due to the insecure nature of these protocols when exposed externally.
+    $risk_score = 70
+    $principal_ip = array_distinct($conn.principal.ip)
+    $principal_port = array_distinct($conn.principal.port)
+    $target_ip = array_distinct($conn.target.ip)
+    $target_port = array_distinct($conn.target.port)
+    $network_protocol = array_distinct($conn.network.ip_protocol)
+    $principal_hostname = array_distinct($conn.principal.hostname)
+    $target_hostname = array_distinct($conn.target.hostname)
+
+  condition:
+    $conn
+}

@@ -1,0 +1,18 @@
+{
+  "type": "detection-engine.rule",
+  "id": "vscode-suspicious-activity",
+  "attributes": {
+    "risk_score": 70,
+    "enabled": true,
+    "name": "Suspicious VSCode Activity Detection",
+    "description": "Detects suspicious behavior related to Visual Studio Code, including URI handler installations, extension installations, outbound network connections, file writes, and module loading.",
+    "rule_id": "vscode_suspicious_activity",
+    "index": ["logs-endpoint.events.*"],
+    "language": "kuery",
+    "query": "(/* VSCode URI Handler Installation */ (event.category:\"process\" AND event.action:\"start\" AND process.name:/Code.exe/ AND process.command_line:/\\*--open-url*/ AND process.command_line:/\\*vscode:\\/\\/\\*/) OR /* VSCode Extension CLI Installation */ (event.category:\"process\" AND event.action:\"start\" AND process.name:/Code.exe/ AND process.command_line:/\\*--install-extension*/ AND process.command_line:/\\*\\.vsix*/ ) OR /* Suspicious Outbound Connection from VSCode */ (event.category:\"network\" AND process.name:/Code.exe/ AND url.full IS NOT NULL AND NOT url.full:/\\*marketplace.visualstudio.com*/ AND NOT url.full:/\\*vscode.blob.core.windows.net*/ AND NOT url.full:/\\*update.code.visualstudio.com*/ AND NOT url.full:/\\*gallerycdn.vsassets.io*/ ) OR /* File Write to VSCode Extension Directory */ (event.category:\"file\" AND event.action:\"creation\" AND (file.path:/\\*\\\\.vscode\\\\extensions\\\\*\\/ OR file.path:/\\*\\\\Microsoft VS Code\\\\resources\\\\app\\\\extensions\\\\*\\/ )) OR /* Suspicious Node Module Loaded by VSCode */ (event.category:\"library\" AND event.action:\"load\" AND process.name:/Code.exe/ AND dll.name:/\\*\\.node*/ AND (dll.path:/\\*\\\\AppData\\\\Local*\\/ OR dll.path:/\\*\\\\Temp*\\/ ) AND NOT dll.path:/\\*\\\\.vscode\\\\extensions*\\/ AND NOT dll.path:/\\*Microsoft VS Code*\\/ ))",
+    "interval": "15m",
+    "severity": "medium",
+    "type": "query",
+    "version": "1"
+  }
+}

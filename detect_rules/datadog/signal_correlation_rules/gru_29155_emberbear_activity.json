@@ -1,0 +1,230 @@
+{
+  "name": "GRU Unit 29155 (Ember Bear/Cadet Blizzard) Activity",
+  "message": "GRU Unit 29155 Activity: {{distinct_count}} TTP(s) on host {{@host}} by user {{@user.name}}: {{case_names}}. Details: {{@process.command_line OR @file.md5 OR @destination.ip OR @destination.domain OR @dns.question.name}}",
+  "isEnabled": true,
+  "type": "signal_correlation",
+  "tags": [
+    "security:attack",
+    "tactic:TA0002",
+    "tactic:TA0005",
+    "tactic:TA0006",
+    "tactic:TA0007",
+    "tactic:TA0008",
+    "tactic:TA0010",
+    "tactic:TA0011",
+    "technique:T1059.001",
+    "technique:T1562.001",
+    "technique:T1003",
+    "technique:T1550.002",
+    "technique:T1567.002",
+    "technique:T1572",
+    "technique:T1090.003",
+    "technique:T1071.004",
+    "technique:T1071.001",
+    "technique:T1105"
+  ],
+  "options": {
+    "evaluationWindow": 3600,
+    "keepAlive": 10800,
+    "maxSignalDuration": 21600
+  },
+  "queries": [
+    {
+      "name": "WhisperGate PowerShell",
+      "query": "source:(sysmon OR xmlwineventlog OR wineventlog) @winlog.event_id:(1 OR 4688) AND @process.name:(powershell.exe OR pwsh.exe) AND @process.command_line:* -enc\\ UwB0AGEAcgB0AC0AUwBsAGUAZQBwACAALQBzACAAMQAwAA==*",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name"
+      ]
+    },
+    {
+      "name": "PowerShell Defender Exclusion",
+      "query": "source:(sysmon OR xmlwineventlog OR wineventlog) @winlog.event_id:(1 OR 4688) AND @process.name:(powershell.exe OR pwsh.exe) AND @process.command_line:*Set-MpPreference*ExclusionPath*C:\\\\*",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name"
+      ]
+    },
+    {
+      "name": "AdvancedRun Defender Disabling",
+      "query": "source:(sysmon OR xmlwineventlog OR wineventlog) @winlog.event_id:(1 OR 4688) AND @process.name:AdvancedRun.exe AND (@process.command_line:*stop\\ WinDefend* OR @process.command_line:*rmdir\\ *C:\\\\ProgramData\\\\Microsoft\\\\Windows\\ Defender*)",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name"
+      ]
+    },
+    {
+      "name": "InstallUtil from Temp Path",
+      "query": "source:(sysmon OR xmlwineventlog OR wineventlog) @winlog.event_id:(1 OR 4688) AND @process.name:InstallUtil.exe AND (@process.executable:*\\\\AppData\\\\Local\\\\Temp\\\\* OR @process.executable:*\\\\Windows\\\\Temp\\\\*)",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name"
+      ]
+    },
+    {
+      "name": "Impacket Execution",
+      "query": "source:(sysmon OR xmlwineventlog OR wineventlog) @winlog.event_id:(1 OR 4688) AND @process.command_line:(*secretsdump.py* OR *psexec.py*)",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name"
+      ]
+    },
+    {
+      "name": "Rclone Exfil to MEGA",
+      "query": "source:(sysmon OR xmlwineventlog OR wineventlog) @winlog.event_id:(1 OR 4688) AND @process.name:(rclone.exe OR rclone) AND @process.command_line:*mega*.nz*",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name"
+      ]
+    },
+    {
+      "name": "GOST Tunneling",
+      "query": "source:(sysmon OR xmlwineventlog OR wineventlog) @winlog.event_id:(1 OR 4688) AND @process.name:(java.exe OR java) AND (@process.command_line:*-L*socks5://* OR @process.command_line:*-L*rtcp://*)",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name"
+      ]
+    },
+    {
+      "name": "ProxyChains Usage",
+      "query": "source:(sysmon OR xmlwineventlog OR wineventlog) @winlog.event_id:(1 OR 4688) AND @process.command_line:*proxychains*",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name"
+      ]
+    },
+    {
+      "name": "su-bruteforce Usage",
+      "query": "source:(sysmon OR xmlwineventlog OR wineventlog) @winlog.event_id:(1 OR 4688) AND @process.command_line:*su-bruteforce*",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name"
+      ]
+    },
+    {
+      "name": "LinPEAS Execution",
+      "query": "source:(sysmon OR xmlwineventlog OR wineventlog) @winlog.event_id:(1 OR 4688) AND @process.command_line:(*linpeas.sh* OR *linpeas.py*)",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name"
+      ]
+    },
+    {
+      "name": "GOST Tool File Hash",
+      "query": "source:(sysmon OR xmlwineventlog OR wineventlog) @winlog.event_id:11 AND @file.md5:896e0f54fc67d72d94b40d7885f10c51",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name"
+      ]
+    },
+    {
+      "name": "C2 Network Connection",
+      "query": "source:(sysmon OR xmlwineventlog OR wineventlog OR network OR firewall OR proxy) (@destination.ip:(5.226.139.66 OR 45.141.87.11 OR 46.101.242.222 OR 62.173.140.223 OR 79.124.8.66 OR 90.131.156.107 OR 112.51.253.153 OR 112.132.218.45 OR 154.21.20.82 OR 179.43.133.202 OR 179.43.142.42 OR 179.43.162.55 OR 179.43.175.38 OR 179.43.175.108 OR 179.43.176.60 OR 179.43.187.47 OR 179.43.189.218 OR 185.245.84.227 OR 185.245.85.251 OR 194.26.29.84 OR 194.26.29.95 OR 194.26.29.98 OR 194.26.29.251) OR @destination.domain:(interlinks.top OR 3proxy.ru OR nssm.cc OR *cdn.discordapp.com OR *ngrok.com))",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name"
+      ]
+    },
+    {
+      "name": "Iodine DNS Tunneling",
+      "query": "source:(sysmon OR xmlwineventlog OR wineventlog OR dns) @dns.question.name:dns.test658324901domain.me",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name"
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "status": "high",
+      "condition": "event_count(\"WhisperGate PowerShell\") >= 1"
+    },
+    {
+      "status": "high",
+      "condition": "event_count(\"PowerShell Defender Exclusion\") >= 1"
+    },
+    {
+      "status": "high",
+      "condition": "event_count(\"AdvancedRun Defender Disabling\") >= 1"
+    },
+    {
+      "status": "high",
+      "condition": "event_count(\"InstallUtil from Temp Path\") >= 1"
+    },
+    {
+      "status": "medium",
+      "condition": "event_count(\"Impacket Execution\") >= 1"
+    },
+    {
+      "status": "high",
+      "condition": "event_count(\"Rclone Exfil to MEGA\") >= 1"
+    },
+    {
+      "status": "high",
+      "condition": "event_count(\"GOST Tunneling\") >= 1"
+    },
+    {
+      "status": "medium",
+      "condition": "event_count(\"ProxyChains Usage\") >= 1"
+    },
+    {
+      "status": "high",
+      "condition": "event_count(\"su-bruteforce Usage\") >= 1"
+    },
+    {
+      "status": "high",
+      "condition": "event_count(\"LinPEAS Execution\") >= 1"
+    },
+    {
+      "status": "high",
+      "condition": "event_count(\"GOST Tool File Hash\") >= 1"
+    },
+    {
+      "status": "critical",
+      "condition": "event_count(\"C2 Network Connection\") >= 1"
+    },
+    {
+      "status": "critical",
+      "condition": "event_count(\"Iodine DNS Tunneling\") >= 1"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+rule gcp_project_metadata_ssh_key_modification {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects the modification or addition of SSH keys to Google Compute Engine project-level metadata. Attackers can use this technique to establish persistent access or for lateral movement to any GCE instance within the project, as any keys added to project metadata are propagated to all VMs in the project."
+    false_positives = "Legitimate administrative activity, such as onboarding new developers or rotating keys via infrastructure-as-code tools. To reduce false positives, consider excluding known administrator accounts or service accounts used by CI/CD pipelines."
+    tags = "GCP, PERSISTENCE, LATERAL_MOVEMENT, COMPUTE, T1098.004"
+    tactic = "TA0003, TA0008"
+    technique = "T1098.004"
+
+  events:
+    // Filter for the API call that sets project-wide instance metadata.
+    $e.metadata.product_name = "compute.googleapis.com"
+    re.regex($e.metadata.product_event_type, `v\d+\.compute\.projects\.setCommonInstanceMetadata`)
+
+    // Check if the 'ssh-keys' metadata key was modified.
+    // This is the core logic to identify SSH key manipulation at the project level.
+    any $key in $e.security_result.metadata.gce_project_audit_metadata.project_metadata_delta.modified_metadata_keys:
+      $key = "ssh-keys"
+
+  outcome:
+    // High risk score due to the potential for broad, persistent access.
+    $risk_score = 70
+    $principal_ip = array_distinct($e.principal.ip)
+    $principal_user = $e.principal.user.email_addr
+    $principal_user_agent = $e.principal.user_agent
+    $project_id = $e.resource.project.name
+
+  condition:
+    $e
+}

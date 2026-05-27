@@ -1,0 +1,62 @@
+// Rule Title: Potential Ransomware Activity on IT/OT System
+// Description: This rule detects common ransomware behaviors, such as deleting volume shadow copies or creating ransom notes, occurring on designated Industrial Control System (ICS) or Operational Technology (OT) assets. Ransomware can spread from IT to OT networks, causing significant operational disruption.
+// Author: RW
+// Date: 2025-08-17
+// References:
+// - https://www.marinelink.com/news/maritime-cyber-threats-grow-increasingly-525922
+// False Positive Sensitivity: Medium
+// - The effectiveness of this rule is highly dependent on the accurate population of the 'ot_systems' list. Without it, the rule will not fire.
+// - Legitimate administrative activity could potentially trigger the shadow copy deletion logic. Consider adding authorized admin accounts to an exclusion list if needed.
+// - The 'ransom_note_patterns' list should be reviewed and customized for your environment and the latest threats.
+// Detection Comment Level: Medium
+
+// Define the hostnames or IP addresses of critical OT/ICS assets.
+// This list MUST be populated with your environment's OT/ICS assets for the rule to be effective.
+let ot_systems = dynamic([
+    "SHIP-NAV-CONSOLE", "PLC-PROD-LINE-A", "10.100.50.10", "HMI-STATION-01" // Example placeholder values
+]);
+
+// Define common ransom note file name patterns.
+let ransom_note_patterns = dynamic([
+    "*readme.txt", "*decrypt*.txt", "*recover*.txt", "*help*.txt", "*ransomed*.txt",
+    "recovery_*.txt", "install_tor.txt", "read_me*.txt", "*want_your_files_back*.txt",
+    "RECOVER-MY-FILES.txt"
+]);
+
+// Find processes that attempt to inhibit system recovery by deleting backups or shadow copies.
+let inhibit_recovery_activity =
+DeviceProcessEvents
+| where TimeGenerated > ago(1d)
+| where
+    (ProcessCommandLine has "vssadmin" and ProcessCommandLine has_all ("delete", "shadows")) or
+    (ProcessCommandLine has "wbadmin" and ProcessCommandLine has_all ("delete", "catalog")) or
+    (ProcessCommandLine has "bcdedit" and ProcessCommandLine has_all ("recoveryenabled", "no"))
+| extend
+    Activity = "Inhibit System Recovery",
+    SuspiciousEntity = ProcessCommandLine,
+    AccountName = iff(isnotempty(InitiatingProcessAccountName), InitiatingProcessAccountName, AccountName);
+
+// Find file creation events that match known ransom note patterns.
+let ransom_note_activity =
+DeviceFileEvents
+| where TimeGenerated > ago(1d)
+| where ActionType == "FileCreated"
+| where FileName has_any (ransom_note_patterns)
+| extend
+    Activity = strcat("Ransom Note Created: ", FileName),
+    SuspiciousEntity = InitiatingProcessFolderPath,
+    AccountName = iff(isnotempty(InitiatingProcessAccountName), InitiatingProcessAccountName, ActorUsername);
+
+// Combine the findings and filter for events on designated OT systems.
+union inhibit_recovery_activity, ransom_note_activity
+| where DeviceName in (ot_systems) or has_any_ipv4_prefix(extract_ipv4s(DeviceName)[0], ot_systems)
+// Summarize alerts to reduce noise, grouping by the affected device and account.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    Activities = make_set(Activity, 5),
+    SuspiciousEntities = make_set(SuspiciousEntity, 3)
+    by DeviceName, AccountName
+| extend
+    RuleTitle = "Potential Ransomware Activity on IT/OT System",
+    Description = strcat("Potential ransomware activity detected on critical system '", DeviceName, "' by account '", AccountName, "'. Observed activities: ", tostring(Activities), ".")

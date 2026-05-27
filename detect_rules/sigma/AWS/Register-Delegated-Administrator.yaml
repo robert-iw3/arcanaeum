@@ -1,0 +1,25 @@
+title: Register Delegated Administrator for AWS Organization
+id: 91363779-e31a-47f9-9964-7f8d17f81773
+status: experimental
+description: >-
+  Detects the registration of a delegated administrator for an AWS service within an AWS Organization. An attacker who has compromised the management account could register a member account as a delegated administrator to establish persistence or expand their control over the organization.
+references:
+  - https://hackingthe.cloud/aws/general-knowledge/aws_organizations_defaults/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.t1098
+  - attack.t1136
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    # Event from AWS Organizations
+    eventSource: 'organizations.amazonaws.com'
+    # API call to register a delegated administrator
+    eventName: 'RegisterDelegatedAdministrator'
+  condition: selection
+falsepositives:
+  - This is a legitimate action performed by administrators when delegating the management of an organization-integrated service (e.g., GuardDuty, AWS Config) to a member account. This activity should be correlated with change management records.
+level: medium

@@ -1,0 +1,37 @@
+rule linux_systemd_service_persistence {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects the creation of a suspicious systemd service file via command-line tools like echo or tee. This is a common persistence technique where adversaries write a malicious service configuration containing persistence directives (e.g., Restart=always) and a payload (e.g., a reverse shell) to ensure their code is executed and maintained by the system's service manager."
+    tactic = "TA0003"
+    technique = "T1543.002"
+    false_positives = "Legitimate software installation or administrative scripts might create service files using command-line tools. While the combination of a persistence directive and a reverse shell pattern is highly suspicious, some non-standard tools could trigger this. If false positives occur, consider excluding known safe parent processes or specific command-line patterns associated with legitimate software deployment."
+
+  events:
+    // Catches process launch events on Linux systems.
+    $process.metadata.event_type = "PROCESS_LAUNCH"
+    $process.metadata.product_name = "Linux"
+
+    // The command line writes to a .service file in a system or user systemd directory.
+    // This is a key indicator of service file creation or modification.
+    re.regex($process.target.process.command_line, `(\/etc\/systemd\/system\/|\.config\/systemd\/user\/)[\w\-\.]+\.service`)
+
+    // The command line includes a systemd directive to ensure the service restarts automatically.
+    re.regex($process.target.process.command_line, `Restart\s*=\s*(always|on-failure)`)
+
+    // The command line also includes patterns commonly used for reverse shells.
+    re.regex($process.target.process.command_line, `(\/dev\/(tcp|udp)\/|nc\s|netcat\s|ncat\s|bash\s+-i)`)
+
+  outcome:
+    // A high risk score is assigned due to the strong indication of a malicious persistence mechanism.
+    $risk_score = 80
+    $principal_hostname = $process.principal.hostname
+    $principal_user = $process.principal.user.userid
+    $target_process_command_line = $process.target.process.command_line
+    $target_process_pid = $process.target.process.pid
+    $parent_process_command_line = $process.principal.process.command_line
+    $parent_process_pid = $process.principal.process.pid
+
+  condition:
+    $process
+}

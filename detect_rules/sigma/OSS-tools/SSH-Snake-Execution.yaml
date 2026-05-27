@@ -1,0 +1,36 @@
+title: CRYSTALRAY SSH-Snake Execution and Exfiltration
+id: 1d262f8b-6540-4aee-9a4c-718aa70f2421
+status: experimental
+description: Detects the execution of the SSH-Snake script via a curl-to-bash download cradle, followed by the exfiltration of discovered SSH keys. This specific command chain was used by the CRYSTALRAY threat actor.
+references:
+  - https://www.sysdig.com/blog/crystalray-rising-threat-actor-exploiting-oss-tools
+author: RW
+date: 2025-08-07
+tags:
+  - attack.execution
+  - attack.t1059.004
+  - attack.credential_access
+  - attack.t1552.003
+  - attack.lateral_movement
+  - attack.t1210
+  - attack.exfiltration
+  - attack.t1048.003
+  - threat_actor.crystalray
+  - tool.ssh-snake
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+        # Detects a single command line that downloads, executes, and exfiltrates SSH-Snake results
+    CommandLine|contains|all:
+      - 'curl'
+      - 'SSH-Snake/main/Snake.nocomments.sh'
+      - '| bash'
+      - '> /tmp/ssh.txt'
+      - '--upload-file'
+      - '/tmp/ssh.txt'
+  condition: selection
+falsepositives:
+  - This is a highly specific command line unlikely to be used for legitimate administrative purposes. However, penetration testers might use the SSH-Snake tool, but likely not with this exact exfiltration and cleanup chain.
+level: high

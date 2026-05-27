@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: aide
+spec:
+  selector:
+    matchLabels:
+      app: aide
+  template:
+    metadata:
+      labels:
+        app: aide
+    spec:
+      hostPID: true
+      securityContext:
+        runAsUser: 0
+      containers:
+        - name: aide
+          image: aide:latest
+          command: ["python3", "/configure_aide.py", "--json"]
+          securityContext:
+            capabilities:
+              add: ["SYS_ADMIN"]
+          volumeMounts:
+            - name: host-root
+              mountPath: /
+              readOnly: true
+            - name: etc-aide
+              mountPath: /etc/aide
+            - name: var-log
+              mountPath: /var/log
+            - name: var-backups
+              mountPath: /var/backups
+            - name: var-lib-aide
+              mountPath: /var/lib/aide
+      volumes:
+        - name: host-root
+          hostPath:
+            path: /
+        - name: etc-aide
+          hostPath:
+            path: /etc/aide
+            type: DirectoryOrCreate
+        - name: var-log
+          hostPath:
+            path: /var/log
+            type: DirectoryOrCreate
+        - name: var-backups
+          hostPath:
+            path: /var/backups
+            type: DirectoryOrCreate
+        - name: var-lib-aide
+          hostPath:
+            path: /var/lib/aide
+            type: DirectoryOrCreate

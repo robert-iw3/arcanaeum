@@ -1,0 +1,68 @@
+// Name: Unusual Mail Filter Rule Creation
+// Author: RW
+// Date: 2025-08-20
+// Mitre TTPs: T1137.001
+// Description: Detects the creation or modification of Outlook inbox rules that may be malicious.
+// Attackers create these rules post-compromise to maintain persistence, hide their activities by
+// deleting or moving emails, or exfiltrate data by forwarding sensitive messages to an external address.
+
+// --- Tuning Section ---
+// Add your organization's domains to this list to correctly identify external forwarding. This is critical for reducing false positives.
+let internal_domains = dynamic(["contoso.com", "contoso.org"]);
+// Add keywords that are common in your environment but might be flagged as suspicious.
+let keyword_allowlist = dynamic([]);
+// Add any legitimate external forwarding domains (e.g., for ticketing or CRM systems).
+let external_forwarding_allowlist = dynamic([]);
+// --- End Tuning Section ---
+
+// Define suspicious keywords often used by attackers to find and hide sensitive emails.
+let suspicious_keywords = dynamic(["invoice", "payment", "password", "phish", "hack", "warning", "security", "support", "undeliverable", "bank", "credential"]);
+// Define folders that attackers might use to hide emails from the user.
+let suspicious_folders = dynamic(["RSS Feeds", "Junk E-mail", "Conversation History", "Archive", "Deleted Items"]);
+
+OfficeActivity
+| where RecordType == "Exchange" and Operation in ("New-InboxRule", "Set-InboxRule")
+// Unpack the parameters column into individual columns for easier analysis.
+| evaluate bag_unpack(Parameters, "p_")
+| extend
+    RuleName = tostring(p_Name),
+    DeleteMessage = tostring(p_DeleteMessage) == "True",
+    MoveToFolder = tostring(p_MoveToFolder),
+    ForwardTo = tostring(p_ForwardTo),
+    ForwardAsAttachmentTo = tostring(p_ForwardAsAttachmentTo),
+    RedirectTo = tostring(p_RedirectTo),
+    SubjectOrBodyContainsWords = tostring(p_SubjectOrBodyContainsWords),
+    SubjectContainsWords = tostring(p_SubjectContainsWords),
+    BodyContainsWords = tostring(p_BodyContainsWords)
+// Combine all forwarding/redirect fields and keyword fields for easier checking.
+| extend AllForwardingRecipients = tolower(strcat(ForwardTo, ForwardAsAttachmentTo, RedirectTo))
+| extend AllKeywords = tolower(strcat(SubjectOrBodyContainsWords, SubjectContainsWords, BodyContainsWords))
+// Identify suspicious conditions based on the rule's actions.
+| extend
+    IsDeleting = DeleteMessage,
+    IsMovingToSuspiciousFolder = MoveToFolder has_any (suspicious_folders),
+    HasSuspiciousKeywords = AllKeywords has_any (suspicious_keywords) and AllKeywords !has_any (keyword_allowlist),
+    IsExternalForwarding = isnotempty(AllForwardingRecipients) and
+                           AllForwardingRecipients !has_any (internal_domains) and
+                           AllForwardingRecipients !has_any (external_forwarding_allowlist)
+// The core detection logic: alert if the rule deletes, moves to a suspicious folder, forwards externally, or uses suspicious keywords.
+| where IsDeleting or IsMovingToSuspiciousFolder or IsExternalForwarding or HasSuspiciousKeywords
+// Create a summary of why the rule is suspicious for the analyst.
+| extend SuspiciousReason = strcat_array(
+    dynamic([
+        iff(IsDeleting, "Deletes messages", ""),
+        iff(IsMovingToSuspiciousFolder, strcat("Moves to suspicious folder (", MoveToFolder, ")"), ""),
+        iff(IsExternalForwarding, strcat("Forwards externally (", AllForwardingRecipients, ")"), ""),
+        iff(HasSuspiciousKeywords, "Contains suspicious keywords", "")
+    ]),
+    ", "
+)
+| project
+    TimeGenerated,
+    User = UserId,
+    SourceIp = ClientIPAddress,
+    UserAgent = OfficeUserAgent,
+    Operation,
+    RuleName,
+    SuspiciousReason,
+    Parameters

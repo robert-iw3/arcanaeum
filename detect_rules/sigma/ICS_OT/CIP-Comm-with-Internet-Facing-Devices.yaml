@@ -1,0 +1,83 @@
+title: CIP Communication with Internet-Facing Device
+status: experimental
+description: >-
+  Detects Common Industrial Protocol (CIP) traffic, typically over EtherNet/IP port 44818, between an internal,
+  private IP address and a public, internet-routable IP address. Exposing ICS devices and protocols directly to
+  the internet is a significant security risk and a common vector for initial access and exploitation.
+references:
+  - https://github.com/ICSVillage
+author: RW
+date: 2025-08-18
+tags:
+  - attack.initial_access
+  - attack.t1190
+  - ics
+  - cip
+logsource:
+  category: network_traffic
+detection:
+  selection_cip_port:
+    destination.port: 44818  # Standard port for EtherNet/IP explicit messaging
+  filter_private_src:
+    # Identifies traffic originating from an internal, private (RFC1918) IP address.
+    source.ip|startswith:
+      - '10.'
+      - '172.16.'
+      - '172.17.'
+      - '172.18.'
+      - '172.19.'
+      - '172.20.'
+      - '172.21.'
+      - '172.22.'
+      - '172.23.'
+      - '172.24.'
+      - '172.25.'
+      - '172.26.'
+      - '172.27.'
+      - '172.28.'
+      - '172.29.'
+      - '172.30.'
+      - '172.31.'
+      - '192.168.'
+  filter_private_dest:
+    # Identifies traffic destined for an internal, private (RFC1918) IP address.
+    destination.ip|startswith:
+      - '10.'
+      - '172.16.'
+      - '172.17.'
+      - '172.18.'
+      - '172.19.'
+      - '172.20.'
+      - '172.21.'
+      - '172.22.'
+      - '172.23.'
+      - '172.24.'
+      - '172.25.'
+      - '172.26.'
+      - '172.27.'
+      - '172.28.'
+      - '172.29.'
+      - '172.30.'
+      - '172.31.'
+      - '192.168.'
+  filter_allowlist:
+    # This list is a placeholder and MUST be populated with authorized public IPs (e.g., vendor support, cloud services) to reduce false positives.
+    # The same IPs should be in both source and destination to cover inbound and outbound connections.
+    source.ip:
+      - '203.0.113.10'   # Example: Authorized vendor IP
+      - '198.51.100.20'  # Example: Authorized cloud service IP
+    destination.ip:
+      - '203.0.113.10'   # Example: Authorized vendor IP
+      - '198.51.100.20'  # Example: Authorized cloud service IP
+  condition: >
+    selection_cip_port and
+    ((filter_private_src and not filter_private_dest) or (not filter_private_src and filter_private_dest)) and
+    not filter_allowlist
+fields:
+  - source.ip
+  - destination.ip
+  - destination.port
+falsepositives:
+  - Legitimate and authorized remote access for vendor support or cloud integration that has not been added to the allowlist.
+  - Network Address Translation (NAT) misconfigurations that may incorrectly map addresses.
+level: high

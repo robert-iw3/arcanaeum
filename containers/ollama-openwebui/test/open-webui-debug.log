@@ -1,0 +1,58 @@
+/app/backend/open_webui
+/app/backend
+/app
+Running migrations
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 7e5b5dc7342b, init
+INFO  [alembic.runtime.migration] Running upgrade 7e5b5dc7342b -> ca81bd47c050, Add config table
+INFO  [alembic.runtime.migration] Running upgrade ca81bd47c050 -> c0fbf31ca0db, Update file table
+INFO  [alembic.runtime.migration] Running upgrade c0fbf31ca0db -> 6a39f3d8e55c, Add knowledge table
+INFO  [alembic.runtime.migration] Running upgrade 6a39f3d8e55c -> 242a2047eae0, Update chat table
+INFO  [alembic.runtime.migration] Running upgrade 242a2047eae0 -> 1af9b942657b, Migrate tags
+INFO  [alembic.runtime.migration] Running upgrade 1af9b942657b -> 3ab32c4b8f59, Update tags
+INFO  [alembic.runtime.migration] Running upgrade 3ab32c4b8f59 -> c69f45358db4, Add folder table
+INFO  [alembic.runtime.migration] Running upgrade c69f45358db4 -> c29facfe716b, Update file table path
+INFO  [alembic.runtime.migration] Running upgrade c29facfe716b -> af906e964978, Add feedback table
+INFO  [alembic.runtime.migration] Running upgrade af906e964978 -> 4ace53fd72c8, Update folder table and change DateTime to BigInteger for timestamp fields
+INFO  [alembic.runtime.migration] Running upgrade 4ace53fd72c8 -> 922e7a387820, Add group table
+INFO  [alembic.runtime.migration] Running upgrade 922e7a387820 -> 57c599a3cb57, Add channel table
+INFO  [alembic.runtime.migration] Running upgrade 57c599a3cb57 -> 7826ab40b532, Update file table
+INFO  [alembic.runtime.migration] Running upgrade 7826ab40b532 -> 3781e22d8b01, Update message & channel tables
+INFO  [open_webui.env] 'DEFAULT_LOCALE' loaded from the latest database entry
+INFO  [open_webui.env] 'DEFAULT_PROMPT_SUGGESTIONS' loaded from the latest database entry
+WARNI [open_webui.env]
+
+WARNING: CORS_ALLOW_ORIGIN IS SET TO '*' - NOT RECOMMENDED FOR PRODUCTION DEPLOYMENTS.
+
+INFO  [open_webui.env] Embedding model set: sentence-transformers/all-MiniLM-L6-v2
+WARNI [langchain_community.utils.user_agent] USER_AGENT environment variable not set, consider setting it to identify your requests.
+Creating knowledge table
+Migrating data from document table to knowledge table
+Converting 'chat' column to JSON
+Renaming 'chat' column to 'old_chat'
+Adding new 'chat' column of type JSON
+Dropping 'old_chat' column
+Primary Key: {'name': None, 'constrained_columns': []}
+Unique Constraints: [{'name': 'uq_id_user_id', 'column_names': ['id', 'user_id']}]
+Indexes: [{'name': 'tag_id', 'column_names': ['id'], 'unique': 1, 'dialect_options': {}}]
+Creating new primary key with 'id' and 'user_id'.
+Dropping unique constraint: uq_id_user_id
+Dropping unique index: tag_id
+
+  ___                    __        __   _     _   _ ___
+ / _ \ _ __   ___ _ __   \ \      / /__| |__ | | | |_ _|
+| | | | '_ \ / _ \ '_ \   \ \ /\ / / _ \ '_ \| | | || |
+| |_| | |_) |  __/ | | |   \ V  V /  __/ |_) | |_| || |
+ \___/| .__/ \___|_| |_|    \_/\_/ \___|_.__/ \___/|___|
+      |_|
+
+
+v0.5.7 - building the best open-source AI user interface.
+
+https://github.com/open-webui/open-webui
+
+ Fetching 30 files:   0%|          | 0/30 [00:00<?, ?it/s] Fetching 30 files:   3%|▎         | 1/30 [00:00<00:03,  8.88it/s] Fetching 30 files:  30%|███       | 9/30 [00:19<00:47,  2.28s/it] Fetching 30 files:  33%|███▎      | 10/30 [00
+:35<01:23,  4.17s/it] Fetching 30 files:  37%|███▋      | 11/30 [00:40<01:21,  4.31s/it] Fetching 30 files:  40%|████      | 12/30 [00:41<01:05,  3.62s/it] Fetching 30 files:  73%|███████▎  | 22/30 [00:43<00:09,  1.14s/it] Fetching 30 f
+iles: 100%|██████████| 30/30 [00:43<00:00,  1.46s/it]
+INFO:     Started server process [1]

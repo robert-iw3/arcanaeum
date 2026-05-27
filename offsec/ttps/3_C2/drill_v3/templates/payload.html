@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Download Dashboard</title>
+    {% if style == True %}
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/light/payload.css') }}"
+    />
+    {% else %}
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/dark/payload.css') }}"
+    />
+    {% endif %}
+  </head>
+  <body>
+    <header>
+      <nav>
+        <ul>
+          <li><a href="/">Control Panel</a></li>
+          <li><a href="/payload" class="active">Payload</a></li>
+          <li><a href="/files">Files</a></li>
+          <li><a href="/logout">Logout</a></li>
+        </ul>
+      </nav>
+    </header>
+
+    <h1>Select OS and Architecture</h1>
+
+    <div id="popup-alert">
+      <div id="popup-message"></div>
+      <button id="popup-ok-btn">OK</button>
+    </div>
+
+    <div id="container">
+      <div id="panel">
+        <div class="download-container">
+          <select id="os-dropdown">
+            <option value="Windows">Windows</option>
+            <option value="Linux">Linux</option>
+            <!-- <option value="OSX">OSX</option> -->
+          </select>
+          <select id="arch-dropdown">
+            <!-- Options will be dynamically populated -->
+          </select>
+          <button onclick="downloadFile()">Create Download</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="download-table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>OS</th>
+            <th>Architecture</th>
+            <th>Time</th>
+            <th>Download</th>
+          </tr>
+        </thead>
+        <tbody id="download-table">
+          <!-- Download rows will be added here -->
+        </tbody>
+      </table>
+    </div>
+    {% if show_login == True %}
+    <script>
+      var show_logout_button = true;
+    </script>
+    {% else %}
+    <script>
+      var show_logout_button = false;
+    </script>
+    {% endif %}
+    <script src="{{ url_for('static', filename='js/payload.js') }}"></script>
+  </body>
+</html>

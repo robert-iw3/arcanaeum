@@ -1,0 +1,70 @@
+// title: Suspicious Certificate Authority Configuration Change
+// description: |
+// Detects modifications to sensitive Certificate Authority (CA) registry settings that weaken security.
+// Attackers, using tools like Certify 2.0, may alter these configurations to enable attack paths like
+// ESC11 (disabling RPC encryption) or ESC16 (enabling dangerous certificate extensions). This rule monitors
+// for changes to 'InterfaceFlags' and 'DisableExtensionList' on CA servers.
+// author: RW
+// date: 2025-08-11
+// level: Medium
+// tags:
+//   - attack.privilege_escalation
+//   - attack.defense_evasion
+//   - attack.t1112
+
+let timeframe = 1d;
+// OID for szOID_NTDS_CA_SECURITY_EXT, related to ESC16. Removing this from the disabled list is suspicious.
+let szOID_NTDS_CA_SECURITY_EXT = "1.3.6.1.4.1.311.21.8.2108309.11199111.115101114.111110.116.1.1.1";
+// Whitelist for legitimate administrators or service accounts that manage PKI infrastructure.
+let pki_admin_exclusions = dynamic([]);
+SecurityEvent
+| where TimeGenerated > ago(timeframe)
+| where EventID == 4657 // A registry value was modified. This event must be enabled in the audit policy for the CA server.
+| extend EventDataXml = parse_xml(EventData)
+| extend
+    SubjectUserName = tostring(EventDataXml.EventData.Data[1]),
+    SubjectDomainName = tostring(EventDataXml.EventData.Data[2]),
+    ObjectName = tostring(EventDataXml.EventData.Data[4]),
+    ObjectValueName = tostring(EventDataXml.EventData.Data[5]),
+    OldValue = tostring(EventDataXml.EventData.Data[7]),
+    NewValue = tostring(EventDataXml.EventData.Data[8]),
+    ProcessName = tostring(EventDataXml.EventData.Data[10])
+// Filter for modifications within the Certificate Services configuration path.
+| where ObjectName has @"\SYSTEM\CurrentControlSet\Services\CertSvc\Configuration\"
+// Exclude known administrative accounts to reduce false positives.
+| where not(SubjectUserName in (pki_admin_exclusions))
+// Filter for specific changes that weaken CA security settings.
+| where
+    // ESC11: Detects disabling of RPC encryption (IF_ENFORCEENCRYPTICERTREQUEST flag = 0x2).
+    (ObjectValueName == "InterfaceFlags" and OldValue in ("2", "3") and NewValue in ("0", "1")) or
+    // ESC11: Detects loosening of RPC restrictions for enrollment agents (IF_ENFORCEENCRYPTICERTREQUEST flag = 0x1).
+    (ObjectValueName == "InterfaceFlags" and OldValue in ("1", "3") and NewValue in ("0", "2")) or
+    // ESC16: Detects enabling the CA security extension by removing it from the disabled list.
+    (ObjectValueName == "DisableExtensionList" and OldValue has szOID_NTDS_CA_SECURITY_EXT and not(NewValue has szOID_NTDS_CA_SECURITY_EXT))
+| extend
+    CAName = extract(@"Configuration\\(.*?)\\", 1, ObjectName),
+    AccountName = SubjectUserName,
+    AccountDomain = SubjectDomainName
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    take_any(ProcessName, OldValue, NewValue)
+    by
+    Computer, // The CA Server
+    CAName,
+    AccountName,
+    AccountDomain,
+    RegistryKey = ObjectName,
+    RegistryValue = ObjectValueName
+| project-reorder
+    StartTime,
+    EndTime,
+    AccountName,
+    AccountDomain,
+    Computer,
+    CAName,
+    RegistryKey,
+    RegistryValue,
+    OldValue,
+    NewValue,
+    ProcessName

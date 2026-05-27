@@ -1,0 +1,59 @@
+[
+  {
+    "type": "expert",
+    "name": "Detect Known ESXi VM Escape Toolkit Malicious File Hashes",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match FILE {\n         Include -hash \"37972a232ac6d8c402ac4531430967c1fd458b74a52d6d1990688d88956791a7\"\n         Include -hash \"4614346fc1ff74f057d189db45aa7dc25d6e7f3d9b68c287a409a53c86dca25e\"\n         Include -hash \"c3f8da7599468c11782c2332497b9e5013d98a1030034243dfed0cf072469c89\"\n         Include -hash \"2bc5d02774ac1778be22cace51f9e35fe7b53378f8d70143bf646b68d2c0f94c\"\n         Include -access \"CREATE,WRITE,EXECUTE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "Critical",
+    "enabled": true,
+    "description": "Detects creation, write, or execution of known malicious files matching SHA256 hashes from the 2025 ESXi VM Escape toolkit (MAESTRO). High-fidelity indicator; very low false positive rate."
+  },
+  {
+    "type": "expert",
+    "name": "Detect VMware VMCI Device Disable via devcon.exe",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"devcon.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*disable*PCI\\\\VEN_15AD&DEV_0740*\"\n         Include -command_line \"*disable*ROOT\\\\VMWVMCIHOSTDEV*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects devcon.exe executions that disable VMware VMCI host devices (via hardware ID PCI\\VEN_15AD&DEV_0740 or ROOT\\VMWVMCIHOSTDEV), a common preparation step in 2025 ESXi VM escape attacks. Tune for legitimate admin/dev use cases."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Kernel Driver Utility (KDU) Execution",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"kdu.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "Critical",
+    "enabled": true,
+    "description": "Detects execution of kdu.exe (Kernel Driver Utility / Bring-Your-Own-Vulnerable-Driver tool), used to load unsigned/vulnerable drivers (e.g. MyDriver.sys) in ESXi VM escape campaigns. Extremely high-fidelity indicator."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Host Network Isolation via netsh advfirewall",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"netsh.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*advfirewall*add*rule*action=block*dir=out*remoteip=0.0.0.0*255.255.255.255*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects netsh.exe commands creating broad outbound block firewall rules (remoteip 0.0.0.0-255.255.255.255), used in ESXi VM escape attacks to isolate the host before exploitation or ransomware deployment. Tune for legitimate admin scripts."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Modification of ESXi inetd.conf (Backdoor Indicator)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match FILE {\n         Include OBJECT_NAME { -v \"/var/run/inetd.conf\" }\n         Include -access \"WRITE,CREATE,MODIFY\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects write, create, or modify operations on /var/run/inetd.conf on ESXi/Linux hosts. Commonly abused to hijack network services (e.g., FTP) for backdoor persistence after VM escape (VSOCKpuppet-style techniques)."
+  },
+  {
+    "type": "firewall",
+    "name": "Detect Unusual Outbound Traffic After Suspected ESXi Escape",
+    "application": "**",
+    "direction": "out",
+    "protocol": "TCP,UDP",
+    "port": "21,22,80,443,445",
+    "action": "Report",
+    "severity": "Medium",
+    "enabled": false,
+    "description": "Auxiliary rule: Detects outbound connections on common exfiltration/C2 ports (FTP, SSH, HTTP/S, SMB) following suspected ESXi compromise. Enable only after tuning; high false-positive risk without context or correlation."
+  }
+]

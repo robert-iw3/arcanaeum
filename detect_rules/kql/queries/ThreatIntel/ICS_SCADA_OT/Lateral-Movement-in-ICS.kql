@@ -1,0 +1,75 @@
+// Name: Lateral Movement in Segmented ICS Environments
+// Description: This rule detects potential lateral movement activities within or between segmented network zones, specifically focusing on
+// traffic patterns that violate typical ICS/OT network segmentation policies. It identifies two primary suspicious patterns:
+// 1) Direct communication between IT and OT zones that bypasses designated DMZ/jump hosts.
+// 2) Use of common administrative protocols (e.g., RDP, SMB, SSH) for peer-to-peer communication between assets within the OT zone, which is often anomalous.
+// Author: RW
+// Date: 2025-08-17
+//
+// MITRE ATT&CK for ICS Information:
+// Tactic: Lateral Movement (TA0109)
+// Technique: Standard Application Layer Protocol (T0864), Valid Accounts (T0865)
+//
+// False Positive Sensitivity: Medium
+//
+// Comments:
+// This detection relies heavily on the correct definition of your network segments (IT, DMZ, OT). Inaccurate definitions will lead to false positives or negatives.
+// The rule assumes that most OT assets should not communicate with each other using administrative protocols and that IT-OT traffic is routed through specific, authorized systems.
+// Tuning Steps:
+// 1. CRITICAL: Populate the 'it_network_range', 'dmz_network_range', and 'ot_network_range' lists with the CIDR ranges for your respective network zones.
+// 2. Populate the 'authorized_jump_hosts' list with the IP addresses of systems that are permitted to initiate connections across segments (e.g., HMIs, data historians, jump servers).
+// 3. Review and adjust the 'lateral_movement_ports' list to reflect the protocols used for remote administration in your environment.
+
+let lookback_period = 1d;
+// --- Network Segmentation Definitions (CRITICAL: Configure for your environment) ---
+let it_network_range = dynamic(["192.168.1.0/24", "10.1.0.0/16"]); // Placeholder for corporate IT network ranges.
+let dmz_network_range = dynamic(["10.100.0.0/24"]); // Placeholder for DMZ network range.
+let ot_network_range = dynamic(["10.200.0.0/16", "172.16.0.0/20"]); // Placeholder for OT/ICS network ranges.
+// --- Authorized Host and Port Definitions (CRITICAL: Configure for your environment) ---
+let authorized_jump_hosts = dynamic(["10.100.0.10", "10.100.0.11"]); // Placeholder for hosts allowed to bridge IT/OT zones.
+let lateral_movement_ports = dynamic([22, 135, 139, 445, 3389, 5985, 5986]); // SSH, RPC, NetBIOS, SMB, RDP, WinRM.
+
+// Pattern 1: Detects traffic that violates the defined IT <-> OT segmentation policy.
+let cross_segment_violations =
+    CommonSecurityLog // Assumes firewall, router, or network sensor logs. Can be substituted with VMConnection or other network flow data.
+    | where TimeGenerated > ago(lookback_period)
+    | where isnotempty(SourceIP) and isnotempty(DestinationIP)
+    // Filter out traffic originating from authorized jump hosts, as they are expected to cross segments.
+    | where not(SourceIP in (authorized_jump_hosts))
+    // Condition: IT host communicates directly with an OT host, bypassing the DMZ.
+    | where (ipv4_is_in_any_range(SourceIP, it_network_range) and ipv4_is_in_any_range(DestinationIP, ot_network_range))
+        // Condition: OT host initiates a connection to an IT host. This is often prohibited.
+        or (ipv4_is_in_any_range(SourceIP, ot_network_range) and ipv4_is_in_any_range(DestinationIP, it_network_range))
+    | extend ViolationType = "Prohibited Cross-Segment Communication";
+
+// Pattern 2: Detects anomalous peer-to-peer communication within the OT zone using administrative protocols.
+let intra_ot_anomalies =
+    CommonSecurityLog
+    | where TimeGenerated > ago(lookback_period)
+    | where isnotempty(SourceIP) and isnotempty(DestinationIP) and isnotempty(DestinationPort)
+    // Both source and destination are within the OT network.
+    | where ipv4_is_in_any_range(SourceIP, ot_network_range) and ipv4_is_in_any_range(DestinationIP, ot_network_range)
+    // Connection uses a common administrative/lateral movement protocol.
+    | where DestinationPort in (lateral_movement_ports)
+    // Exclude traffic where an authorized management host is the source or destination.
+    | where not(SourceIP in (authorized_jump_hosts)) and not(DestinationIP in (authorized_jump_hosts))
+    | extend ViolationType = "Anomalous Intra-OT Peer Communication";
+
+// Combine results from both patterns for a unified alert.
+union cross_segment_violations, intra_ot_anomalies
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    DestinationPorts = make_set(DestinationPort),
+    Actions = make_set(column_ifexists("DeviceAction", "Unknown")),
+    ConnectionCount = count()
+    by SourceIP, DestinationIP, ViolationType
+| extend
+    Tactic = "Lateral Movement",
+    // Assign MITRE Techniques based on the type of violation detected.
+    Techniques = case(
+        ViolationType == "Anomalous Intra-OT Peer Communication", dynamic(["T0864", "T0865"]),
+        ViolationType == "Prohibited Cross-Segment Communication", dynamic(["T0864"]),
+        dynamic([])
+    ),
+    Summary = strcat("Potential lateral movement detected from ", SourceIP, " to ", DestinationIP, ". Policy Violated: ", ViolationType)

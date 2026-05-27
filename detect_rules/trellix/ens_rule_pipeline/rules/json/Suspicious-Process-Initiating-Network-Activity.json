@@ -1,0 +1,8 @@
+{
+    "type": "expert",
+    "name": "Detect Suspicious Process Initiating Network Activity",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**.exe\" }\n      Exclude OBJECT_NAME { -v \"C:\\\\Program Files\\\\**\" }\n      Exclude OBJECT_NAME { -v \"C:\\\\Program Files (x86)\\\\**\" }\n      Exclude OBJECT_NAME { -v \"C:\\\\Windows\\\\System32\\\\**\" }\n   }\n   Target {\n      Match NETWORK {\n         Include -protocol \"TCP\"\n         Include -port \"80,443\"\n         Include -direction \"OUTBOUND\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "Medium",
+    "enabled": true
+}

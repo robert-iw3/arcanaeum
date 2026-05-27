@@ -1,0 +1,22 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: yara-update
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: updater
+            image: your-registry/backend:latest
+            command: ["/app/update-yara.sh"]
+            volumeMounts:
+            - name: yara-rules
+              mountPath: /app/configs/python/backend/yara/rules
+          restartPolicy: OnFailure
+          volumes:
+          - name: yara-rules
+            persistentVolumeClaim:
+              claimName: yara-rules-pvc

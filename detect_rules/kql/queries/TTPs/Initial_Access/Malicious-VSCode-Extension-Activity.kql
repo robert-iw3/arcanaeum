@@ -1,0 +1,72 @@
+// Name: Malicious VSCode Extension Activity
+// Author: RW
+// Date: 2025-08-20
+// Description: Detects multiple potentially malicious activities related to Visual Studio Code extensions.
+// This includes installation via URI handlers or command line, suspicious network connections, direct file modification in extension directories, and loading of unusual Node modules.
+// These behaviors can be indicative of an attacker leveraging VSCode for initial access or persistence.
+// False Positives: Legitimate developer activity can trigger parts of this rule.
+// Extension installation, updates, and normal operation involve file writes and network connections.
+// Tuning, especially of the network and file event portions, may be required.
+// MITRE TTPs: T1566.001, T1192, T1071.001, T1129
+
+let timeframe = 1h;
+// Part 1: Detects VSCode being launched to install an extension from a URL.
+let uri_handler =
+DeviceProcessEvents
+| where TimeGenerated > ago(timeframe)
+| where FileName =~ "Code.exe" and ProcessCommandLine has_all ("--open-url", "vscode://")
+| extend
+    DetectionMethod = "VSCode URI Handler Installation",
+    Details = strcat("URI: ", extract("vscode://(.*)", 1, ProcessCommandLine))
+| project
+    TimeGenerated, DeviceName, AccountName, DetectionMethod, ActorProcessFileName = FileName, ActorProcessCommandLine = ProcessCommandLine, Details, ReportId, DeviceId;
+// Part 2: Detects VSCode extensions being installed from the command line.
+let vsix_install =
+DeviceProcessEvents
+| where TimeGenerated > ago(timeframe)
+| where FileName =~ "Code.exe" and ProcessCommandLine has "--install-extension" and ProcessCommandLine has ".vsix"
+| extend
+    DetectionMethod = "VSCode Extension CLI Installation",
+    Details = strcat("VSIX File: ", extract(@"--install-extension\s+""?([^""\s]+)""?", 1, ProcessCommandLine))
+| project
+    TimeGenerated, DeviceName, AccountName, DetectionMethod, ActorProcessFileName = FileName, ActorProcessCommandLine = ProcessCommandLine, Details, ReportId, DeviceId;
+// Part 3: Detects suspicious network connections from VSCode, potentially indicating C2 or data exfiltration.
+let known_ms_domains = dynamic(["marketplace.visualstudio.com", "vscode.blob.core.windows.net", "update.code.visualstudio.com", "gallerycdn.vsassets.io"]); // Placeholder for known-good domains
+let network_activity =
+DeviceNetworkEvents
+| where TimeGenerated > ago(timeframe)
+| where InitiatingProcessFileName =~ "Code.exe"
+| where isnotempty(RemoteUrl) and not(RemoteUrl has_any (known_ms_domains))
+// FP-Medium: Legitimate extensions may communicate with their own backends. This list may need to be expanded with trusted publisher domains.
+| extend
+    DetectionMethod = "Suspicious Outbound Connection from VSCode",
+    Details = strcat("Destination: ", RemoteUrl, ":", RemotePort)
+| project
+    TimeGenerated, DeviceName, AccountName = InitiatingProcessAccountName, DetectionMethod, ActorProcessFileName = InitiatingProcessFileName, ActorProcessCommandLine = InitiatingProcessCommandLine, Details, ReportId, DeviceId;
+// Part 4: Detects files being created in VSCode extension directories by any process.
+let file_writes =
+DeviceFileEvents
+| where TimeGenerated > ago(timeframe)
+| where FolderPath has ".vscode\\extensions\\" or FolderPath has "Microsoft VS Code\\resources\\app\\extensions\\"
+| where ActionType in ("FileCreated", "FileRenamed")
+// FP-Medium: This can be noisy during legitimate extension installs. Review the InitiatingProcessFileName for suspicious origins (e.g., browsers, office apps).
+| extend
+    DetectionMethod = "File Write to VSCode Extension Directory",
+    Details = strcat("File: ", FolderPath, FileName)
+| project
+    TimeGenerated, DeviceName, AccountName = InitiatingProcessAccountName, DetectionMethod, ActorProcessFileName = InitiatingProcessFileName, ActorProcessCommandLine = InitiatingProcessCommandLine, Details, ReportId, DeviceId;
+// Part 5: Detects VSCode loading a Node native addon (.node file) from a suspicious, non-standard path.
+let node_loads =
+DeviceImageLoadEvents
+| where TimeGenerated > ago(timeframe)
+| where InitiatingProcessFileName =~ "Code.exe"
+| where FileName endswith ".node"
+// Look for .node files loaded from temp or user profile locations outside of the normal VSCode extension paths.
+| where (FolderPath has @"\AppData\Local\" or FolderPath has @"\Temp\") and not(FolderPath has_any(".vscode\\extensions", "Microsoft VS Code\\"))
+| extend
+    DetectionMethod = "Suspicious Node Module Loaded by VSCode",
+    Details = strcat("Module: ", FolderPath, FileName)
+| project
+    TimeGenerated, DeviceName, AccountName = InitiatingProcessAccountName, DetectionMethod, ActorProcessFileName = InitiatingProcessFileName, ActorProcessCommandLine = InitiatingProcessCommandLine, Details, ReportId, DeviceId;
+// Combine all detection methods
+union uri_handler, vsix_install, network_activity, file_writes, node_loads

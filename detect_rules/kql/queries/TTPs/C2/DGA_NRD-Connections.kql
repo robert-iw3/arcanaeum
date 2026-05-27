@@ -1,0 +1,110 @@
+// name Connections to DGA or Newly Registered Domains
+// author RW
+// description
+//   This rule detects potential C2 activity by identifying outbound connections to domains that
+//   are either algorithmically generated (DGA) or have been recently registered (NRD). It uses
+//   heuristics like domain length, character ratios (vowels/consonants/digits) to spot DGA patterns,
+//   and joins with threat intelligence data to identify NRDs. Attackers use DGA and NRDs to quickly
+//   cycle through domains, evading static blocklists.
+// tags
+// - T1568.002
+// - T1071
+// severity Medium
+// false_positives
+// - Some legitimate services, particularly CDNs or domain parking services, may generate domain names that appear random.
+// - The NRD detection is highly dependent on the quality and timeliness of the threat intelligence feed. A domain might be new but benign.
+// - Heuristic-based DGA detection can misclassify non-standard but legitimate domain names.
+// - Tuning the 'DomainAllowList' and the DGA thresholds is recommended to fit your environment's traffic profile.
+// datasources
+// - DnsEvents
+// - ThreatIntelligenceIndicator
+//
+// Define an allowlist for domains that are known to be safe.
+// This is critical for reducing false positives from legitimate services.
+
+let DomainAllowList = dynamic([
+    "google.com", "microsoft.com", "apple.com", "windows.com", "live.com", "office.com",
+    "msftncsi.com", "windowsupdate.com", "g.doubleclick.net", "googlesyndication.com",
+    "amazonaws.com", "cloudfront.net", "akamai.net", "azure.com", "msedge.net"
+]);
+
+// Define thresholds for DGA heuristics. These may need tuning.
+let DgaLengthThreshold = 20; // Minimum length for a domain to be considered for DGA checks.
+let DgaDigitRatioThreshold = 0.3; // Ratio of digits to total length.
+let DgaVowelRatioLowThreshold = 0.2; // Low ratio of vowels to letters.
+let DgaVowelRatioHighThreshold = 0.6; // High ratio of vowels to letters.
+
+// CTE for DGA detection based on domain name characteristics.
+let DGA_Domains =
+    DnsEvents
+    | where TimeGenerated > ago(1d)
+    | where isnotempty(Name) and not(Name has_any (DomainAllowList))
+    | where Name !~ "localhost" and not(Name has_suffix "in-addr.arpa") and not(Name has_suffix "ip6.arpa")
+    // Extract the parent domain to reduce noise from legitimate subdomains.
+    | extend DomainParts = split(Name, '.')
+    | extend ParentDomain = iif(
+        array_length(DomainParts) > 2,
+        strcat_array(array_slice(DomainParts, array_length(DomainParts) - 2, array_length(DomainParts) - 1), '.'),
+        Name
+      )
+    | where not(ParentDomain has_any (DomainAllowList))
+    // Calculate DGA-like features.
+    | extend
+        NameLower = tolower(Name),
+        DomainLength = strlen(Name)
+    | extend
+        VowelCount = countof(NameLower, "[aeiou]"),
+        ConsonantCount = countof(NameLower, "[bcdfghjklmnpqrstvwxyz]"),
+        DigitCount = countof(NameLower, "[0-9]")
+    | extend
+        LetterCount = VowelCount + ConsonantCount,
+        DigitRatio = iif(DomainLength > 0, todouble(DigitCount) / DomainLength, 0.0),
+        VowelRatio = iif(LetterCount > 0, todouble(VowelCount) / LetterCount, 0.0)
+    // Core DGA detection logic based on heuristics.
+    | where
+        (DomainLength > DgaLengthThreshold and DigitRatio > DgaDigitRatioThreshold) or
+        (DomainLength > 15 and LetterCount > 5 and (VowelRatio < DgaVowelRatioLowThreshold or VowelRatio > DgaVowelRatioHighThreshold))
+    | summarize
+        StartTime = min(TimeGenerated),
+        EndTime = max(TimeGenerated),
+        EventCount = count()
+        by ClientIP, Name, ResultCode
+    | extend DetectionType = "DGA Heuristics";
+
+// CTE for NRD detection based on threat intelligence feeds.
+// This requires your TI feed to be populated with NRD indicators.
+let NRD_Domains =
+    ThreatIntelligenceIndicator
+    | where TimeGenerated > ago(1d)
+    | where Active == true and isnotempty(DomainName)
+    // Filter for indicators specifically tagged as NRD. Adjust tag as needed for your TI source.
+    | where Tags has "newly_registered_domain" or Description has "newly registered domain"
+    | join kind=inner (
+        DnsEvents
+        | where TimeGenerated > ago(1d)
+        | where isnotempty(Name)
+    ) on $left.DomainName == $right.Name
+    | summarize
+        StartTime = min(TimeGenerated),
+        EndTime = max(TimeGenerated),
+        EventCount = count()
+        by ClientIP, Name = DomainName, ResultCode
+    | extend DetectionType = "Newly Registered Domain";
+
+// Combine results from both detection methods.
+union DGA_Domains, NRD_Domains
+| summarize
+    StartTime = min(StartTime),
+    EndTime = max(EndTime),
+    TotalEvents = sum(EventCount),
+    make_set(DetectionType),
+    make_set(ResultCode)
+    by ClientIP, SuspiciousDomain = Name
+| project-reorder
+    StartTime,
+    EndTime,
+    ClientIP,
+    SuspiciousDomain,
+    DetectionType_set,
+    TotalEvents,
+    ResultCode_set

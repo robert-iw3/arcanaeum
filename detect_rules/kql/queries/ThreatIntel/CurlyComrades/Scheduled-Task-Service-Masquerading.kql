@@ -1,0 +1,60 @@
+// Name: Curly COMrades Masquerading Scheduled Task or Service
+// Author: RW
+// Date: 2025-08-13
+// Description: Detects the creation of a scheduled task or service with a name mimicking a legitimate process, but where the associated
+//              binary path is in an unusual location, such as C:\ProgramData\. This is a TTP used by the Curly COMrades group for persistence.
+// False Positives: Medium. Some legitimate software installers or updaters might create services or tasks that run from C:\ProgramData\.
+// Review the executable and its publisher. Consider adding specific legitimate processes or paths to an exclusion list.
+// MITRE ATT&CK: T1053, T1543
+
+let suspiciousTaskNames = dynamic([
+    @"\Microsoft\Windows\UpdateOrchestrator\Check_AC",
+    @"\Microsoft\Windows\DeviceDirectoryClient\RegisterDeviceProtectionUSB",
+    @"\Microsoft\Windows\DeviceDirectoryClient\RegisterDeviceToolsUSB",
+    @"\Microsoft\Java\JavaUpdate",
+    @"\microsoft\windows\devicedirectoryclient\registerdevicesusb",
+    @"\mozilla\browser.visualupdate"
+]);
+let suspiciousServiceNames = dynamic([
+    "MsEdgeSvc",
+    "JavaSvc",
+    "OracleJavaSvc"
+]);
+// Define unusual paths used by the actor for persistence
+let suspiciousPaths = dynamic([
+    @"c:\programdata\",
+    @"c:\program files (x86)\google\"
+]);
+(
+    // Look for scheduled task creation events via schtasks.exe
+    DeviceProcessEvents
+    | where ProcessVersionInfoOriginalFileName =~ "schtasks.exe" and ProcessCommandLine has "/create"
+    // Check if the task name is one of the known suspicious names used by the actor
+    | where ProcessCommandLine has_any (suspiciousTaskNames)
+    // Extract the path of the executable that the task will run
+    | extend TaskCommand = extract(@"(?i)\s/tr\s+([^\s>]+|\""[^\""]+\"")", 1, ProcessCommandLine)
+    | extend TaskCommand = trim('"', TaskCommand)
+    | where isnotempty(TaskCommand)
+    // Check if the executable path is in a suspicious location
+    // FP Note: Legitimate installers may place binaries here. Tuning may be required to exclude known good software.
+    | where TaskCommand has_any (suspiciousPaths)
+    | extend Tactic = "Persistence", Technique = "T1053", Activity = "Suspicious Scheduled Task Creation", SuspiciousEntity = TaskCommand
+    | project-reorder TimeGenerated, DeviceName, Tactic, Technique, Activity, SuspiciousEntity, ProcessCommandLine, InitiatingProcessCommandLine
+)
+| union
+(
+    // Look for service creation events via sc.exe
+    DeviceProcessEvents
+    | where ProcessVersionInfoOriginalFileName =~ "sc.exe" and ProcessCommandLine has "create"
+    // Check if the service name is one of the known suspicious names
+    | where ProcessCommandLine has_any (suspiciousServiceNames)
+    // Extract the binary path for the service
+    | extend BinPath = extract(@"(?i)binpath=\s*([^\s]+|\""[^\""]+\"")", 1, ProcessCommandLine)
+    | extend BinPath = trim('"', BinPath)
+    | where isnotempty(BinPath)
+    // Check if the binary path is in a suspicious location
+    // FP Note: Legitimate installers may place binaries here. Tuning may be required to exclude known good software.
+    | where BinPath has_any (suspiciousPaths)
+    | extend Tactic = "Persistence", Technique = "T1543", Activity = "Suspicious Service Creation", SuspiciousEntity = BinPath
+    | project-reorder TimeGenerated, DeviceName, Tactic, Technique, Activity, SuspiciousEntity, ProcessCommandLine, InitiatingProcessCommandLine
+)

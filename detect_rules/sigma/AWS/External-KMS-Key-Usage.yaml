@@ -1,0 +1,31 @@
+title: AWS S3 Object Encrypted With External KMS Key
+id: 5431a66a-0422-4f88-b7e7-b1f416f212bc
+status: experimental
+description: >-
+  Detects when an object is uploaded to an S3 bucket and encrypted with an AWS KMS key that belongs to a different AWS account.
+  This could be an indicator of an S3 ransomware attack, where an attacker uses a KMS key from an account they control to encrypt objects in the victim's S3 bucket, rendering the data inaccessible to the bucket owner.
+references:
+  - https://rhinosecuritylabs.com/aws/s3-ransomware-part-1-attack-vector/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.impact
+  - attack.t1486
+logsource:
+  product: aws
+  service: s3
+detection:
+  # Detects a PutObject API call that specifies a KMS key for server-side encryption
+  selection:
+    eventName: 'PutObject'
+    requestParameters.x-amz-server-side-encryption-aws-kms-key-id|exists: true
+  # Filter out events where the KMS key belongs to the local/trusted AWS account(s)
+  filter:
+    requestParameters.x-amz-server-side-encryption-aws-kms-key-id|startswith:
+      - 'arn:aws:kms:*:YOUR_AWS_ACCOUNT_ID_HERE:'
+      # - 'arn:aws:kms:*:ANOTHER_TRUSTED_ACCOUNT_ID:'
+  condition: selection and not filter
+falsepositives:
+  - Legitimate cross-account data sharing workflows where objects are encrypted with a KMS key from a trusted partner or a central security account.
+  - To reduce false positives, add all trusted AWS account IDs to the 'filter' selection.
+level: high

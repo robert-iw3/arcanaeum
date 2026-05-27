@@ -1,0 +1,43 @@
+// Name: SLE Session Hijacking or Replay Detected
+// Author: RW
+// Date: 2025-08-19
+// Description: Detects when a single Space Link Extension (SLE) provider asset receives successful BIND requests from
+// multiple source IPs within a short time frame. This pattern can indicate a session hijacking attack, where an adversary
+// uses captured credentials to establish a new session after forcing the legitimate user to disconnect, as described in the provided intelligence.
+// Tactic: Initial Access, Defense Evasion
+// Technique: T1190 (Exploit Public-Facing Application), T1557 (Adversary-in-the-Middle)
+// False Positive Sensitivity: Medium. This activity could be legitimate in environments with client-side load balancing, high-availability
+// failover configurations, or where multiple operators connect from different workstations. Investigation should correlate this activity with
+// other alerts, such as authentication failures from an expected source IP. Tune by adjusting the time window or allowlisting known IP ranges
+// for specific providers.
+
+// IMPORTANT: This query requires a data source with Deep Packet Inspection (DPI) capabilities (e.g., Zeek, Corelight).
+// You must replace 'NetworkTrafficPayloads' with your table name. The table must contain the network payload as a hex string in a field named 'Payload'.
+let DpiLogs = view () {
+    NetworkTrafficPayloads // Replace with your table
+};
+
+// Define the time window for detecting multiple distinct sources.
+let time_window = 5m;
+
+DpiLogs
+| where TimeGenerated > ago(time_window)
+// The 'bf64' hex sequence is the ASN.1 signature for a CLTU-BIND message, as identified in the intelligence.
+| where isnotempty(Payload) and Payload has "bf64"
+// To increase fidelity, filter for traffic targeting critical SLE Providers (e.g., Ground Stations).
+// Example: | where DestinationIp in (critical_sle_providers_watchlist)
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    DistinctSourceIpCount = dcount(SourceIP),
+    SourceIpList = make_set(SourceIP)
+  by DestinationIP, bin(TimeGenerated, time_window)
+// The core logic: alert if more than one source IP successfully binds to the same provider in the time window.
+| where DistinctSourceIpCount > 1
+| project
+    StartTime,
+    EndTime,
+    SleProviderIP = DestinationIP,
+    DistinctSourceIpCount,
+    SourceIpList
+| order by StartTime desc

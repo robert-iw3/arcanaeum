@@ -1,0 +1,54 @@
+rule rabbitmq_server_anomalies {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects suspicious activity related to RabbitMQ servers, which are often used for critical data transfer in satellite ground systems as seen in the Moonlight Defender exercise. The rule looks for connections from non-standard processes (e.g., shells, script interpreters) or from external IP addresses to the management interface. This could indicate reconnaissance, lateral movement, or data exfiltration attempts."
+    false_positives = "Legitimate administrative scripts or monitoring tools might cause false positives. Connections to the management UI from authorized external IPs (e.g., cloud management services, partner networks) should be whitelisted."
+    reference = "https://www.rabbitmq.com/networking.html"
+    tactic = "TA0011, TA0010, TA0007"
+    technique = "T1071.001, T1041, T1567"
+    tags = "SATELLITE, GROUND_SYSTEM, RABBITMQ, MOONLIGHT_DEFENDER, T1071.001, T1041, T1567"
+
+  events:
+    // Condition 1: A suspicious process connects to any RabbitMQ port.
+    $suspicious_proc.metadata.event_type = "NETWORK_CONNECTION"
+    $suspicious_proc.principal.ip = $source_ip
+    $suspicious_proc.target.ip = $target_ip
+    $suspicious_proc.target.port in (5672, 5671, 15672, 15671, 4369, 25672)
+    // FP Tuning: This regex can be tuned to exclude legitimate admin scripts.
+    re.regex($suspicious_proc.principal.process.file.name, `(?i)(powershell|pwsh|cmd|rundll32|cscript|wscript|bash|sh|zsh|python\d*|perl|ncat|netcat|nc)(\.exe)?$`)
+
+    // Condition 2: An external IP connects to the RabbitMQ management UI.
+    $external_conn.metadata.event_type = "NETWORK_CONNECTION"
+    $external_conn.principal.ip = $source_ip
+    $external_conn.target.ip = $target_ip
+    $external_conn.target.port in (15672, 15671)
+    // Filter for non-private, non-loopback source IPs.
+    // FP Tuning: Add any authorized external IP ranges to this exclusion list.
+    not (
+      net.ip_in_range_cidr($external_conn.principal.ip, "10.0.0.0/8") or
+      net.ip_in_range_cidr($external_conn.principal.ip, "172.16.0.0/12") or
+      net.ip_in_range_cidr($external_conn.principal.ip, "192.168.0.0/16") or
+      net.ip_in_range_cidr($external_conn.principal.ip, "127.0.0.0/8")
+    )
+
+  match:
+    // Group related activity from the same source to the same target over 30 minutes.
+    $source_ip, $target_ip over 30m
+
+  outcome:
+    // A medium risk score is assigned, which should be raised if occurring on a critical asset.
+    $risk_score = 65
+    $principal_ip = array_distinct($source_ip)
+    $target_ip = array_distinct($target_ip)
+    $target_ports = array_distinct($suspicious_proc.target.port) + array_distinct($external_conn.target.port)
+    $initiating_process_names = array_distinct($suspicious_proc.principal.process.file.name)
+    $initiating_process_command_lines = array_distinct($suspicious_proc.principal.process.command_line)
+    $user_display_names = array_distinct($suspicious_proc.principal.user.user_display_name) + array_distinct($external_conn.principal.user.user_display_name)
+    $event_count = count_distinct($suspicious_proc.metadata.id) + count_distinct($external_conn.metadata.id)
+    $suspicious_process_connection_count = count_distinct($suspicious_proc.metadata.id)
+    $external_management_connection_count = count_distinct($external_conn.metadata.id)
+
+  condition:
+    $suspicious_proc or $external_conn
+}

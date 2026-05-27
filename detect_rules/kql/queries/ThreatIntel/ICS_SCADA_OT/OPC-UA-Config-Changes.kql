@@ -1,0 +1,79 @@
+// Name: OPC UA Server Configuration Modified
+// Author: RW
+// Date: 2025-08-14
+// Description: Detects modifications to OPC UA server configuration files or registry keys.
+// Unauthorized changes to these settings, such as enabling insecure protocols, altering endpoint
+// descriptions, or changing transport settings, can weaken security and may indicate an attacker
+// attempting to facilitate further attacks.
+// References: https://www.cisa.gov/news-events/ics-advisories/icsa-25-072-09
+// MITRE TTPs: T1566.001
+
+// Define the time window for the search.
+let lookback = 1d;
+
+// --- CUSTOMIZATION REQUIRED ---
+// Add the full paths to your OPC UA server configuration files and registry keys to this list.
+// The examples below are placeholders and must be adapted for your specific environment.
+let OpcUaConfigPaths = dynamic([
+    // File path examples
+    "C:\\ProgramData\\Kepware\\KEPServerEX\\V6\\config.json",
+    "C:\\Program Files\\Inductive Automation\\Ignition\\data\\opcua\\server\\settings.xml",
+    "/etc/open62541/server_config.xml",
+    // Registry key examples (use double backslashes for paths in SecurityEvent)
+    "\\REGISTRY\\MACHINE\\SOFTWARE\\Kepware\\KEPServerEX\\V6",
+    "\\REGISTRY\\MACHINE\\SOFTWARE\\Prosys\\OPC UA Simulation Server"
+]);
+
+// This rule uses multiple data sources for comprehensive coverage.
+
+// Option 1: Azure Change Tracking & Inventory (FIM)
+let FimChanges = ConfigurationChange
+| where TimeGenerated > ago(lookback)
+| where ConfigType in ("Files", "Registry")
+| extend HostName = tostring(split(Computer, ".")[0])
+| where FileSystemPath in (OpcUaConfigPaths) or RegistryKey in (OpcUaConfigPaths)
+| project
+    TimeGenerated,
+    Activity = "ConfigurationChange",
+    HostName,
+    Entity = coalesce(FileSystemPath, RegistryKey),
+    ChangedBy = coalesce(tostring(Properties.ModifiedBy), "N/A"),
+    Description = "FIM detected a change to a sensitive OPC UA configuration."
+;
+
+// Option 2: Windows Security Events (File and Registry Auditing)
+// Note: This requires that auditing is enabled on the target files/registry keys.
+let AuditChanges = SecurityEvent
+| where TimeGenerated > ago(lookback)
+// EventID 4657: A registry value was modified. EventID 4663: An attempt was made to access an object (for files).
+| where EventID in (4657, 4663)
+| where ObjectName has_any (OpcUaConfigPaths)
+| extend
+    Activity = case(
+        EventID == 4657, "Registry Modified",
+        EventID == 4663, "File Accessed",
+        "Audit Event"
+    ),
+    ChangedBy = Account
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    ChangedBySet = make_set(ChangedBy)
+    by Activity, HostName = Computer, Entity = ObjectName
+| project
+    TimeGenerated = StartTime,
+    Activity,
+    HostName,
+    Entity,
+    ChangedBy = tostring(ChangedBySet),
+    Description = "Windows Auditing detected access/modification of a sensitive OPC UA configuration."
+;
+
+// Combine results from all sources
+union FimChanges, AuditChanges
+// FP Tuning: Exclude changes made by known administrators or automated deployment accounts.
+// This is a critical step to reduce noise from legitimate administrative activity.
+// For example: | where ChangedBy !~ 'SYSTEM' and ChangedBy !in ('CONTOSO\\AdminSvc', 'SCCM_Admin')
+| extend
+    timestamp = TimeGenerated,
+    IPAddress = "N/A" // IP is not typically available in these logs

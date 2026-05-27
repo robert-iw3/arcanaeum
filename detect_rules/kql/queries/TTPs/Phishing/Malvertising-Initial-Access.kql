@@ -1,0 +1,26 @@
+// Name: Malvertising Leading to Microsoft Services
+// Author: RW
+// Date: 2025-08-20
+// Mitre TTPs: T1566.001
+// Description: Detects users being directed to Microsoft Office domains from a Google ad click.
+// This can be a precursor to an ADFS phishing redirect, where attackers use malvertising to lend legitimacy to their initial link.
+
+// This rule looks for network events from sources like MDE (DeviceNetworkEvents) or web proxies (CommonSecurityLog).
+// Adjust table and field names for your environment.
+DeviceNetworkEvents
+// Filter for traffic originating from a Google search/ad click.
+| where ReferrerUrl has "google.com"
+// The destination URL should be a Microsoft Office domain.
+| where RemoteUrl has "office.com"
+// The destination URL must contain common Google ad tracking parameters.
+// This indicates the click was on a paid ad, not an organic search result.
+| where RemoteUrl has "gclid=" or RemoteUrl has "gclsrc="
+// This detection can be noisy as legitimate ad campaigns may direct users to office.com.
+// It is best used as a low-severity alert or correlated with subsequent suspicious activity,
+// such as a redirect to an untrusted ADFS server (see ADFS Phishing Redirect rule).
+| project
+    TimeGenerated,
+    DeviceName,
+    InitiatingProcessAccountName,
+    RemoteUrl,
+    ReferrerUrl

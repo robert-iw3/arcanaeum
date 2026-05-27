@@ -1,0 +1,56 @@
+rule ot_network_baseline_deviation_unexpected_protocol {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects potentially unauthorized or unexpected network protocols (e.g., RDP, SSH, FTP, SMB) used for communication between two devices within a defined OT network segment. Standard OT protocols are expected, so the use of common IT administrative or file transfer protocols can indicate lateral movement, unauthorized remote access, or data exfiltration attempts, representing a deviation from the normal operational baseline."
+    reference = "https://isc.sans.edu/diary/lt+appears+that+the+number+of+industrial+devices+accessible+from+the+internet+has+risen+by+30+thousand+over+the+past+three+years/30860"
+    tactic = "TA0008, TA0011"
+    technique = "T1219, T1021.001, T1071"
+    tags = "OT, ICS, BASELINE_DEVIATION, ANOMALY, LATERAL_MOVEMENT"
+    false_positives = "Legitimate administrative access (e.g., SSH/RDP for maintenance by engineers)., Authorized file transfers for device updates or log collection (e.g., FTP/SMB)., Misconfiguration of the OT network IP ranges defined in the rule."
+
+  events:
+    // Match network connections.
+    $conn.metadata.event_type = "NETWORK_CONNECTION"
+
+    // *IMPORTANT*: Define your OT network ranges here.
+    // This rule triggers on traffic where BOTH source and destination are inside these ranges.
+    net.ip_in_range_cidr($conn.principal.ip, [
+      "172.16.0.0/12",   // Placeholder for OT/ICS network
+      "10.100.0.0/16"    // Placeholder for OT/ICS network
+    ])
+    net.ip_in_range_cidr($conn.target.ip, [
+      "172.16.0.0/12",   // Placeholder for OT/ICS network
+      "10.100.0.0/16"    // Placeholder for OT/ICS network
+    ])
+
+    // Detect common IT/administrative protocols that are often anomalous in an OT context.
+    // This list can be tuned based on what is considered "normal" for your environment.
+    $conn.target.port in (
+      21,   // FTP
+      22,   // SSH
+      23,   // Telnet
+      135,  // RPC
+      139,  // NetBIOS
+      445,  // SMB
+      3389, // RDP
+      5900  // VNC
+    )
+
+    // Optional: Exclude known-good communication pairs to reduce noise.
+    // For example, if a specific engineering workstation is allowed to RDP to a specific HMI.
+    // not ($conn.principal.ip = "172.16.10.5" and $conn.target.ip = "172.16.20.100" and $conn.target.port = 3389)
+
+  outcome:
+    // Risk score is medium, as this could be authorized administrative activity.
+    $risk_score = 55
+    $principal_ip = array_distinct($conn.principal.ip)
+    $principal_hostname = array_distinct($conn.principal.hostname)
+    $target_ip = array_distinct($conn.target.ip)
+    $target_hostname = array_distinct($conn.target.hostname)
+    $target_port = array_distinct($conn.target.port)
+    $network_protocol = array_distinct($conn.network.ip_protocol)
+
+  condition:
+    $conn
+}

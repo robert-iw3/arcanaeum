@@ -1,0 +1,72 @@
+// title: Unauthorized Certificate Template Modification
+// description: |
+// Detects modifications to sensitive attributes of Active Directory Certificate Template objects.
+// Attackers may modify certificate templates to introduce vulnerabilities that can be exploited for
+// privilege escalation or persistence. This technique is associated with tools like Certify 2.0,
+// which can automate the discovery and modification of these templates (e.g., ESC4 attacks).
+// This rule monitors for changes to critical template attributes such as security descriptors, enrollment flags, and key usage settings.
+// author: RW
+// date: 2025-08-11
+// level: Medium
+// tags:
+//   - attack.privilege_escalation
+//   - attack.persistence
+//   - attack.t1556
+
+let timeframe = 1d;
+// Define a list of sensitive certificate template attributes. Modifications to these can introduce vulnerabilities.
+let suspicious_attributes = dynamic([
+    "nTSecurityDescriptor", // Permissions change, indicative of ESC4.
+    "msPKI-Certificate-Name-Flag", // Flags controlling subject name, modification can lead to ESC1.
+    "msPKI-Enrollment-Flag", // Flags controlling enrollment, like removing manager approval.
+    "pKIExtendedKeyUsage", // Defines what the certificate can be used for, adding privileged EKUs is indicative of ESC3.
+    "msPKI-RA-Signature", // Number of required signatures for enrollment agent requests, setting to 0 is indicative of ESC2.
+    "msPKI-Certificate-Application-Policy" // Application policies (EKUs).
+]);
+// Whitelist for legitimate administrators or service accounts that manage PKI infrastructure.
+// Add account names (e.g., "pki_admin") or group SIDs to this list to reduce false positives.
+let pki_admin_exclusions = dynamic([]);
+SecurityEvent
+| where TimeGenerated > ago(timeframe)
+| where EventID == 5136 // A directory service object was modified. This event is logged on Domain Controllers.
+| extend EventDataXml = parse_xml(EventData)
+| extend
+    ObjectClass = tostring(EventDataXml.EventData.Data[4]),
+    ObjectDN = tostring(EventDataXml.EventData.Data[5]),
+    AttributeLDAPDisplayName = tostring(EventDataXml.EventData.Data[7]),
+    SubjectUserSid = tostring(EventDataXml.EventData.Data[0]),
+    SubjectAccountName = tostring(EventDataXml.EventData.Data[1]),
+    SubjectDomainName = tostring(EventDataXml.EventData.Data[2])
+| where ObjectClass == "pKICertificateTemplate" // Filter for modifications to Certificate Template objects.
+| where AttributeLDAPDisplayName in (suspicious_attributes)
+// Potential for False Positives: Legitimate administrative changes to certificate templates will trigger this alert.
+// Tune the 'pki_admin_exclusions' list to filter out noise from authorized changes.
+| where not(SubjectAccountName in (pki_admin_exclusions) or SubjectUserSid in (pki_admin_exclusions))
+| extend TemplateName = extract("CN=([^,]+)", 1, ObjectDN)
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    ModifiedAttributes = make_set(AttributeLDAPDisplayName),
+    ActivityCount = count()
+    by
+    TemplateName,
+    ObjectDN,
+    SubjectAccountName,
+    SubjectUserSid,
+    SubjectDomainName,
+    Computer
+| extend
+    AccountName = SubjectAccountName,
+    AccountDomain = SubjectDomainName,
+    AccountSid = SubjectUserSid
+| project-reorder
+    StartTime,
+    EndTime,
+    AccountName,
+    AccountDomain,
+    AccountSid,
+    TemplateName,
+    ModifiedAttributes,
+    ActivityCount,
+    Computer,
+    ObjectDN

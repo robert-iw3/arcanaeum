@@ -1,0 +1,52 @@
+title: Ransomware Activity Indicators on IT/OT Systems
+status: experimental
+description: >-
+  Detects the execution of commands commonly used by ransomware to inhibit system recovery before the encryption phase.
+  This includes deleting volume shadow copies, disabling boot recovery options, and clearing event logs.
+  Such activities are strong indicators of a ransomware infection in progress and are critical to detect in both IT and OT
+  environments, such as those found in the maritime industry, to prevent widespread impact.
+references:
+  - https://attack.mitre.org/techniques/T1490/
+  - https://attack.mitre.org/techniques/T1070/001/
+author: RW
+date: 2025-08-18
+tags:
+  - attack.impact
+  - attack.t1490
+  - attack.t1070.001
+  - industry.ics
+  - industry.maritime
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  # Ransomware often deletes volume shadow copies to prevent restoration.
+  selection_vssadmin:
+    Image|endswith: '\vssadmin.exe'
+    CommandLine|contains|all:
+      - 'delete'
+      - 'shadows'
+  # WMIC is another tool used for deleting shadow copies.
+  selection_wmic:
+    Image|endswith: '\wmic.exe'
+    CommandLine|contains|all:
+      - 'shadowcopy'
+      - 'delete'
+  # Disabling recovery features hinders automated system repair.
+  selection_bcdedit:
+    Image|endswith: '\bcdedit.exe'
+    CommandLine|contains|all:
+      - '/set'
+      - 'recoveryenabled'
+      - 'no'
+  # Clearing event logs is a common technique to hide malicious activity.
+  selection_wevtutil:
+    Image|endswith: '\wevtutil.exe'
+    CommandLine|contains:
+      - 'cl' # 'cl' is an alias for 'clear-log'
+      - 'clear-log'
+  condition: 1 of them
+falsepositives:
+  - Legitimate administrative scripts, although clearing shadow copies or disabling recovery outside of a controlled maintenance window is highly unusual.
+  - Some backup or system management software might perform these actions, but should be validated.
+level: high

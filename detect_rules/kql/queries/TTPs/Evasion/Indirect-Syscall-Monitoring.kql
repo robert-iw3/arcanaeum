@@ -1,0 +1,40 @@
+// Name: Process with Executable Memory Allocation and Subsequent Network Activity
+// Author: RW
+// Date: 2025-08-02
+// Description: Detects processes that allocate executable memory and shortly after initiate network communications. This pattern can be indicative of shellcode execution, which may use advanced evasion techniques like indirect syscalls to bypass EDR hooks. The detection focuses on the precursor activities required to stage and execute the malicious code.
+// False Positive Sensitivity: Medium. Benign applications like JIT compilers, software updaters, or some games might exhibit this behavior. Tuning is required.
+
+let timeWindow = 5m;
+// Step 1: Identify processes allocating executable memory.
+// This is a key precursor for running custom shellcode from a non-standard memory region.
+let ExecutableMemAllocations = DeviceEvents
+    | where Timestamp > ago(1d)
+    | where ActionType == "AllocateVirtualMemory"
+    // Filtering for Read-Write-Execute or Read-Execute permissions, which are common for shellcode.
+    | where isnotempty(AdditionalFields) and (AdditionalFields has "PAGE_EXECUTE_READWRITE" or AdditionalFields has "PAGE_EXECUTE_READ")
+    | project AllocationTime = Timestamp, DeviceId, ProcessId = TargetProcessId, InitiatingProcessFolderPath, InitiatingProcessFileName;
+// Step 2: Identify network connections from any process.
+let NetworkConnections = DeviceNetworkEvents
+    | where Timestamp > ago(1d)
+    | where isnotempty(RemoteUrl) or isnotempty(RemoteIP)
+    | project ConnectionTime = Timestamp, DeviceId, ProcessId = InitiatingProcessId, RemoteUrl, RemoteIP, InitiatingProcessFileName, InitiatingProcessFolderPath;
+// Step 3: Correlate these two behaviors occurring within the defined time window for the same process.
+ExecutableMemAllocations
+| join kind=inner (
+    NetworkConnections
+) on DeviceId, ProcessId, InitiatingProcessFileName, InitiatingProcessFolderPath
+| where ConnectionTime between (AllocationTime .. (AllocationTime + timeWindow))
+// Step 4: Filter out common benign processes and paths to reduce noise.
+// This exclusion list is a starting point. It should be customized for your environment.
+// Consider adding legitimate software that performs JIT compilation or self-updating.
+| where not(InitiatingProcessFileName in~ ('chrome.exe', 'firefox.exe', 'msedge.exe', 'javaw.exe', 'csc.exe', 'svchost.exe', 'powershell.exe', 'pwsh.exe', 'teams.exe', 'outlook.exe', 'onedrive.exe', 'gamingservices.exe'))
+// Filtering based on path can also help reduce noise from legitimate updaters or system processes.
+| where not(InitiatingProcessFolderPath has_any (@'C:\Windows\System32', @'C:\Program Files', @'C:\Program Files (x86)'))
+// Step 5: Aggregate results for alerting to create one alert per process instance.
+| summarize
+    StartTime = min(AllocationTime),
+    EndTime = max(ConnectionTime),
+    RemoteUrls = make_set(RemoteUrl, 10),
+    RemoteIPs = make_set(RemoteIP, 10)
+    by DeviceId, ProcessId, InitiatingProcessFileName, InitiatingProcessFolderPath
+| project-reorder StartTime, EndTime, DeviceId, InitiatingProcessFileName, InitiatingProcessFolderPath, ProcessId, RemoteUrls, RemoteIPs

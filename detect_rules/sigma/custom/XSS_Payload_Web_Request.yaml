@@ -1,0 +1,46 @@
+title: Potential XSS Payload in Web Request
+id: 6839816f-9490-4cc4-9466-ed003998f1a0
+status: experimental
+description: Detects web requests that contain common Cross-Site Scripting (XSS) keywords and patterns in the URL query or request body. This activity is indicative of an attempt to exploit an XSS vulnerability, which could be leveraged for session riding, data exfiltration, or full account takeover.
+author: RW
+date: 2025-08-06
+tags:
+  - attack.initial_access
+  - attack.t1190
+logsource:
+  category: webserver
+detection:
+    # This list contains common keywords and functions used in XSS payloads.
+  keywords:
+    - '<script'
+    - '</script>'
+    - '"><script'
+    - 'javascript:'
+    - 'onload='
+    - 'onerror='
+    - 'onmouseover='
+    - 'onclick='
+    - 'alert('
+    - 'prompt('
+    - 'eval('
+    - 'fetch('
+    - 'btoa('
+    - 'document.cookie'
+    - 'document.write('
+    - 'String.fromCharCode('
+    - 'addEventListener('
+    - 'appendChild('
+    - "createElement('script')"
+    - 'FormData('
+    # The detection looks for these keywords in either the URL query or the request body.
+    # Field names like 'c-uri-query' and 'http_request_body' may need to be adjusted for your specific log source.
+  selection_url:
+    c-uri-query|contains: keywords
+  selection_body:
+    http_request_body|contains: keywords
+  condition: 1 of them
+falsepositives:
+  - Security scanners (e.g., Nessus, Qualys, Burp Suite) will frequently trigger this rule. It is recommended to filter by source IP or User-Agent for known scanners.
+  - Legitimate web applications may use some of these strings in parameters, although it is uncommon for full script tags or event handlers.
+  - Developers performing testing or debugging activities.
+level: medium

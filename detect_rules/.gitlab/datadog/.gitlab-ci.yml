@@ -1,0 +1,48 @@
+stages:
+  - test-and-import
+
+datadog_test_and_import:
+  stage: test-and-import
+  image: python:3.12
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "release"'
+      changes:
+        - datadog/rules/*
+      when: always
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}-pip
+    paths:
+      - .cache/pip
+  variables:
+    PIP_CACHE_DIR: .cache/pip
+  environment:
+    name: production
+  script:
+    - set -e
+    - cd datadog
+    - pip install --upgrade pip
+    - pip install pyyaml>=6.0.2 datadog-api-client>=2.25.0 urllib3>=2.2.3 jsonschema>=4.23.0 coverage>=7.6.1
+    - export PYTHONPATH=.
+    - coverage run --source=. --omit="*/test_*.py" test_datadog_rule_conversion.py
+    - coverage json -o coverage.json
+    - coverage report
+    - echo "## Test Metrics Summary" >> test_summary.md
+    - if [ -f test_metrics.json ]; then cat test_metrics.json >> test_summary.md; else echo "No test metrics generated" >> test_summary.md; fi
+    - echo "## Coverage Report" >> test_summary.md
+    - if [ -f coverage.json ]; then jq . coverage.json >> test_summary.md; else echo "No coverage report generated" >> test_summary.md; fi
+    - DD_API_KEY=$DD_API_KEY DD_APP_KEY=$DD_APP_KEY DD_DRY_RUN=true python datadog_rule_converter.py
+    - DD_API_KEY=$DD_API_KEY DD_APP_KEY=$DD_APP_KEY DD_DRY_RUN=false python datadog_rule_converter.py
+    - curl -X POST -H "Authorization: Bearer $SLACK_BOT_TOKEN" -H "Content-type: application/json" --data "{\"channel\":\"security-alerts\",\"text\":\"Datadog Rule Import Pipeline completed successfully. Check GitLab CI for conversion_summary.json, import_summary.json, test_metrics.json, conversion_metrics.json, and coverage.json.\"}" https://slack.com/api/chat.postMessage || true
+  artifacts:
+    paths:
+      - datadog/signal_correlation_rules/*.json
+      - datadog/conversion_summary.json
+      - datadog/import_summary.json
+      - datadog/test_metrics.json
+      - datadog/conversion_metrics.json
+      - datadog/coverage.json
+      - datadog/test_summary.md
+    expire_in: 7 days
+    when: always
+  after_script:
+    - if [ $CI_JOB_STATUS != "success" ]; then curl -X POST -H "Authorization: Bearer $SLACK_BOT_TOKEN" -H "Content-type: application/json" --data "{\"channel\":\"security-alerts\",\"text\":\"Datadog Rule Import Pipeline failed. Check GitLab CI for details, test_metrics.json, and coverage.json.\"}" https://slack.com/api/chat.postMessage; fi

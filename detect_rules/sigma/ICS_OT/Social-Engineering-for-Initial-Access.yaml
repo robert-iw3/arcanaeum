@@ -1,0 +1,54 @@
+title: Suspicious Process Spawned by User-Facing Application
+status: experimental
+description: >-
+  Detects when a common user-facing application (e.g., email client, web browser, office suite) spawns a suspicious child
+  process like a command shell or scripting engine. This behavior is a strong indicator of a successful social engineering
+  or phishing attempt (MITRE ATT&CK T1566), where a user has been tricked into opening a malicious link or document, leading to initial access.
+references:
+  - https://attack.mitre.org/techniques/T1566/
+  - https://attack.mitre.org/techniques/T1204/002/
+author: RW
+date: 2025-08-18
+tags:
+  - attack.initial_access
+  - attack.t1566
+  - attack.t1204.002
+  - industry.maritime
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  # Parent processes are common user-facing applications often targeted in phishing campaigns
+  selection_parent:
+    ParentImage|endswith:
+      - '\outlook.exe'
+      - '\winword.exe'
+      - '\excel.exe'
+      - '\powerpnt.exe'
+      - '\acrord32.exe'
+      - '\acrordr32.exe'
+      - '\chrome.exe'
+      - '\msedge.exe'
+      - '\firefox.exe'
+      - '\iexplore.exe'
+  # Child processes are common shells or scripting engines used for initial payloads
+  selection_child:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+      - '\cmd.exe'
+      - '\wscript.exe'
+      - '\cscript.exe'
+      - '\mshta.exe'
+      - '\rundll32.exe'
+  # Filter out common benign behavior where browsers/email clients use rundll32 to open URLs
+  filter_main_rundll32_url:
+    Image|endswith: '\rundll32.exe'
+    CommandLine|contains: 'url.dll,FileProtocolHandler'
+  condition: selection_parent and selection_child and not filter_main_rundll32_url
+falsepositives:
+  - Legitimate software installers or updaters launched from a web browser.
+  - Legitimate macros or add-ins in office applications that spawn shell commands.
+  - Custom "open with" actions configured by a user.
+  - It may be necessary to tune this rule by adding more filters for known benign parent-child process relationships or command lines specific to your environment.
+level: high

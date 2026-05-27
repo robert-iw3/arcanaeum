@@ -1,0 +1,37 @@
+title: AWS Lambda Layer Attached or Modified
+id: 778fe37a-0fd4-4113-a379-cbb4a0d57ab7
+status: experimental
+description: >-
+  Detects when a Lambda layer is attached to a function or its configuration is modified.
+  Attackers can use malicious Lambda layers to inject code and establish persistence, as seen with tools like AWSDoor.
+  This technique allows them to hide malicious payloads in shared dependencies, which may be overlooked during code reviews.
+author: RW
+date: 2025-09-21
+tags:
+  - attack.persistence
+  - attack.t1574.013
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    # Detects the modification of a Lambda function's configuration
+    eventName: 'UpdateFunctionConfiguration'
+    eventSource: 'lambda.amazonaws.com'
+    # Ensure the API call was successful
+    errorCode:
+    # This field is present when layers are added, removed, or reordered for the function.
+    # The '*' wildcard checks for the existence of the 'layers' key.
+    requestParameters.layers: '*'
+  condition: selection
+fields:
+  - userIdentity.arn
+  - userIdentity.principalId
+  - requestParameters.functionName
+  - requestParameters.layers
+  - sourceIPAddress
+falsepositives:
+  # Legitimate deployment or update of Lambda functions that use layers is a common practice in many development workflows.
+  # To reduce false positives, consider filtering for events originating from non-CI/CD or non-administrator principals.
+  # Baselining known-good layer ARNs and alerting on new or unexpected ones can also improve fidelity.
+level: medium

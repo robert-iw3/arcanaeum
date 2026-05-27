@@ -1,0 +1,81 @@
+rule quasar_rat_associated_ttps {
+  meta:
+    author = "RW"
+    date = "2025-08-22"
+    description = "Detects a combination of indicators and behaviors associated with Quasar RAT, as detailed in a Splunk Threat Research Team blog post. This rule provides broad coverage by looking for specific process executions, file modifications, and network reconnaissance patterns characteristic of this malware, correlated on a single host."
+    reference = "https://www.splunk.com/en_us/blog/security/image-steganography-quasar-rat-detection.html"
+    false_positives = "Legitimate administrative activity may trigger parts of this rule (e.g., schtasks, shutdown). Access to FileZilla configuration files by backup utilities or other legitimate software could cause false positives. DNS queries to IP checking services can be legitimate for network troubleshooting or by some applications."
+    tags = "MALWARE, QUASAR, CREDENTIAL_ACCESS, DEFENSE_EVASION, DISCOVERY, EXECUTION, IMPACT, PERSISTENCE"
+    tactic = "TA0002, TA0003, TA0004, TA0005, TA0007, TA0040"
+    technique = "T1053.005, T1529, T1552.001, T1547.001, T1553.005, T1082"
+
+  events:
+    // Event 1: Suspicious Process Activity (IOC Hash, Schtasks, Shutdown)
+    $process.metadata.event_type = "PROCESS_LAUNCH"
+    $process.principal.hostname = $hostname
+    (
+      // Known hash for the .NET Steganography Loader
+      $process.target.process.file.sha256 = "7300535ef26158bdb916366b717390fc36eb570473ed7805c18b101367c68af5" or
+      // Scheduled task creation with highest privileges for persistence/privilege escalation
+      (
+        re.regex($process.target.process.file.full_path, `\\schtasks\.exe$`) and
+        re.regex($process.target.process.command_line, `(?i)/create`) and
+        re.regex($process.target.process.command_line, `(?i)/rl\s+HIGHEST`)
+      ) or
+      // Immediate system shutdown or reboot
+      (
+        re.regex($process.target.process.file.full_path, `\\shutdown\.exe$`) and
+        re.regex($process.target.process.command_line, `(?i)/t\s+0`) and
+        (re.regex($process.target.process.command_line, `(?i)\s/s`) or re.regex($process.target.process.command_line, `(?i)\s/r`))
+      )
+    )
+
+    // Event 2: FileZilla Credential Access
+    $file_zilla.metadata.event_type in ("FILE_OPEN", "FILE_READ")
+    $file_zilla.principal.hostname = $hostname
+    re.regex($file_zilla.target.file.full_path, `\\FileZilla\\(recentservers|sitemanager)\.xml$`)
+    // Filter out legitimate processes. This may need tuning for your environment.
+    not re.regex($file_zilla.principal.process.file.full_path, `\\(filezilla|OneDrive)\.exe$`)
+
+    // Event 3: Startup Folder Persistence
+    $startup_url.metadata.event_type = "FILE_CREATION"
+    $startup_url.principal.hostname = $hostname
+    re.regex($startup_url.target.file.full_path, `\\Start Menu\\Programs\\Startup\\.*\.url$`)
+
+    // Event 4: Mark-of-the-Web Bypass
+    $motw.metadata.event_type = "FILE_DELETION"
+    $motw.principal.hostname = $hostname
+    re.regex($motw.target.file.full_path, `:Zone\.Identifier$`)
+
+    // Event 5: Network Reconnaissance via IP Check Service
+    $dns.metadata.event_type = "NETWORK_DNS"
+    $dns.principal.hostname = $hostname
+    // This part can be noisy. Consider filtering for processes that shouldn't be making these queries.
+    // For example: not re.regex($dns.principal.process.file.full_path, `\\(chrome|msedge|firefox)\.exe$`)
+    re.regex($dns.network.dns.questions.name, `(?i)wtfismyip\.com|checkip\.|ipecho\.net|ipinfo\.io|api\.ipify\.org|icanhazip\.com|ip\.anysrc\.com|api\.ip\.sb|ident\.me|myexternalip\.com|zen\.spamhaus\.org|cbl\.abuseat\.org|b\.barracudacentral\.org|dnsbl-1\.uceprotect\.net|spam\.dnsbl\.sorbs\.net|iplogger\.org|ip-api\.com|geoip\.|ipwho\.is|ifconfig\.me|myip\.com|ipstack\.com|ip-api\.io|trackip\.net|ipgeolocation\.io|ipfind\.io|freegeoip\.app|ipv4bot\.whatismyipaddress\.com|hacker-target\.com`)
+
+  match:
+    $hostname over 1h
+
+  outcome:
+    // Set a base risk score, and increase it if multiple distinct TTPs are observed on the same host.
+    $risk_score = if(
+      (if(#process > 0, 1, 0)) +
+      (if(#file_zilla > 0, 1, 0)) +
+      (if(#startup_url > 0, 1, 0)) +
+      (if(#motw > 0, 1, 0)) +
+      (if(#dns > 0, 1, 0)) > 1, 75, 45
+    )
+    $principal_hostname = $hostname
+    $event_count = #process + #file_zilla + #startup_url + #motw + #dns
+
+    // Collect details from each event type for the alert.
+    $suspicious_processes = array_distinct($process.target.process.command_line)
+    $credential_files_accessed = array_distinct($file_zilla.target.file.full_path)
+    $persistence_files_created = array_distinct($startup_url.target.file.full_path)
+    $motw_bypassed_files = array_distinct($motw.target.file.full_path)
+    $recon_dns_queries = array_distinct($dns.network.dns.questions.name)
+
+  condition:
+    $process or $file_zilla or $startup_url or $motw or $dns
+}

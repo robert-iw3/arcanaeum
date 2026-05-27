@@ -1,0 +1,53 @@
+[
+  {
+    "type": "expert",
+    "name": "Detect Volt Typhoon LotL Reconnaissance and Credential Dumping",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"cmd.exe\" -v \"powershell.exe\" -v \"ntdsutil.exe\" -v \"vssadmin.exe\" -v \"reg.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*whoami*\"\n         Include -command_line \"*hostname*\"\n         Include -command_line \"*systeminfo*\"\n         Include -command_line \"*ipconfig /all*\"\n         Include -command_line \"*net user*\"\n         Include -command_line \"*net group*\"\n         Include -command_line \"*net localgroup*\"\n         Include -command_line \"*net view*\"\n         Include -command_line \"*nltest*\"\n         Include -command_line \"*query user*\"\n         Include -command_line \"*qwinsta*\"\n         Include -command_line \"*nbtstat*\"\n         Include -command_line \"*arp -a*\"\n         Include -command_line \"*tasklist /v*\"\n         Include -command_line \"*create shadow*\"\n         Include -command_line \"*save HKLM\\\\SAM*\"\n         Include -command_line \"*save HKLM\\\\SYSTEM*\"\n         Include -parent_process \"w3wp.exe\" -parent_process \"httpd.exe\" -parent_process \"nginx.exe\" -parent_process \"tomcat*.exe\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects Volt Typhoon LotL reconnaissance (whoami, systeminfo, net group, etc.) and credential dumping (vssadmin shadow, reg save SAM/SYSTEM) via cmd/powershell/ntdsutil/vssadmin/reg. Includes suspicious web server parents (w3wp.exe, etc.) indicating webshell/post-exploitation. High-fidelity for PRC APT behavior (CISA AA24-038A, Microsoft 2023-2026). Tune exclusions for known admin scripts/tools."
+  },
+  {
+    "type": "firewall",
+    "name": "Detect Edge Device Exploitation Attempts (Volt Typhoon Initial Access)",
+    "application": "**",
+    "direction": "in",
+    "protocol": "TCP",
+    "port": "80,443,8080,8443",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects inbound connections to common web management ports (80/443/8080/8443) potentially targeting edge appliances (Fortinet, Cisco, NETGEAR, etc.) for exploitation — primary initial access vector for Volt Typhoon (CISA/NSA/FBI advisories). ENS lacks URL/signature filtering; pair with IDS/IPS and asset inventory for edge devices."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Spear-Phishing via Microsoft Office Script Execution",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"cmd.exe\" -v \"powershell.exe\" -v \"wscript.exe\" -v \"cscript.exe\" -v \"mshta.exe\" -v \"rundll32.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -parent_process \"winword.exe\" -parent_process \"excel.exe\" -parent_process \"powerpnt.exe\" -parent_process \"outlook.exe\" -parent_process \"msaccess.exe\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects Office apps (winword.exe, excel.exe, etc.) spawning script interpreters (cmd/powershell/wscript/etc.), classic spear-phishing/macro delivery vector observed in Volt Typhoon-adjacent PRC campaigns. Tune exclusions for legitimate macros/add-ins."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Webshell Command Execution (Volt Typhoon Post-Exploitation)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"cmd.exe\" -v \"powershell.exe\" -v \"pwsh.exe\" -v \"whoami.exe\" -v \"ipconfig.exe\" -v \"net.exe\" -v \"net1.exe\" -v \"systeminfo.exe\" -v \"quser.exe\" -v \"qwinsta.exe\" -v \"nbtstat.exe\" -v \"nltest.exe\" -v \"certutil.exe\" -v \"bitsadmin.exe\" -v \"sh.exe\" -v \"bash.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -parent_process \"w3wp.exe\" -parent_process \"httpd.exe\" -parent_process \"nginx.exe\" -parent_process \"tomcat*.exe\" -parent_process \"php-cgi.exe\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects web server processes (IIS, Apache, Tomcat, etc.) spawning recon/execution utilities — strong indicator of webshell activity used by Volt Typhoon for persistence and lateral movement. Tune for legitimate monitoring/automation scripts."
+  },
+  {
+    "type": "firewall",
+    "name": "Detect Unusual SSL or Proxied HTTP Traffic (Volt Typhoon C2 Fallback)",
+    "application": "**",
+    "direction": "out",
+    "protocol": "TCP",
+    "port": "443,444,8443,8081,8000",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects outbound HTTPS/HTTP on non-standard ports (444, 8443, 8081, 8000) often used for C2/proxying in Volt Typhoon operations (SOHO router pivots, fallback channels). Exclude internal traffic; tune for legitimate apps. Pair with Web Control or SSL inspection for certificate/user-agent analysis."
+  }
+]

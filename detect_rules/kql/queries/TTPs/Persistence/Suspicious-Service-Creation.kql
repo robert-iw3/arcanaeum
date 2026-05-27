@@ -1,0 +1,44 @@
+// Name: Suspicious Service Installation in Uncommon Directory
+// Author: RW
+// Date: 2025-08-06
+// Tactic: Persistence
+// Technique: T1543.003
+// MITRE: https://attack.mitre.org/techniques/T1543/003/
+// Description:
+// This rule detects the creation of a new Windows service where the executable is located in a suspicious or non-standard directory.
+// Adversaries create services that point to executables in user-writable or temporary locations to establish persistence with elevated privileges.
+// This behavior was observed in the provided research paper where a Metasploit module created a service pointing to a payload in the user's AppData\Local\Temp directory.
+
+let suspicious_paths = dynamic([
+    @'C:\Users\',
+    @'C:\ProgramData\',
+    @'C:\Windows\Temp\',
+    @'C:\PerfLogs\',
+    @'C:\$Recycle.Bin\'
+]);
+// Using Event ID 4697 which indicates a new service was installed. This requires specific auditing to be enabled.
+// An alternative is Windows System Event ID 7045, which is often enabled by default.
+SecurityEvent
+| where EventID == 4697
+| parse-xml EventData with *
+    '<Data Name="ServiceName">' ServiceName '</Data>' *
+    '<Data Name="ServiceFileName">' ServiceFileName '</Data>' *
+    '<Data Name="ServiceType">' ServiceType '</Data>' *
+    '<Data Name="ServiceStartType">' ServiceStartType '</Data>' *
+    '<Data Name="ServiceAccount">' ServiceAccount '</Data>' *
+| where isnotempty(ServiceFileName)
+// Identifies service binaries in user-writable or temporary locations.
+| where ServiceFileName has_any (suspicious_paths)
+// False Positive Tuning:
+// Some legitimate installers may use C:\ProgramData for their service executables.
+// Exclude known legitimate service names, executables, or accounts if they cause noise.
+// For example: | where ServiceName !~ "LegitUpdaterSvc" and Account !~ "SYSTEM"
+| project
+    TimeGenerated,
+    Computer,
+    Account, // The account that installed the service.
+    ServiceName,
+    ServiceFileName,
+    ServiceStartType,
+    ServiceAccount, // The account the service will run as.
+    EventID

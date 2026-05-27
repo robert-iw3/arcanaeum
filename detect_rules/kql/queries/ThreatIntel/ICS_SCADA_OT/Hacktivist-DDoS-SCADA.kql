@@ -1,0 +1,58 @@
+// Name: Hacktivist Activity on SCADA/OT Systems
+// Author: RW
+// Date: 2025-08-17
+// Description: This rule detects TTPs associated with hacktivist groups like CARR and KillNet targeting ICS/OT environments.
+// It identifies potential DDoS symptoms, anomalous administrative tool usage on critical OT assets (HMIs, EWS), and large-scale
+// data exfiltration. These activities can indicate attempts to manipulate SCADA systems or serve as a distraction for other malicious actions.
+// False Positive Sensitivity: Medium
+// Tactic: Impact, Execution, Exfiltration
+// Technique: T1498, T1059, T1048
+
+let timeframe = 1h;
+// FP Tuning: This list is CRITICAL. Populate it with the hostnames of your HMIs, EWS, SCADA servers, and other key OT assets.
+let ot_critical_assets = dynamic([]);
+// FP Tuning: Add your corporate, VPN, and trusted partner IP ranges to prevent false positives from legitimate traffic.
+let corporate_ip_ranges = dynamic(["192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"]);
+// FP Tuning: Adjust the threshold for the number of distinct source IPs connecting to a single host within 5 minutes.
+let ddos_ip_threshold = 200;
+// FP Tuning: Adjust the data transfer threshold (in MB) to suit your environment's baseline for legitimate large transfers.
+let exfil_threshold_mb = 50;
+// Define common administrative/scripting tools that are anomalous on dedicated OT assets.
+let anomalous_processes = dynamic(["powershell.exe", "cmd.exe", "cscript.exe", "wscript.exe", "nmap.exe", "netcat.exe", "nc.exe", "net.exe", "netsh.exe", "plink.exe", "putty.exe", "mstsc.exe"]);
+
+// Pattern 1: Detects host-level symptoms of a DDoS or network flood attack.
+let ddos_symptom =
+DeviceNetworkEvents
+| where TimeGenerated > ago(timeframe)
+| where ActionType in ("InboundConnectionAccepted", "ConnectionSuccess")
+| where not(ipv4_is_in_any_range(RemoteIP, corporate_ip_ranges))
+| summarize DistinctRemoteIPs = dcount(RemoteIP) by bin(TimeGenerated, 5m), DeviceName
+| where DistinctRemoteIPs > ddos_ip_threshold
+| extend Pattern = "Potential DDoS Symptom (High Inbound Connections)", Tactic = "Impact", Technique = "T1498"
+| project TimeGenerated, DeviceName, Pattern, Tactic, Technique, Details = strcat("Host received connections from ", DistinctRemoteIPs, " distinct external IPs in 5 minutes.");
+
+// Pattern 2: Detects execution of anomalous tools on critical OT assets, indicating potential manipulation.
+let ot_manipulation =
+DeviceProcessEvents
+| where TimeGenerated > ago(timeframe)
+| where array_length(ot_critical_assets) == 0 or DeviceName in (ot_critical_assets)
+| where FileName in~ (anomalous_processes)
+// FP Tuning: Add legitimate parent processes or command lines for your environment to this exclusion.
+| where not(InitiatingProcessFileName has "monitoring_agent.exe")
+| extend Pattern = "Anomalous Process on Critical OT Asset", Tactic = "Execution", Technique = "T1059"
+| project TimeGenerated, DeviceName, Pattern, Tactic, Technique, Details = strcat("Process: ", FileName, ", CommandLine: ", ProcessCommandLine, ", Initiated by: ", InitiatingProcessFileName);
+
+// Pattern 3: Detects large data transfers from critical OT assets to external destinations, indicating potential data leak.
+let data_leak =
+DeviceNetworkEvents
+| where TimeGenerated > ago(timeframe)
+| where ActionType == "ConnectionSuccess" and isnotempty(RemoteIP)
+| where array_length(ot_critical_assets) == 0 or DeviceName in (ot_critical_assets)
+| where not(ipv4_is_in_any_range(RemoteIP, corporate_ip_ranges))
+| summarize TotalBytesOut = sum(TotalBytesOut) by bin(TimeGenerated, 1h), DeviceName, RemoteIP, InitiatingProcessFileName
+| where TotalBytesOut > (exfil_threshold_mb * 1024 * 1024)
+| extend Pattern = "Large Data Exfiltration from OT Asset", Tactic = "Exfiltration", Technique = "T1048"
+| project TimeGenerated, DeviceName, Pattern, Tactic, Technique, Details = strcat("Transferred ", format_bytes(TotalBytesOut, 2, "MB"), " to ", RemoteIP, " via process ", InitiatingProcessFileName);
+
+// Combine all patterns into a single view.
+union ddos_symptom, ot_manipulation, data_leak

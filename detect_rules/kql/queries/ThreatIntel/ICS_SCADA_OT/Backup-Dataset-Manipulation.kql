@@ -1,0 +1,72 @@
+// Name: SCADA/ICS Backup Dataset Manipulation
+// Author: RW
+// Date: 2025-08-20
+// Description: Detects attempts to modify or create backup files on critical SCADA/ICS assets using non-standard or suspicious processes.
+// This activity could indicate an attacker attempting to poison backup datasets to disrupt recovery efforts.
+//
+// **IMPORTANT**: This rule requires logs from an EDR solution like Microsoft Defender for Endpoint.
+// The effectiveness of this rule is highly dependent on the accurate population of the placeholder lists, especially 'ICS_Asset_List' and 'LegitBackupProcesses'.
+//
+// False Positive Sensitivity: Medium. Legitimate administrative scripts or third-party backup software not included in the allowlist may trigger this alert.
+// Review and tune the 'LegitBackupProcesses' list based on the software used in your OT environment.
+// Tactics: Impact
+// Techniques: T1565.001
+
+// --- Tuning Section ---
+let timeFrame = 1d;
+
+// Tuning: Populate this list with the hostnames of critical SCADA servers, HMIs, and engineering workstations.
+let ICS_Asset_List = dynamic([
+    "SCADA_SERVER_01",
+    "HMI_STATION_05",
+    "ENGINEERING_WS_02",
+    "HISTORIAN_DB_SERVER"
+]);
+
+// Tuning: Add or remove backup file extensions relevant to your environment. Includes common extensions and some SCADA-specific ones (e.g., .apa, .zap).
+let BackupFileExtensions = dynamic([".bak", ".bkf", ".zip", ".rar", ".7z", ".dmp", ".sql", ".apa", ".zap", ".mer"]);
+
+// Tuning: Add keywords found in your standard backup directories.
+let BackupFolderPathKeywords = dynamic(['\\backup', '\\archive\\', '\\backups\\']);
+
+// Tuning: Add legitimate processes that are authorized to create or modify backup files in your environment.
+let LegitBackupProcesses = dynamic([
+    "wbengine.exe",       // Windows Server Backup
+    "sqlservr.exe",       // SQL Server
+    "RSLinxNG.exe",       // Rockwell FactoryTalk
+    "FTAManager.exe"      // Rockwell FactoryTalk AssetCentre
+]);
+
+// A list of suspicious processes that should generally not be modifying backup files directly.
+let SuspiciousProcesses = dynamic(["cmd.exe", "powershell.exe", "pwsh.exe", "rundll32.exe", "wscript.exe", "cscript.exe", "bitsadmin.exe", "certutil.exe"]);
+// --- End of Tuning Section ---
+
+DeviceFileEvents
+| where TimeGenerated > ago(timeFrame)
+// Focus on file creation (which includes overwrites) and modification events.
+| where ActionType in ("FileCreated", "FileModified")
+// Filter for events occurring on designated critical ICS assets.
+| where DeviceName in~ (ICS_Asset_List)
+// Filter for files that appear to be backups, either by extension or folder path.
+| where FileName endswith_any (BackupFileExtensions) or FolderPath has_any (BackupFolderPathKeywords)
+// Core detection logic: Trigger if the modifying process is suspicious OR is not a known legitimate backup tool.
+| where InitiatingProcessFileName in~ (SuspiciousProcesses) or InitiatingProcessFileName !in~ (LegitBackupProcesses)
+// Summarize events to create a single, actionable alert.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    take_any(DeviceName, AccountName, AccountUpn, InitiatingProcessFileName, InitiatingProcessCommandLine, FolderPath, FileName, SHA1),
+    FileModificationCount = count()
+    by bin(TimeGenerated, 10m), DeviceId
+| extend
+    // Map entities for investigation in Microsoft Sentinel.
+    HostName = DeviceName,
+    AccountUPN = AccountUpn,
+    Process = InitiatingProcessFileName,
+    CommandLine = InitiatingProcessCommandLine
+| project-reorder StartTime, EndTime, HostName, AccountUPN, Process, CommandLine, FolderPath, FileName, SHA1, FileModificationCount
+| extend
+    HostCustomEntity = HostName,
+    AccountCustomEntity = AccountUPN,
+    FileCustomEntity = FileName,
+    ProcessCustomEntity = Process

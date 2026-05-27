@@ -1,0 +1,29 @@
+rule PowerShell_V2_Downgrade_Cmdline {
+  meta:
+    author = "RW"
+    description = "Detects PowerShell process creation attempts explicitly requesting version 2.0 via command-line arguments (e.g., powershell.exe -version 2)."
+    severity = "MEDIUM"
+
+  events:
+    $e.metadata.event_type = "PROCESS_LAUNCH" // UDM event type for process creation events.
+    $e.principal.process.file.file_name in ("powershell.exe", "pwsh.exe") // Process name filter.
+
+    // Check for version 2.0 arguments in the command line.
+    ($e.principal.process.command_line = /.*-version 2.*/ nocase or $e.principal.process.command_line = /.*-v 2.*/ nocase)
+
+    // FP Tuning: Exclude known benign parent processes, users, or command lines.
+    // Example: not $e.principal.process.parent_process.file.file_name = /legacyscript\.exe/ nocase
+    // Example: not $e.principal.user.userid = "legacy_user"
+
+  outcome:
+    $event_time = $e.metadata.event_timestamp.epoch_seconds // _time
+    $host = $e.principal.hostname // dest
+    $user = $e.principal.user.userid // user
+    $parent_process = $e.principal.process.parent_process.file.full_path // parent_process_name
+    $process = $e.principal.process.file.file_name // process_name
+    $process_command_line = $e.principal.process.command_line // process (full command line)
+    $detection_method = "Command-line argument"
+
+  condition:
+    $e
+}

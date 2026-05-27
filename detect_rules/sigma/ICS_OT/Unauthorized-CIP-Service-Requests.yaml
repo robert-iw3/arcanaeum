@@ -1,0 +1,41 @@
+title: Unauthorized CIP Service Request Detected
+status: experimental
+description: >-
+  Detects potentially malicious reconnaissance or enumeration activity by identifying Common Industrial Protocol
+  (CIP) "Get All Attributes" (0x01) or "Get Attribute List" (0x03) service requests from sources not on an established
+  allowlist of authorized systems. Attackers use these services to map out device objects and attributes as a precursor
+  to exploitation.
+references:
+  - https://github.com/ICSVillage
+author: RW
+date: 2025-08-18
+tags:
+  - attack.reconnaissance
+  - attack.t1595
+  - ics
+  - cip
+logsource:
+  category: network_traffic
+  service: cip
+detection:
+  selection:
+    # These services are commonly used for legitimate engineering purposes but are also ideal for reconnaissance and enumeration.
+    cip.service_code:
+      - '1'   # Service: Get_Attributes_All
+      - '3'   # Service: Get_Attribute_List
+  filter_authorized_sources:
+    # This list is a placeholder and MUST be populated with the IP addresses of legitimate systems
+    # that perform these actions, such as Engineering Workstations, HMIs, or Asset Management servers.
+    source.ip:
+      - '192.168.1.10'  # Example: Engineering Workstation
+      - '10.0.5.25'     # Example: Asset Management Server
+  condition: selection and not filter_authorized_sources
+fields:
+  - source.ip
+  - destination.ip
+  - cip.service_name
+  - cip.service_code
+falsepositives:
+  - Legitimate activity from new or temporary engineering workstations, HMIs, or vendor systems that have not been added to the allowlist.
+  - Network scanning or asset inventory tools that have not been properly allowlisted.
+level: medium

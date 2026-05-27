@@ -1,0 +1,53 @@
+// ZTNA Authentication from New Device or Location
+// author: RW
+// description: Detects successful ZTNA authentications from a device or country not seen for a user in the last 14 days.
+//              This could indicate an authentication bypass, such as the Netskope "OrgKey" vulnerability (CVE-2024-7401),
+//              or other account compromise scenarios where an attacker enrolls a new device or logs in from an unusual location.
+// creationDate 2025-08-11
+// tags
+// - attack.initial_access
+// - attack.t1566
+// - attack.t1078
+
+// Set the lookback period for baselining user activity.
+let lookback = 14d;
+// Set the detection window for recent activity.
+let timeframe = 1h;
+// Define the ZTNA log table. Replace with your actual table name (e.g., ZscalerZIA, Netskope, CommonSecurityLog).
+let ztna_table = "ZTNA_Authentication_CL";
+// Create a baseline of known user, device, and location (Country) combinations.
+let baseline =
+    table(ztna_table)
+    | where TimeGenerated between (ago(lookback) .. ago(timeframe))
+    // Adjust the filter to match successful authentication events in your logs.
+    | where isnotempty(UserPrincipalName) and isnotempty(DeviceId) and AuthenticationResult == "Success"
+    | extend GeoIPInfo = geo_info_from_ip_address(SourceIpAddress)
+    | extend Country = tostring(GeoIPInfo.country)
+    | summarize KnownDevices = make_set(DeviceId), KnownCountries = make_set(Country) by UserPrincipalName;
+// Find recent successful authentications from new devices or locations.
+table(ztna_table)
+| where TimeGenerated > ago(timeframe)
+| where isnotempty(UserPrincipalName) and isnotempty(DeviceId) and AuthenticationResult == "Success"
+| extend GeoIPInfo = geo_info_from_ip_address(SourceIpAddress)
+| extend Country = tostring(GeoIPInfo.country), City = tostring(GeoIPInfo.city), Asn = tostring(GeoIPInfo.asn)
+// Join recent activity with the baseline data.
+| lookup kind=leftouter baseline on UserPrincipalName
+| extend IsNewDevice = not(DeviceId in (KnownDevices)),
+         IsNewCountry = isnotempty(Country) and not(Country in (KnownCountries))
+// Alert if either the device or the country is new for the user.
+| where IsNewDevice or IsNewCountry
+// Potential False Positives: A user might legitimately use a new device or travel for work.
+// To reduce FPs, consider:
+// 1. Excluding specific user groups (e.g., frequent travelers, IT admins) from this alert.
+// 2. Increasing the lookback period (e.g., to 30d or 60d) to build a more robust baseline, at the cost of query performance.
+// 3. Correlating this alert with other suspicious activity from the user or device.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    NewDevices = make_set_if(DeviceId, IsNewDevice),
+    NewCountries = make_set_if(Country, IsNewCountry),
+    SourceIpAddresses = make_set(SourceIpAddress),
+    KnownDevices = any(KnownDevices),
+    KnownCountries = any(KnownCountries)
+    by UserPrincipalName, bin(TimeGenerated, 1h)
+| project-reorder StartTime, EndTime, UserPrincipalName, NewDevices, NewCountries, SourceIpAddresses, KnownDevices, KnownCountries

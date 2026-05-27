@@ -1,0 +1,66 @@
+// Rule Title: Unusual Network Traffic to or from ICS/OT Network
+// Description: This rule detects network traffic to or from a designated Industrial Control System (ICS) / Operational Technology (OT)
+// network segment that does not originate from or go to an authorized source. Such activity can be an indicator of unauthorized
+// access attempts, lateral movement from a compromised IT system, or data exfiltration from the ICS/OT environment.
+// Author: RW
+// Date: 2025-08-17
+// References:
+// - https://www.marinelink.com/news/maritime-cyber-threats-grow-increasingly-525922
+//
+// False Positive Sensitivity: Medium
+// - This detection is highly dependent on the accurate and complete population of the 'ics_networks' and 'authorized_sources' lists.
+// - Legitimate but unlisted systems (e.g., new administrative workstations, temporary vendor access) communicating with the ICS network will trigger alerts.
+// - Recommendation: Establish a baseline of normal traffic and regularly review and update the authorized sources list.
+//
+// Detection Comment Level: Medium
+//
+
+// Define the sensitive ICS/OT network ranges.
+// This is a placeholder and MUST be populated with the actual IP ranges of your ICS/OT environment.
+let ics_networks = dynamic([
+    "192.168.1.0/24",
+    "10.100.0.0/16",
+    "172.16.100.0/24"
+]);
+// Define the list of authorized IT systems (e.g., management servers, engineering workstations) allowed to communicate with the ICS network.
+// This is a placeholder and MUST be populated with IPs/subnets of authorized systems to reduce false positives.
+let authorized_sources = dynamic([
+    "172.16.1.10", // Example: Engineering Workstation 1
+    "172.16.2.0/24", // Example: Management Subnet
+    "10.1.1.5" // Example: Data Historian
+]);
+
+// Combine network event data from common sources like firewalls and EDR.
+union isfuzzy=true CommonSecurityLog, DeviceNetworkEvents
+| where TimeGenerated > ago(1h)
+// Normalize IP address and port fields for consistency across data sources.
+| extend
+    SourceIp = iif(isnotempty(SourceIP), SourceIP, coalesce(SrcIpAddr, SourceIPAddress)),
+    DestinationIp = iif(isnotempty(DestinationIP), DestinationIP, coalesce(DstIpAddr, DestinationIPAddress)),
+    DestinationPort = iif(isnotempty(DestinationPort), DestinationPort, DstPortNumber)
+| where isnotempty(SourceIp) and isnotempty(DestinationIp)
+// Core detection logic: Identify traffic crossing the IT/OT boundary from/to an unauthorized source.
+| where
+    // Case 1: Traffic from an external, unauthorized source INTO the ICS network.
+    (
+        has_any_ipv4_prefix(DestinationIp, ics_networks) and
+        not(has_any_ipv4_prefix(SourceIp, ics_networks)) and
+        not(has_any_ipv4_prefix(SourceIp, authorized_sources))
+    ) or
+    // Case 2: Traffic FROM the ICS network to an external, unauthorized destination.
+    (
+        has_any_ipv4_prefix(SourceIp, ics_networks) and
+        not(has_any_ipv4_prefix(DestinationIp, ics_networks)) and
+        not(has_any_ipv4_prefix(DestinationIp, authorized_sources))
+    )
+// Summarize events to reduce alert volume and provide a concise overview.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    TotalEvents = count(),
+    DestinationPorts = make_set(DestinationPort, 10),
+    Actions = make_set(coalesce(Action, DeviceAction, CommunicationDirection), 5)
+    by SourceIp, DestinationIp, DeviceName, InitiatingProcessAccountName, bin(TimeGenerated, 5m)
+| extend
+    RuleTitle = "Unusual Network Traffic to or from ICS/OT Network",
+    Description = strcat("Unauthorized network traffic detected between IP '", SourceIp, "' and ICS/OT IP '", DestinationIp, "'. This could indicate an unauthorized access attempt or policy violation.")

@@ -1,0 +1,6 @@
+opensearch-py>=2.7.1
+PyYAML>=6.0.2
+tenacity>=9.0.0
+boto3>=1.35.24
+prometheus_client>=0.21.0
+testcontainers-opensearch>=2.0.1

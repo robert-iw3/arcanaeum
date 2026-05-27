@@ -1,0 +1,36 @@
+// Name: Cloud-Only User Converted to Hybrid via Soft Match
+// Author: RW
+// Date: 2025-08-09
+// Description: Detects when a cloud-only user account is converted to a directory-synced (hybrid) account.
+//              This is indicated by the 'OnPremisesSyncEnabled' property changing from false to true.
+//              This event can be a sign of a "soft match" account takeover, where an attacker creates an
+//              on-premises user with a matching UPN or proxy address to a cloud-only account, effectively taking it over.
+// False Positives:
+// - This activity is expected during planned user migrations from cloud-only to a hybrid identity model.
+// - Investigation should focus on whether the change was authorized, especially for users with administrative privileges (active or eligible).
+
+let timeframe = 1d;
+AuditLogs
+| where TimeGenerated > ago(timeframe)
+// Filter for user update operations, which is where this change is logged.
+| where Category == "UserManagement" and OperationName == "Update user"
+// The change is typically initiated by the Entra Connect sync service principal.
+| where InitiatedBy.app.displayName has "On-Premises Directory Synchronization Service Account"
+| mv-expand TargetResources
+// Focus on the specific property that indicates a user is synced from on-premises.
+| where TargetResources.modifiedProperties has "OnPremisesSyncEnabled"
+| mv-expand TargetResources.modifiedProperties
+| where TargetResources_modifiedProperties.displayName == "OnPremisesSyncEnabled"
+// The core logic: Identify when the property changes from false (or null) to true.
+| where (tostring(TargetResources_modifiedProperties.oldValue) has "False" or isempty(TargetResources_modifiedProperties.oldValue))
+    and tostring(TargetResources_modifiedProperties.newValue) has "True"
+| project
+    TimeGenerated,
+    OperationName,
+    Description = "A cloud-only user account was converted to a directory-synced account.",
+    TargetUserUPN = tostring(TargetResources.userPrincipalName),
+    TargetUserDisplayName = tostring(TargetResources.displayName),
+    TargetUserId = tostring(TargetResources.id),
+    InitiatorApp = tostring(InitiatedBy.app.displayName),
+    CorrelationId
+| extend timestamp = TimeGenerated, AccountCustomEntity = TargetUserUPN

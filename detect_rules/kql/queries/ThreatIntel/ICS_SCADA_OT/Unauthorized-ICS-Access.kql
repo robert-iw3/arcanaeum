@@ -1,0 +1,58 @@
+// Name: Unauthorized External Access to ICS Devices
+// Author: RW
+// Date: 2025-08-11
+// Description: This rule detects successful network connections from the internet to common Industrial Control System (ICS) ports, such as Modbus (502) and EtherNet/IP (44818).
+// This could indicate unauthorized access attempts, reconnaissance, or exploitation of internet-exposed ICS assets.
+// Tactic: Initial Access
+// Technique: T1190 - Exploit Public-Facing Application
+// False Positive Sensitivity: Medium
+// - This rule may generate false positives for legitimate, expected remote access from vendors, partners, or remote employees.
+// - It is CRITICAL to populate the 'authorized_ips' list with known-good external IP addresses to reduce noise.
+// References:
+// - https://www.cisa.gov/news-events/ics-advisories/icsa-21-294-01
+
+let timeframe = 1h;
+// Define common ICS ports. Add or remove ports based on your specific OT environment.
+let ics_ports = dynamic([
+    502,    // Modbus
+    44818,  // EtherNet/IP (TCP)
+    2222,   // EtherNet/IP (UDP)
+    20000,  // DNP3
+    47808,  // BACnet
+    102,    // S7 Communication
+    1911,   // Niagara Fox
+    789,    // T-Mobile/Sprint SCADA
+    2404,   // IEC 60870-5-104
+    5007    // M-Bus
+]);
+// Define RFC 1918 private IP address spaces to identify external IPs.
+let private_ips = dynamic(["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fe80::/10"]);
+
+// **TUNING REQUIRED**: Populate this list with the public IP addresses of authorized external entities
+// such as vendors, partners, or remote maintenance services that are expected to connect to your ICS assets.
+let authorized_ips = dynamic(["1.1.1.1", "8.8.8.8", "x.x.x.x"]); // <-- Replace with actual authorized IPs
+
+// Using CommonSecurityLog as a generic table for firewall logs. You may need to change this to your specific data source,
+// e.g., PaloAltoCDL, Zscaler, Fortinet, or DeviceNetworkEvents.
+CommonSecurityLog
+| where TimeGenerated > ago(timeframe)
+// Filter for traffic targeting the specified ICS ports
+| where DestinationPort in (ics_ports)
+// Look for successful connections from the internet. To detect scanning, you could change this to look for "Deny" actions.
+| where DeviceAction in~ ("Allow", "Accept", "Permit")
+// Ensure the source is an external (public) IP address
+| where not(ipv4_is_in_any_range(SourceIp, private_ips))
+// **CRITICAL TUNING STEP**: Exclude connections from known, authorized external sources.
+| where not(SourceIp in (authorized_ips))
+// Summarize the activity to reduce alert volume and provide context.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    ConnectionCount = count(),
+    DestinationPorts = make_set(DestinationPort),
+    Actions = make_set(DeviceAction)
+    by SourceIp, DestinationIp, SourceGeoCountry, DeviceVendor, DeviceProduct
+| extend
+    timestamp = StartTime,
+    HostCustomEntity = DestinationIp,
+    IPCustomEntity = SourceIp

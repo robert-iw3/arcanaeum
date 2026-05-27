@@ -1,0 +1,76 @@
+// name: Anomalous Certificate Issuance for Privileged Account via Intune
+// id: 9e1f2a3b-4c5d-6a7b-8c9d-4a1b2c3d4e5f
+// version: 1
+// date: 2025-07-31
+// author: RW
+// description: |
+//   Detects the issuance of a certificate from an on-premises Active Directory Certificate Services (AD CS) authority for a highly privileged account, such as a Domain Controller, where the request originates from an Intune Certificate Connector or NDES server.
+//   As detailed in research by Dirk-jan Mollema, an attacker with Intune privileges can abuse the integration with on-premises AD CS to request certificates that allow for impersonation of privileged accounts.
+//   This rule detects this specific pattern by looking for certificate issuance events that meet three key criteria: the certificate is enabled for Client Authentication, the request is proxied by a known Intune Connector/NDES server, and the certificate's Subject Alternative Name (SAN) contains the name of a known privileged asset.
+// severity: High
+// tactics:
+//   - PrivilegeEscalation
+//   - CredentialAccess
+// techniques:
+//   - T1649 # Steal or Forge Authentication Certificates
+//   - T1552.006 # Unsecured Credentials: Group Policy Preferences
+// dataSources:
+//   - WindowsEvent
+// how_to_implement: |
+//   To successfully implement this detection, you must be ingesting Active Directory Certificate Services (AD CS) logs from your Certificate Authority servers into your Log Analytics workspace. This is typically done by configuring the Azure Monitor Agent (AMA) to collect the `Microsoft-Windows-CertificationAuthority/Operational` log channel, which populates the `WindowsEvent` table.
+//   Most importantly, you MUST populate both the `NdesAndIntuneConnectorServers` and `PrivilegedAccounts` lists in the query with the appropriate values for your environment to ensure the rule is properly targeted.
+// known_false_positives: |
+//   False positives are highly unlikely, as issuing certificates to Domain Controllers or other Tier 0 assets via Intune is an irregular and insecure practice. A false positive could occur in a misconfigured environment or during authorized security testing. Any alert should be investigated as a high-priority event.
+
+
+query: |
+  // comment: Define the list of NDES/Intune Connector servers. This list MUST be populated.
+  let NdesAndIntuneConnectorServers = dynamic([
+      "ndes-server1.contoso.com",
+      "intune-connector1.contoso.com"
+      // Add the RequesterName (often FQDN or DOMAIN\\MACHINE$) of your NDES and Intune Certificate Connector servers here.
+  ]);
+  // comment: Define the list of privileged accounts (e.g., Domain Controllers). This list MUST be populated.
+  let PrivilegedAccounts = dynamic([
+      "dc01.contoso.com",
+      "dc02.contoso.com"
+      // Add the FQDNs of your Domain Controllers and other Tier 0 assets here.
+  ]);
+  WindowsEvent
+  | where Provider == "Microsoft-Windows-CertificationAuthority" and EventID == 21 // EventID 21 = Certificate Issued
+  // comment: Filter for requests originating from the specified Intune Certificate Connector or NDES servers.
+  | extend RequesterName = tostring(EventData.RequesterName)
+  | where RequesterName in~ (NdesAndIntuneConnectorServers)
+  | extend CertificateAttributes = tostring(EventData.Attributes)
+  // comment: Filter for certificates that have the Client Authentication EKU (OID 1.3.6.1.5.5.7.3.2).
+  | where CertificateAttributes has "1.3.6.1.5.5.7.3.2"
+  | extend SanDnsName = extract("DNS Name=([^\\n,]+)", 1, CertificateAttributes)
+  // comment: Check if the certificate's SAN matches a known privileged account.
+  | where isnotempty(SanDnsName) and SanDnsName in~ (PrivilegedAccounts)
+  | extend
+      CaServer = Computer,
+      SubjectName = tostring(EventData.SubjectName),
+      TemplateName = tostring(EventData.TemplateName)
+  | project
+      TimeGenerated,
+      CaServer,
+      RequesterName,
+      SanDnsName,
+      SubjectName,
+      TemplateName
+entityMappings:
+  - entityType: Host
+    fieldMappings:
+      - identifier: FullName
+        columnName: RequesterName
+  - entityType: Host
+    fieldMappings:
+      - identifier: FullName
+        columnName: SanDnsName
+  - entityType: Host
+    fieldMappings:
+      - identifier: FullName
+        columnName: CaServer
+customDetails:
+  SubjectName: SubjectName
+  TemplateName: TemplateName

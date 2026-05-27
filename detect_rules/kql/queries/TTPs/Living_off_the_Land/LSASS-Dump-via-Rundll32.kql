@@ -1,0 +1,30 @@
+// Name: LSASS Memory Dump via Rundll32 and Comsvcs.dll
+// Author: RW
+// Date: 2025-08-08
+// Description: Detects an attempt to dump the LSASS process memory using rundll32.exe and the MiniDump function from comsvcs.dll.
+//              This is a known credential dumping technique used by threat actors, including APTs.
+// False Positive Sensitivity: Medium
+// Tactics: Credential Access
+// Techniques: T1003.001
+
+DeviceEvents
+// Filters for process access events, specifically when a process opens a handle to another process
+| where ActionType == "OpenProcess"
+// Identifies rundll32.exe as the process initiating the access
+| where InitiatingProcessFileName =~ "rundll32.exe"
+// Specifies that the target of the access is the LSASS process
+| where TargetProcessFileName =~ "lsass.exe"
+// Looks for the specific command-line arguments indicating the use of comsvcs.dll's MiniDump function
+| where InitiatingProcessCommandLine has_all ("comsvcs.dll", "MiniDump")
+// FP Tuning: This technique is highly indicative of malicious activity. False positives are rare but could occur with specific diagnostic or crash dump utilities.
+// If necessary, exclude known legitimate parent processes of rundll32.exe.
+| project
+    TimeGenerated,
+    DeviceName,
+    ActionType,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessId,
+    TargetProcessFileName,
+    TargetProcessId,
+    ReportId

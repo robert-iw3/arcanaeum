@@ -1,0 +1,66 @@
+{
+  "rule_id": "dcsync_attack_detection",
+  "name": "DCSync Attack Attempt",
+  "description": "Detects attempts to perform a DCSync attack by monitoring for Active Directory replication properties being accessed (Event ID 4662) from non-domain controller systems.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "from winlogbeat-* | where winlog.channel == 'Security' and winlog.event_id == '4662' and winlog.event_data.Properties RLIKE '(?i).*(1131f6ad-9c07-11d1-f79f-00c04fc2dcd2|1131f6aa-9c07-11d1-f79f-00c04fc2dcd2|9923a32a-3607-11d2-b9be-0000f87a36b2).*' and NOT (winlog.event_data.SubjectUserName IN ('DWM-1', 'UMFD-1') OR winlog.event_data.SubjectUserName RLIKE '.*\\\\$$') | stats count() by host.name, winlog.event_data.SubjectUserName, source.ip, winlog.event_data.ObjectName | keep host.name, winlog.event_data.SubjectUserName, source.ip, winlog.event_data.ObjectName, count",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0006",
+        "name": "Credential Access",
+        "reference": "https://attack.mitre.org/tactics/TA0006/"
+      },
+      "technique": [
+        {
+          "id": "T1003",
+          "name": "OS Credential Dumping",
+          "reference": "https://attack.mitre.org/techniques/T1003/"
+        },
+        {
+          "id": "T1003.006",
+          "name": "DCSync",
+          "reference": "https://attack.mitre.org/techniques/T1003/006/"
+        }
+      ]
+    }
+  ],
+  "interval": "5m",
+  "from": "now-5m",
+  "max_signals": 100,
+  "risk_score": 99,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://adsecurity.org/?p=1729"
+  ],
+  "tags": [
+    "Active Directory",
+    "Credential Access",
+    "DCSync"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "exemptions": [
+    {
+      "name": "dc_replication_exemption",
+      "description": "Exempts domain controller IP addresses from the rule.",
+      "conditions": [
+        {
+          "field": "source.ip",
+          "operator": "included",
+          "type": "list",
+          "list_id": "domain_controllers"
+        }
+      ],
+      "enabled": true
+    }
+  ],
+  "custom_query_fields": [],
+  "event_group": "winlog.event_data.SubjectUserName, source.ip, winlog.event_data.ObjectName"
+}

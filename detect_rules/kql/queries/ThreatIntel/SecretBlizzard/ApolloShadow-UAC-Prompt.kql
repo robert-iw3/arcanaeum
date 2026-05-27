@@ -1,0 +1,21 @@
+// Name: ApolloShadow UAC Prompt for Privilege Escalation
+// Author: RW
+// Date: 2025-07-31
+// Description: Detects a User Account Control (UAC) prompt initiated by 'CertificateDB.exe'. This behavior is associated with the ApolloShadow malware used by Secret Blizzard to gain elevated privileges.
+// False Positives: Low. The filename is specific to the malware described in the reference.
+// References: https://www.microsoft.com/en-us/security/blog/2025/07/31/frozen-in-transit-secret-blizzards-aitm-campaign-against-diplomats/
+DeviceEvents
+// Look for UAC prompt events, which indicate a request for elevation.
+| where ActionType == "UacPromptLaunched"
+// The ApolloShadow malware uses this specific filename to masquerade as a certificate installer.
+| where FileName =~ "CertificateDB.exe"
+| project
+    Timestamp,
+    DeviceId,
+    DeviceName,
+    ActionType,
+    FileName,
+    FolderPath,
+    InitiatingProcessAccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine

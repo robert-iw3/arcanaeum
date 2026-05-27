@@ -1,0 +1,44 @@
+// Name: Azure Key Vault Excessive Permissions Granted
+// Author: RW
+// Date: 2025-08-31
+// Description: Detects when an Azure Key Vault access policy is created or modified to grant excessive permissions (e.g., 'all')
+// for keys, secrets, or certificates. This can be an indicator of privilege escalation or preparation for secret exfiltration.
+// MITRE ATT&CK: T1098 (Account Manipulation), T1484 (Group Policy Modification)
+// False Positive Sensitivity: Medium
+
+AzureActivity
+| where OperationNameValue == "MICROSOFT.KEYVAULT/VAULTS/ACCESSPOLICIES/WRITE" // Catches creation/update of Key Vault data plane access policies
+| where ActivityStatusValue == "Success"
+// Potential for false positives: Administrators or deployment scripts may legitimately grant 'all' permissions during setup.
+// Consider excluding known administrative accounts or service principals used for deployment to reduce noise.
+// For example: `| where Caller !in ("admin@contoso.com", "deployment-sp-id")`
+| extend properties = todynamic(Properties)
+| extend accessPolicies = properties.requestbody.properties.accessPolicies
+| mvexpand policy = accessPolicies // Expand the array of access policies to inspect each one individually
+| extend permissions = policy.permissions
+| extend
+    keyPermissions = tostring(permissions.keys),
+    secretPermissions = tostring(permissions.secrets),
+    certificatePermissions = tostring(permissions.certificates)
+// This rule detects overly permissive data plane permissions. A separate rule should be used to monitor for management plane RBAC assignments like 'Owner' or 'Contributor' on the Key Vault resource itself.
+| where keyPermissions has "all" or secretPermissions has "all" or certificatePermissions has "all" // Check if any permission set includes the highly permissive 'all' permission
+| extend
+    PrincipalObjectId = tostring(policy.objectId),
+    PrincipalTenantId = tostring(policy.tenantId),
+    GrantedBy = Caller,
+    PermissionsDetail = strcat(
+        "Keys: ", keyPermissions,
+        ", Secrets: ", secretPermissions,
+        ", Certificates: ", certificatePermissions
+    )
+| project
+    TimeGenerated,
+    GrantedBy,
+    CallerIpAddress,
+    OperationName,
+    SubscriptionId,
+    ResourceGroup,
+    ResourceId, // This is the Key Vault that was modified
+    PrincipalObjectId, // The user, group, or service principal that was granted permissions
+    PrincipalTenantId,
+    PermissionsDetail

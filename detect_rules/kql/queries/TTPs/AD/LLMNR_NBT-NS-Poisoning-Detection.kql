@@ -1,0 +1,46 @@
+// Name: LLMNR/NBT-NS Poisoning Detection
+// Author: RW
+// Date: 2025-08-04
+// Description: Detects network traffic associated with Link-Local Multicast Name Resolution (LLMNR) on UDP port 5355
+//              and NetBIOS Name Service (NBT-NS) on UDP port 137. These legacy protocols are susceptible to poisoning
+//              attacks (e.g., using Responder), allowing an adversary to intercept credentials. Their use is often
+//              disabled in secure environments, making their presence anomalous and indicative of either misconfiguration or an active attack.
+// MITRE ATT&CK: T1557.001
+// False Positive Sensitivity: Medium
+// Tags: Initial Access, Credential Access, T1557.001
+
+// Define the time window for the search.
+let timeWindow = 1h;
+// Define the target ports for LLMNR and NBT-NS.
+let TargetPorts = dynamic([5355, 137]);
+// In environments where these protocols are used legitimately, whitelist specific devices to reduce false positives.
+let DeviceExclusionList = dynamic([]);
+
+DeviceNetworkEvents
+| where TimeGenerated > ago(timeWindow)
+// Filter for outbound network connections to the specified ports.
+| where ActionType has "Outbound" or ActionType == "NetworkConnectionSuccess"
+| where RemotePort in (TargetPorts)
+// Exclude whitelisted devices.
+| where DeviceName !in (DeviceExclusionList)
+// Aggregate events by the source device and destination port to identify systems using these protocols.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    EventCount = count(),
+    DestinationIPs = make_set(RemoteIP, 10),
+    InitiatingProcesses = make_set(InitiatingProcessFileName, 5)
+    by DeviceName, DeviceId, RemotePort
+// Add a field to identify the protocol based on the port number for easier analysis.
+| extend ProtocolName = case(RemotePort == 5355, "LLMNR", RemotePort == 137, "NBT-NS", "Unknown")
+// Project the relevant fields for the alert.
+| project
+    StartTime,
+    EndTime,
+    DeviceName,
+    DeviceId,
+    ProtocolName,
+    RemotePort,
+    EventCount,
+    InitiatingProcesses,
+    DestinationIPs

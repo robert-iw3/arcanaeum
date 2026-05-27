@@ -1,0 +1,63 @@
+// Name: Domain Admin Group Reconnaissance
+// Id: b452e109-4c02-4c53-b5ff-533d567d07aa
+// Version: 2
+//
+// Severity: Medium
+//
+// QueryFrequency: 1h
+// QueryPeriod: 1h
+//
+// ThreatIntel:
+//   - Salt Typhoon
+//
+// Tactics:
+//   - Discovery
+//
+// MITRE ATT&CK Framework:
+//   - T1069.002: Domain Groups
+//
+// Description:
+// Detects reconnaissance of the 'Domain Admins' group using common command-line tools.
+// This is a known TTP of the threat actor Salt Typhoon to identify privileged accounts.
+//
+// Version History:
+// - 1.0 (2025-07-31) - Initial version (Sigma)
+// - 2.0 (2025-07-31) - Converted to KQL
+//
+// Author: RW
+//
+// False Positives:
+// Legitimate administrative activity by system administrators, help desk staff, or security auditors.
+// Automated scripts for identity and access management or auditing may also trigger this rule.
+// Consider filtering based on known administrative accounts or specific parent processes if this is common in your environment.
+let lookback = 1h;
+DeviceProcessEvents
+| where TimeGenerated > ago(lookback)
+| where
+    // Detects 'net.exe' used to query the Domain Admins group
+    (
+        FileName in~ ("net.exe", "net1.exe")
+        and ProcessCommandLine has "group"
+        and ProcessCommandLine has "Domain Admins"
+    )
+    or
+    // Detects PowerShell used to query the Domain Admins group
+    (
+        FileName in~ ("powershell.exe", "pwsh.exe")
+        and ProcessCommandLine has "Get-ADGroup" // Catches Get-ADGroup and Get-ADGroupMember
+        and ProcessCommandLine has "Domain Admins"
+    )
+// FP Tuning: Exclude known administrative accounts or management servers to reduce noise.
+// | where not (AccountName in ("admin_acct1", "helpdesk_user") and InitiatingProcessFileName in~ ("AdminTool.exe"))
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    AccountDomain,
+    FileName,
+    ProcessCommandLine,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    ReportId,
+    ProcessId,
+    InitiatingProcessId

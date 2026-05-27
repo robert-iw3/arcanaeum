@@ -1,0 +1,86 @@
+rule consolidated_nova_malspam_campaign_activity {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "This rule consolidates multiple detections related to a widespread malspam campaign delivering the Nova infostealer. It hunts for activity across email, network, and DNS logs associated with known malicious domains and IPs."
+    tactic = "TA0001, TA0011"
+    technique = "T1566, T1071"
+    false_positives = "This is a broad query combining high-fidelity IOCs. Legitimate activity is unlikely but possible if an IOC is stale. Tuning may be required by excluding trusted senders or specific internal processes."
+
+  events:
+    // Define IOCs for the campaign
+    $malicious_domains = {
+      "windhym.site", "bioccon.com", "hanhanggroup.com", "sprinterstravels.co.uk"
+    }
+    $malicious_ips = {
+      "79.141.165.17", "185.81.114.43", "185.117.90.49", "185.80.53.203"
+    }
+
+    // Match across Email, Network, and DNS events
+    (
+      $e.metadata.event_type = "NETWORK_CONNECTION" and
+      (
+        $e.target.ip in $malicious_ips or
+        $e.principal.ip in $malicious_ips or
+        $e.network.hostname in $malicious_domains
+      )
+    ) or (
+      $e.metadata.event_type = "NETWORK_DNS" and
+      $e.network.dns.questions.name in $malicious_domains
+    ) or (
+      $e.metadata.event_type = "EMAIL_MESSAGE" and
+      (
+        // Match emails from malicious IPs or domains
+        $e.principal.ip in $malicious_ips or
+        (
+          any $domain in $malicious_domains satisfies
+          strings.ends_with($e.email.from, $domain)
+        ) or
+        // Match emails containing malicious URLs in the body
+        (
+          any $url in $e.email.body_urls satisfies
+          (
+            any $domain in $malicious_domains satisfies
+            strings.contains($url, $domain)
+          )
+        )
+      )
+    )
+
+  outcome:
+    // Determine the specific indicator that was matched
+    $indicator = if($e.network.hostname in $malicious_domains, $e.network.hostname,
+                 if($e.network.dns.questions.name in $malicious_domains, $e.network.dns.questions.name,
+                 if($e.target.ip in $malicious_ips, strings.join($e.target.ip, ", "),
+                 if($e.principal.ip in $malicious_ips, strings.join($e.principal.ip, ", "),
+                 if(any $url in $e.email.body_urls satisfies (any $domain in $malicious_domains satisfies strings.contains($url, $domain)),
+                    strings.join(filter($e.email.body_urls, re.regex($, ".*(" + strings.join($malicious_domains, "|") + ").*")), ", "),
+                    $e.email.from)))))
+
+    // Determine the type of the indicator
+    $indicator_type = if($e.network.hostname in $malicious_domains, "Domain",
+                      if($e.network.dns.questions.name in $malicious_domains, "Domain",
+                      if($e.target.ip in $malicious_ips, "IP Address",
+                      if($e.principal.ip in $malicious_ips, "IP Address",
+                      if(any $url in $e.email.body_urls satisfies (any $domain in $malicious_domains satisfies strings.contains($url, $domain)), "URL",
+                      "Sender")))))
+
+    // Determine the detection method based on the event type
+    $detection_method = if($e.metadata.event_type = "NETWORK_CONNECTION", "Malicious Network Connection",
+                        if($e.metadata.event_type = "NETWORK_DNS", "Malicious DNS Query",
+                        if($e.metadata.event_type = "EMAIL_MESSAGE", "Malicious Email Detected", "Unknown")))
+
+    // Populate standard outcome fields for context
+    $principal_ip = $e.principal.ip
+    $principal_hostname = $e.principal.hostname
+    $principal_user = $e.principal.user.userid
+    $target_ip = $e.target.ip
+    $target_hostname = $e.target.hostname
+    $target_user = $e.target.user.userid
+    $email_subject = $e.email.subject
+    $email_from = $e.email.from
+    $email_to = $e.email.to
+
+  condition:
+    $e
+}

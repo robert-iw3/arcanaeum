@@ -1,0 +1,34 @@
+title: Entra ID Account Manipulation for Persistence
+id: 3aae4993-9f7f-4332-9409-678a424bdeb3
+status: experimental
+description: Detects account manipulation activities in Microsoft Entra ID, such as password changes or modifications to Multi-Factor Authentication (MFA) methods. Adversaries may perform these actions to maintain access to a compromised account.
+references:
+  - Threat Intel ID: 6e487ba759c8e80223efef2a739cd68b6586a6454f568bafdb580d896b47660a
+author: RW
+date: 2025-08-19
+tags:
+  - attack.persistence
+  - attack.t1098
+logsource:
+  product: azure
+  service: auditlogs
+detection:
+  selection:
+    category: 'UserManagement'
+    result: 'success'
+    activityDisplayName:
+      - 'Reset user password' # Covers admin and self-service password resets
+      - 'Change user password' # Covers user-initiated password changes
+      - 'Update user' # Generic event that can include changes to authentication methods. Review modified properties for suspicious changes (e.g., otherMails, mobilePhone).
+      - 'User registered all required security info' # User sets up MFA for the first time
+      - 'User registered security info' # User adds a new authentication method
+      - 'User updated security info' # User modifies an existing authentication method
+      - 'Admin updated security info' # Admin modifies a user's authentication method
+      - 'User deleted security info' # User removes an authentication method
+      - 'Admin deleted security info' # Admin removes a user's authentication method
+  condition: selection
+falsepositives:
+  - Legitimate password resets performed by users or helpdesk administrators.
+  - Users legitimately updating their authentication methods (e.g., getting a new phone or changing their recovery email).
+  - These events should be correlated with other suspicious activities, such as a recent logon from an unusual location, to increase fidelity.
+level: medium

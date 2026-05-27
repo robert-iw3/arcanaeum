@@ -1,0 +1,78 @@
+// Name: Suspicious Service Principal Creation
+// Author: RW
+// Date: 2025-08-09
+// Description: This rule detects the creation of a new service principal that is either immediately granted a highly
+//              privileged role or has a suspicious name. This can indicate persistence or an attempt to impersonate a
+//              legitimate application, as discussed in the "Consent & Compromise" Black Hat talk.
+// False Positives: Legitimate applications might be created with names that trigger this logic, or may require high privileges.
+// Tuning of the allowlists, suspicious patterns, and privileged role list is recommended.
+
+// Define a time window to correlate creation with privileged role assignment.
+let timeframe = 15m;
+
+// Define highly privileged role template IDs. This list can be tuned.
+// Find Role Template IDs in Entra ID -> Roles and administrators -> Select Role -> Properties -> Template ID
+let privilegedRoleTemplateIds = dynamic([
+    "62e90394-69f5-4237-9190-012177145e10", // Global Administrator
+    "194ae4cb-b126-40b2-bd5b-606bceb20793", // Application Administrator
+    "e8611ab8-c189-46e8-94e1-60213ab1a814", // Cloud Application Administrator
+    "f28a1f50-f6e7-4571-818b-6a12f2af6b6c"  // Privileged Role Administrator
+]);
+
+// Define suspicious naming patterns for service principals.
+let suspiciousKeywords = dynamic(["admin", "backup", "security", "graph", "office", "update", "system", "core", "phish"]);
+
+// Allowlist for legitimate service principal creators (e.g., CI/CD service accounts).
+let creatorAllowList = dynamic([]);
+
+// Collect IDs of service principals that were assigned a privileged role within the timeframe.
+let privilegedPrincipals = AuditLogs
+| where TimeGenerated > ago(timeframe)
+| where OperationName == "Add member to role" and Result == "Success"
+| mv-expand TargetResources
+| where TargetResources.type == "Role"
+| extend RoleTemplateId = tostring(TargetResources.id)
+| where RoleTemplateId in (privilegedRoleTemplateIds)
+| mv-expand ModifiedProperties = TargetResources.modifiedProperties
+| where ModifiedProperties.displayName == "Members"
+| extend AddedMembers = todynamic(ModifiedProperties.newValue)
+| mv-expand Member = AddedMembers
+| extend MemberId = tostring(Member.id)
+| where isnotempty(MemberId)
+| distinct MemberId;
+
+// Find service principal creation events and check for suspicious indicators.
+AuditLogs
+| where TimeGenerated > ago(timeframe)
+| where Category == "ApplicationManagement" and OperationName == "Add service principal" and Result == "Success"
+| extend SpDisplayName = tostring(TargetResources[0].displayName)
+| extend SpId = tostring(TargetResources[0].id)
+| extend SpAppId = tostring(TargetResources[0].appId)
+| extend Creator = tostring(InitiatedBy.user.userPrincipalName)
+| extend CreatorIp = tostring(InitiatedBy.user.ipAddress)
+| where isnotempty(Creator) and not(Creator in (creatorAllowList))
+// Check if the SP was granted high privileges or has a suspicious name.
+| extend IsPrivileged = SpId in (privilegedPrincipals)
+| extend IsSuspiciouslyNamed =
+    (SpDisplayName has_any (suspiciousKeywords)) or
+    (SpDisplayName matches regex @"^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$") or // Name is a GUID
+    (SpDisplayName matches regex @"\S+@\S+\.\S+") // Name looks like a UPN
+| where IsPrivileged or IsSuspiciouslyNamed
+| extend Reason = case(
+    IsPrivileged and IsSuspiciouslyNamed, "Granted high privileges and has suspicious name",
+    IsPrivileged, "Granted high privileges shortly after creation",
+    IsSuspiciouslyNamed, "Suspicious naming convention",
+    "Unknown"
+)
+| project
+    TimeGenerated,
+    SpDisplayName,
+    SpId,
+    SpAppId,
+    Creator,
+    CreatorIp,
+    Reason
+| extend
+    timestamp = TimeGenerated,
+    AccountCustomEntity = Creator,
+    IpCustomEntity = CreatorIp

@@ -1,0 +1,55 @@
+rule sustained_satellite_communication_interference {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects sustained periods of high interference or low signal quality for satellite communications, potentially indicating jamming activity. This rule requires a custom UDM event type (e.g., SATELLITE_RF_MONITORING) that provides RF signal or satellite health metrics."
+    tactic = "TA0005" // Defense Evasion
+    technique = "T1070.006" // Indicator Removal
+    false_positives = "Natural atmospheric or solar events (e.g., solar flares), benign RF interference in high-traffic areas, or misconfigured ground equipment can cause similar signal degradation."
+    severity = "High"
+    tags = "Space, Satellite, Jamming, Denial of Service"
+
+  events:
+    // This rule requires a custom data source providing satellite RF signal metrics.
+    // The event type 'SATELLITE_RF_MONITORING' is a placeholder for your specific log source.
+    $e.metadata.event_type = "SATELLITE_RF_MONITORING"
+
+    // Filter for events indicating potential jamming based on thresholds.
+    // FP Risk: These thresholds are placeholders and must be tuned based on baseline data from your monitoring systems to avoid false positives.
+    (
+      $e.udm.extensions.interference_level > 70 or
+      $e.udm.extensions.signal_to_noise_ratio < 10
+    )
+
+    // Focus on high-risk areas if location data is available.
+    // The reference list %high_risk_geopolitical_regions should be populated with relevant locations based on current threat intelligence.
+    $e.principal.location.country_or_region in %high_risk_geopolitical_regions
+
+    // Define placeholder for grouping events by region.
+    $region = $e.principal.location.country_or_region
+
+  match:
+    // Group events by the affected region over a 1-hour window.
+    $region over 1h
+
+  outcome:
+    // Assign a risk score.
+    $risk_score = 75
+    // Count of distinct interference events.
+    $event_count = count_distinct($e.metadata.id)
+    // The geographical region where jamming is suspected.
+    $principal_location_country_or_region = array_distinct($region)
+    // List of satellites affected in the region.
+    $affected_satellites = array_distinct($e.about.id)
+    // Capture the highest interference level and lowest SNR observed.
+    $max_interference_level = max($e.udm.extensions.interference_level)
+    $min_snr = min($e.udm.extensions.signal_to_noise_ratio)
+    // Capture the time window of the activity.
+    $window_start_time = min($e.metadata.collected_timestamp.seconds)
+    $window_end_time = max($e.metadata.collected_timestamp.seconds)
+
+  condition:
+    // Alert if the activity is sustained, indicated by 4 or more distinct interference events in the time window.
+    // This threshold helps to reduce noise from transient, non-malicious interference.
+    #e >= 4
+}

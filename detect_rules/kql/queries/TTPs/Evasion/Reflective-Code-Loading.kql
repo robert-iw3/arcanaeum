@@ -1,0 +1,49 @@
+// Name: Reflective Assembly Load in PowerShell
+// Author: RW
+// Date: 2025-08-11
+// Description: Detects reflective loading of .NET assemblies from memory within PowerShell.
+//              This technique is often used to execute malicious code while bypassing file-based
+//              detections and some AMSI features, as the assembly is loaded directly from a
+//              byte array rather than from a file on disk.
+// MITRE ATT&CK: T1620 (Reflective Code Loading), T1055 (Process Injection), T1622 (Debugger Evasion)
+
+// This detection requires PowerShell Script Block Logging.
+DeviceEvents
+| where ActionType == "PowerShellCommand"
+| extend ScriptBlockText = tostring(AdditionalFields.ScriptBlockText)
+| where isnotempty(ScriptBlockText)
+
+// Main detection logic: Look for Assembly.Load combined with memory-based sources.
+| where
+    // High-confidence: Loading an assembly directly from a Base64 string is a very common malware pattern.
+    (ScriptBlockText has "[System.Reflection.Assembly]::Load" and ScriptBlockText has "FromBase64String")
+    or
+    // High-confidence: Loading an assembly from a byte array downloaded from the web.
+    (ScriptBlockText has "[System.Reflection.Assembly]::Load" and ScriptBlockText has "DownloadData")
+    or
+    // Medium-confidence: A more generic pattern looking for Assembly.Load with a byte array.
+    (ScriptBlockText has "[System.Reflection.Assembly]::Load" and ScriptBlockText has "[byte[]]")
+    or
+    // Alternative method using the current AppDomain, also combined with memory-based sources.
+    (ScriptBlockText has "CurrentDomain.Load" and (ScriptBlockText has "FromBase64String" or ScriptBlockText has "DownloadData"))
+
+// FP Tuning: Some legitimate software installers or management tools may use reflective loading.
+// Exclude known safe parent processes or scripts if false positives occur.
+// Example: | where InitiatingProcessFileName !in ("TrustedInstaller.exe", "ManagementConsole.exe")
+
+// Extract key information for the alert.
+| extend Technique = case(
+    ScriptBlockText has "FromBase64String", "Reflective Load from Base64 String",
+    ScriptBlockText has "DownloadData", "Reflective Load from Web Download",
+    ScriptBlockText has "[byte[]]", "Reflective Load from Byte Array",
+    "Generic Reflective Load"
+  )
+| project
+    TimeGenerated,
+    DeviceName,
+    Technique,
+    AccountName,
+    InitiatingProcessFileName,
+    FileName,
+    ProcessCommandLine,
+    ScriptBlockText

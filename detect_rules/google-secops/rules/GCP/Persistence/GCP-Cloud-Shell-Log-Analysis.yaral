@@ -1,0 +1,38 @@
+rule gcp_logging_sink_modified_or_deleted {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects when a GCP logging sink is deleted or disabled. Disabling or deleting logging sinks is a common defense evasion technique used by attackers to hide their activity within a GCP environment. This is particularly relevant for services with limited native logging, like Cloud Shell, where audit logs are critical for visibility."
+    false_positives = "Legitimate administrative changes to logging configurations. All changes should be verified with the administrator who performed the action."
+    tactic = "TA0005"
+    technique = "T1070.004"
+    tags = "GCP, CLOUD, LOGGING, DEFENSE_EVASION"
+
+  events:
+    // Filter for GCP Audit Log events related to the logging service.
+    $gcp.metadata.event_type = "GCP_AUDIT_LOG"
+    $gcp.protoPayload.serviceName = "logging.googleapis.com"
+
+    // Detect either the deletion of a sink or an update that disables it.
+    (
+      $gcp.protoPayload.methodName = "google.logging.v2.ConfigServiceV2.DeleteSink" or
+      (
+        $gcp.protoPayload.methodName = "google.logging.v2.ConfigServiceV2.UpdateSink" and
+        // Check if the update request sets the sink to disabled.
+        re.regex($gcp.protoPayload.request.json, `"disabled":\s*true`)
+      )
+    )
+
+  outcome:
+    // High risk score, as this action directly impairs security visibility.
+    $risk_score = 70
+    $principal_ip = array_distinct($gcp.principal.ip)
+    $principal_user = array_distinct($gcp.principal.user.email_id)
+    $project_id = array_distinct($gcp.target.resource.project_id)
+    $method_name = array_distinct($gcp.protoPayload.methodName)
+    $resource_name = array_distinct($gcp.protoPayload.resourceName)
+    $request_payload = array_distinct($gcp.protoPayload.request.json)
+
+  condition:
+    $gcp
+}

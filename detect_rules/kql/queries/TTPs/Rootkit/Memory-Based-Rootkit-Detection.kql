@@ -1,0 +1,63 @@
+// Name: Memory-Based Rootkit - Process Injection with Network Egress
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects when a process, commonly targeted for injection, establishes an external network connection
+//              shortly after a remote thread was created in it. This behavior is a strong indicator of a memory-based
+//              rootkit or fileless malware executing its payload and establishing a command and control channel.
+// Tactic: Defense Evasion, Command and Control
+// Technique: T1055, T1573
+// False Positive Sensitivity: Medium
+
+// Define common processes that are targeted for injection by malware.
+// This list can be tuned to include other applications like browsers or office software.
+let injection_target_processes = dynamic([
+    "svchost.exe",
+    "explorer.exe",
+    "lsass.exe",
+    "runtimebroker.exe",
+    "spoolsv.exe",
+    "winlogon.exe",
+    "services.exe"
+]);
+
+// Identify process injection events. This relies on an EDR capability that logs remote thread creation.
+let injection_events =
+DeviceEvents
+| where ActionType == "CreateRemoteThread"
+| where ProcessFileName in (injection_target_processes);
+
+// Correlate injection events with subsequent network connections from the compromised process.
+injection_events
+| join kind=inner (
+    DeviceNetworkEvents
+    // Focus on external network connections, a common sign of C2.
+    | where isnotempty(RemoteIP) and not(ipv4_is_private(RemoteIP))
+) on $left.DeviceName == $right.DeviceName and $left.ProcessId == $right.InitiatingProcessId
+// The network event should occur shortly after the injection.
+| where ($right.Timestamp - $left.Timestamp) between (0s .. 5m)
+// FP Reduction: Some legitimate tools (e.g., remote admin, security scanners) might use this technique.
+// Exclude known legitimate injecting processes if they cause noise in your environment.
+// For example: | where $left.InitiatingProcessFileName !in~ ("legit_admin_tool.exe")
+| summarize
+    StartTime = min($left.Timestamp),
+    EndTime = max($right.Timestamp),
+    make_set(RemoteIP, 5),
+    make_set(RemotePort, 5),
+    make_set(RemoteUrl, 5)
+    by
+    DeviceName,
+    AccountName = $left.AccountName,
+    InjectingProcess = $left.InitiatingProcessFileName,
+    InjectingProcessCommandLine = $left.InitiatingProcessCommandLine,
+    InjectedProcess = $left.ProcessFileName
+| project
+    StartTime,
+    EndTime,
+    DeviceName,
+    AccountName,
+    InjectingProcess,
+    InjectingProcessCommandLine,
+    InjectedProcess,
+    SuspiciousRemoteIPs = set_RemoteIP,
+    SuspiciousRemotePorts = set_RemotePort,
+    SuspiciousRemoteUrls = set_RemoteUrl

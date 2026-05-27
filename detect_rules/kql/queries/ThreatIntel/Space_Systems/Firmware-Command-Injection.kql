@@ -1,0 +1,43 @@
+// Name: Potential Command Injection on Ground Station Systems
+// Author: RW
+// Date: 2025-08-15
+// Tactic: Execution
+// Technique: T1059
+// References: id-76c7b8b0b6d27f004dcbec4248f3eaded30e1641a5a37b59d97465c08c28876d
+// Description: This rule detects potential command injection attacks against ground station systems. It identifies when a
+// common server process (like a web server) spawns a command shell (like PowerShell or bash). This behavior is highly
+// indicative of an attacker exploiting a vulnerability to gain code execution on a server. This detection is based on
+// intelligence highlighting command injection as a key attack vector for space systems.
+// False Positive Sensitivity: Medium. Some administrative tools or legitimate application functions may spawn shells.
+// It is recommended to baseline normal activity and add exclusions for known parent-child process relationships to reduce noise.
+//
+// Data sources: DeviceProcessEvents
+
+let timeframe = 1h;
+// Key parameter: Populate this list with the hostnames of your critical ground station servers.
+let ground_station_servers = dynamic([]); // e.g., dynamic(['ground-web-srv-01', 'mission-control-app-02']);
+// Key parameter: List of server processes that should not typically spawn shells.
+let server_processes = dynamic(['w3wp.exe', 'httpd.exe', 'nginx.exe', 'tomcat.exe', 'java.exe', 'node.exe', 'php-cgi.exe']);
+// Key parameter: List of common command shells.
+let shell_processes = dynamic(['cmd.exe', 'powershell.exe', 'pwsh.exe', 'sh', 'bash', 'zsh', 'csh', 'tclsh']);
+
+DeviceProcessEvents
+| where TimeGenerated > ago(timeframe)
+// Focus on specified ground station assets, or all assets if the list is empty.
+| where isempty(ground_station_servers) or DeviceName in~ (ground_station_servers)
+// Filter for events where a server process is the parent.
+| where InitiatingProcessFileName in~ (server_processes)
+// Filter for events where a shell is the child process.
+| where FileName in~ (shell_processes)
+// FP Tuning: Exclude known legitimate command lines or parent processes if they exist in your environment.
+// | where not (InitiatingProcessCommandLine has "C:\\Program Files\\SomeApp\\legit_script.bat")
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    ParentProcess = InitiatingProcessFileName,
+    ParentProcessCommandLine = InitiatingProcessCommandLine,
+    ChildProcess = FileName,
+    ChildProcessCommandLine = ProcessCommandLine,
+    MD5,
+    SHA256

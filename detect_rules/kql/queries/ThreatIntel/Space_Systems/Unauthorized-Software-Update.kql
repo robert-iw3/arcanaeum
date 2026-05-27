@@ -1,0 +1,44 @@
+// Name: Unauthorized Software/Firmware Update (SPARTA SIUU)
+// Author: RW
+// Date: 2025-08-15
+// Description: Aligned with the SPARTA SIUU (Software Integrity and Unauthorized Updates) threat pattern, this rule detects the
+// execution of unsigned software, installers, or drivers. This activity could indicate the introduction of unauthorized or
+// malicious code, backdoors, or attempts to tamper with system integrity.
+// Tactic: Persistence, Privilege Escalation, Defense Evasion
+// Technique: T1553.002
+// False Positive Sensitivity: Medium
+
+let timeframe = 1d;
+let temp_folders = dynamic(['C:\\Windows\\Temp\\', 'C:\\PerfLogs\\', '\\AppData\\Local\\Temp', '\\Users\\Public\\']);
+let installer_names = dynamic(['install', 'setup', 'update', 'patch', 'hotfix']);
+
+// Part 1: Detect execution of unsigned executables that appear to be installers or are in suspicious locations
+let unsigned_software_exec =
+    DeviceProcessEvents
+    | where Timestamp > ago(timeframe)
+    | where IsSigned == false and FileName endswith ".exe"
+    // Filter for processes that are either in a temp/download location OR have a name like an installer
+    | where FolderPath has_any (temp_folders) or FolderPath contains '\\Downloads\\' or FileName has_any (installer_names)
+    // FP Mitigation: Exclude known legitimate but unsigned applications. This list is critical for tuning.
+    | where not(FileName has_any ("putty.exe", "7z.exe") or InitiatingProcessFileName has_any ("sccm.exe", "Choco.exe"))
+    | extend
+        DetectionType = "Unsigned Software Execution",
+        Description = strcat("Unsigned process '", FileName, "' executed from folder: ", FolderPath)
+    | project Timestamp, DeviceName, AccountName, DetectionType, Description, FileName, ProcessCommandLine, SHA1, InitiatingProcessFileName;
+
+// Part 2: Detect loading of unsigned drivers, a form of privileged software update
+let unsigned_driver_load =
+    DeviceImageLoadEvents
+    | where Timestamp > ago(timeframe)
+    | where isnotempty(SHA1)
+    | where IsSigned == false and FileName endswith ".sys"
+    // FP Mitigation: Exclude known legitimate unsigned drivers. This is common with older hardware or specific software (e.g., virtualization).
+    // This requires significant baselining in a real environment.
+    | where not(FileName has_any ("vboxdrv.sys", "truecrypt.sys", "veracrypt.sys"))
+    | extend
+        DetectionType = "Unsigned Driver Load",
+        Description = strcat("Unsigned driver '", FileName, "' was loaded by process '", InitiatingProcessFileName, "'.")
+    | project Timestamp, DeviceName, AccountName, DetectionType, Description, FileName, ProcessCommandLine=InitiatingProcessCommandLine, SHA1, InitiatingProcessFileName;
+
+// Combine results from both detection types
+union unsigned_software_exec, unsigned_driver_load

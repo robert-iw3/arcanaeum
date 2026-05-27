@@ -1,0 +1,50 @@
+// Name: DNS Tunneling Indicators
+// Author: RW
+// Date: 2025-08-10
+// Description: This rule detects potential DNS tunneling activity based on indicators such as long domain names, a high number
+//              of subdomains, or queries for specific record types (TXT, NULL) often abused for data exfiltration.
+// False Positive Sensitivity: Medium
+
+let domainLengthThreshold = 100; // Threshold for suspicious domain name length.
+let subdomainCountThreshold = 10; // Threshold for a suspicious number of subdomains/labels.
+let suspiciousQueryTypes = dynamic(["TXT", "NULL"]); // Query types often used for data transfer.
+
+// Whitelist for common, legitimate TXT record prefixes to reduce false positives.
+let benignTxtPrefixes = dynamic([
+    "_dmarc.",
+    "_domainkey.",
+    "google-site-verification=",
+    "ms=",
+    "v=spf1",
+    "_acme-challenge."
+]);
+
+DnsEvents
+| where isnotempty(Name)
+// Calculate features for detection logic.
+| extend
+    domainLength = strlen(Name),
+    subdomainCount = countof(Name, ".")
+// Core detection logic looking for tunneling indicators.
+| where
+    // Condition 1: Suspicious query type (TXT/NULL) that doesn't match a common benign pattern.
+    (DnsQueryTypeName in (suspiciousQueryTypes) and not(Name has_any (benignTxtPrefixes)))
+    // Condition 2: Unusually long domain name.
+    or domainLength > domainLengthThreshold
+    // Condition 3: High number of subdomains, suggesting data chunking.
+    or subdomainCount > subdomainCountThreshold
+// Potential for false positives:
+// - Legitimate services (e.g., CDNs, cloud storage) may use long or complex domain names.
+// - Consider creating an allowlist of known benign domains or parent domains to filter out noise.
+//   For example: `| where Name !endswith ".blob.core.windows.net"`
+| project
+    TimeGenerated,
+    DeviceName,
+    ClientIP,
+    Name,
+    DnsQueryTypeName,
+    domainLength,
+    subdomainCount,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessParentFileName

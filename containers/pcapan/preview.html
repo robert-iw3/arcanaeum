@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PCAP Analyzer UI Preview</title>
+  <!-- Orbitron font for cyberpunk aesthetic -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap">
+  <!-- Material Icons -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Orbitron', sans-serif;
+      background-color: #0a0a0a;
+      color: #00ff00;
+      transition: color 0.3s, background-color 0.3s;
+    }
+    .light-theme {
+      background-color: #1a1a1a;
+      color: #00ccff;
+    }
+    .dark-theme {
+      background-color: #0a0a0a;
+      color: #00ff00;
+    }
+    .container {
+      padding: 20px;
+      max-width: 1200px;
+      margin: 0 auto;
+      position: relative;
+      overflow: hidden;
+    }
+    .glitch {
+      position: relative;
+      animation: glitch 2s infinite;
+    }
+    @keyframes glitch {
+      0% { transform: translate(0); }
+      2% { transform: translate(-2px, 2px); }
+      4% { transform: translate(2px, -2px); }
+      6% { transform: translate(0); }
+      100% { transform: translate(0); }
+    }
+    .login-form, .upload-form {
+      margin-bottom: 20px;
+      background: rgba(0, 255, 0, 0.1);
+      padding: 15px;
+      border: 1px solid #00ff00;
+      border-radius: 5px;
+      box-shadow: 0 0 10px #00ff00;
+    }
+    .light-theme .login-form, .light-theme .upload-form {
+      background: rgba(0, 204, 255, 0.1);
+      border-color: #00ccff;
+      box-shadow: 0 0 10px #00ccff;
+    }
+    .login-form input, .upload-form input {
+      margin-right: 10px;
+      padding: 8px;
+      border: 1px solid #00ff00;
+      background: #0a0a0a;
+      color: #00ff00;
+      border-radius: 4px;
+      font-family: 'Orbitron', sans-serif;
+    }
+    .light-theme .login-form input, .light-theme .upload-form input {
+      border-color: #00ccff;
+      background: #1a1a1a;
+      color: #00ccff;
+    }
+    .table-container {
+      margin-top: 20px;
+      border: 1px solid #00ff00;
+      box-shadow: 0 0 15px #00ff00;
+      border-radius: 5px;
+      background: rgba(0, 255, 0, 0.05);
+    }
+    .light-theme .table-container {
+      border-color: #00ccff;
+      box-shadow: 0 0 15px #00ccff;
+      background: rgba(0, 204, 255, 0.05);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      border: 1px solid #00ff00;
+      padding: 8px;
+      text-align: left;
+      font-size: 14px;
+    }
+    .light-theme th, .light-theme td {
+      border-color: #00ccff;
+    }
+    th {
+      background: rgba(0, 255, 0, 0.2);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .light-theme th {
+      background: rgba(0, 204, 255, 0.2);
+    }
+    button {
+      padding: 8px 16px;
+      background: #00ff00;
+      color: #0a0a0a;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: 'Orbitron', sans-serif;
+      box-shadow: 0 0 5px #00ff00;
+      transition: box-shadow 0.3s;
+    }
+    .light-theme button {
+      background: #00ccff;
+      box-shadow: 0 0 5px #00ccff;
+    }
+    button:hover {
+      box-shadow: 0 0 10px #00ff00;
+    }
+    .light-theme button:hover {
+      box-shadow: 0 0 10px #00ccff;
+    }
+    .theme-toggle {
+      display: flex;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .theme-toggle .material-icons {
+      color: #00ff00;
+    }
+    .light-theme .theme-toggle .material-icons {
+      color: #00ccff;
+    }
+    .digital-rain {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      opacity: 0.1;
+      background: linear-gradient(to bottom, rgba(0, 255, 0, 0.1), transparent);
+      animation: digitalRain 10s linear infinite;
+    }
+    @keyframes digitalRain {
+      0% { background-position: 0 0; }
+      100% { background-position: 0 1000px; }
+    }
+  </style>
+</head>
+<body class="dark-theme">
+  <div class="digital-rain"></div>
+  <div class="container">
+    <div class="theme-toggle">
+      <label style="display: flex; align-items: center; cursor: pointer;">
+        <input type="checkbox" id="themeSwitch" onchange="toggleTheme()">
+        <span class="material-icons" id="themeIcon">brightness_7</span>
+      </label>
+    </div>
+    <div id="loginForm" class="login-form glitch">
+      <input type="text" id="username" placeholder="Username" />
+      <input type="password" id="password" placeholder="Password" />
+      <button onclick="handleLogin()">Login</button>
+    </div>
+    <div id="uploadForm" class="upload-form glitch" style="display: none;">
+      <input type="file" id="fileInput" />
+      <button onclick="showResults()">Analyze</button>
+    </div>
+    <div id="resultsTable" class="table-container glitch" style="display: none;">
+      <table>
+        <thead>
+          <tr>
+            <th>IP</th>
+            <th>Hosts</th>
+            <th>Size</th>
+            <th>User Agents</th>
+            <th>Certs</th>
+            <th>Timestamps</th>
+            <th>Anomaly Score</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>192.168.1.1</td>
+            <td>[["SNI","example.com"],["DNS","test.com"]]</td>
+            <td>1500</td>
+            <td>Mozilla/5.0</td>
+            <td>{"subject":"CN=example.com","issuer":"CN=Test CA","valid_from":"2025-01-01","valid_to":"2026-01-01"}</td>
+            <td>2025-09-06T10:00:00Z</td>
+            <td>0.90</td>
+          </tr>
+          <tr>
+            <td>2001:db8::1</td>
+            <td>[["HttpHost","api.example.com"]]</td>
+            <td>500</td>
+            <td>curl/7.68.0</td>
+            <td></td>
+            <td>2025-09-06T10:01:00Z</td>
+            <td>0.10</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <script>
+    function toggleTheme() {
+      const body = document.body;
+      const themeIcon = document.getElementById('themeIcon');
+      if (body.classList.contains('dark-theme')) {
+        body.classList.remove('dark-theme');
+        body.classList.add('light-theme');
+        themeIcon.textContent = 'brightness_4';
+      } else {
+        body.classList.remove('light-theme');
+        body.classList.add('dark-theme');
+        themeIcon.textContent = 'brightness_7';
+      }
+    }
+
+    function handleLogin() {
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      if (username === 'user' && password === 'pass') {
+        document.getElementById('loginForm').style.display = 'none';
+        document.getElementById('uploadForm').style.display = 'block';
+      } else {
+        alert('Invalid credentials');
+      }
+    }
+
+    function showResults() {
+      document.getElementById('resultsTable').style.display = 'block';
+    }
+  </script>
+</body>
+</html>

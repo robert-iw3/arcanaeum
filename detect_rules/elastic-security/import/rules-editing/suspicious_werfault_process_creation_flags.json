@@ -1,0 +1,63 @@
+{
+  "rule_id": "suspicious_werfault_process_creation_flags",
+  "name": "Suspicious WerFault.exe Process Creation with Specific Flags",
+  "description": "Detects the creation of WerFault.exe with suspicious process creation flags (e.g., CREATE_SUSPENDED). This technique is often used by attackers to stage process injection and evade endpoint security controls.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "from * | where ((event.module == 'wineventlog' and event.code == '4688') or (event.module == 'xmlwineventlog' and event.code == '1') or (event.module == 'crowdstrike' and event.action == 'ProcessRollup2')) and (process.name == 'WerFault.exe' or process.executable like '%\\WerFault.exe') and (process.creation_flags like '%0x4%' or process.flags like '%0x4%') | stats count = COUNT(*) by host.name, user.name, process.parent.name, process.name, process.executable, process.command_line, process.creation_flags, process.flags | keep host.name, user.name, process.parent.name, process.name, process.executable, process.command_line, process.creation_flags, process.flags, count",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0005",
+        "name": "Defense Evasion",
+        "reference": "https://attack.mitre.org/tactics/TA0005/"
+      },
+      "technique": [
+        {
+          "id": "T1055",
+          "name": "Process Injection",
+          "reference": "https://attack.mitre.org/techniques/T1055/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0002",
+        "name": "Execution",
+        "reference": "https://attack.mitre.org/tactics/TA0002/"
+      },
+      "technique": [
+        {
+          "id": "T1059",
+          "name": "Command and Scripting Interpreter",
+          "reference": "https://attack.mitre.org/techniques/T1059/"
+        }
+      ]
+    }
+  ],
+  "interval": "5m",
+  "from": "now-5m",
+  "max_signals": 100,
+  "risk_score": 90,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://www.elastic.co/security-labs/upping-the-ante-detecting-in-memory-threats-with-kernel-call-stacks",
+    "https://github.com/elastic/detection-rules/blob/main/rules/windows/defense_evasion_masquerading_suspicious_werfault_childproc.toml"
+  ],
+  "tags": [
+    "Windows",
+    "WerFault",
+    "Process Injection",
+    "Defense Evasion"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "host.name, process.name, process.creation_flags, process.flags"
+}

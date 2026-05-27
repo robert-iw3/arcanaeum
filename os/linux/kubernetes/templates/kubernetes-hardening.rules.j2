@@ -1,0 +1,36 @@
+# Audit rules for Kubernetes hardening
+# Monitor critical system calls and Kubernetes-related files
+
+# Clear existing rules
+-D
+
+# Set buffer size to avoid overflow
+-b 8192
+
+# Monitor Kubernetes configuration files
+-w /etc/kubernetes/ -p wa -k k8s_config
+-w /etc/kubernetes/admin.conf -p wa -k k8s_config
+-w /etc/kubernetes/scheduler.conf -p wa -k k8s_config
+-w /etc/kubernetes/controller-manager.conf -p wa -k k8s_config
+-w /etc/kubernetes/kubelet.conf -p wa -k k8s_config
+
+# Monitor system calls related to privilege escalation
+-a always,exit -F arch=b64 -S execve -C uid!=euid -F key=privilege_escalation
+-a always,exit -F arch=b64 -S setuid -F key=privilege_escalation
+-a always,exit -F arch=b64 -S setgid -F key=privilege_escalation
+
+# Monitor network-related system calls
+-a always,exit -F arch=b64 -S bind -F key=network_bind
+-a always,exit -F arch=b64 -S connect -F key=network_connect
+
+# Monitor changes to user/group files
+-w /etc/passwd -p wa -k identity
+-w /etc/shadow -p wa -k identity
+-w /etc/group -p wa -k identity
+-w /etc/gshadow -p wa -k identity
+
+# Monitor SSH configuration changes
+-w /etc/ssh/sshd_config -p wa -k ssh_config
+
+# Catch-all rule for unhandled events
+-a exit,always -F perm=wa -F key=catch_all

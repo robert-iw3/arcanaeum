@@ -1,0 +1,27 @@
+[package]
+name = "indirect_shellcode"
+description = "Rust base program that indirect writes payload into self memory of the process in order to evade detection"
+author = "M7 - Miguel Moreno Pastor"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.5.51", features = ["derive"] }
+reqwest = {version = "0.12.24", features = ["blocking"]}
+winapi = { version = "0.3.9", features = ["memoryapi", "processthreadsapi", "synchapi", "winnt"] }
+windows = { version = "0.58.0", features = [
+    "Win32_Foundation",
+    "Win32_System_Memory",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_Storage_FileSystem",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading"
+] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+debug = 0

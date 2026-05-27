@@ -1,0 +1,49 @@
+rule AMSI_Bypass_SetThreadContext_Breakpoint_Detection {
+  meta:
+    author = "RW"
+    description = "Detects potential AMSI bypass via SetThreadContext API calls to place hardware breakpoints within amsi.dll, often originating from scripting hosts or custom loaders."
+    severity = "CRITICAL"
+
+  events:
+    $e.metadata.event_type = "API_CALL" // UDM event type for API calls.
+    $e.metadata.vendor_name = "Microsoft" // Assuming MDE logs from Microsoft.
+    $e.metadata.product_name = "Microsoft Defender for Endpoint" // Assuming MDE as source, maps to product_name.
+    $e.metadata.product_event_type = "SetThreadContextApiCall" // MDE ActionType maps to product_event_type.
+
+    // Filter for attempts to place a breakpoint within amsi.dll.
+    // TargetModulePath is likely mapped to target.process.file.full_path or a similar field.
+    $e.target.process.file.full_path = /.*\\amsi\.dll/ nocase
+
+    // Filter for originating processes that are scripting hosts or loaders.
+    // InitiatingProcessFileName maps to principal.process.file.file_name.
+    $e.principal.process.file.file_name in ("powershell.exe", "pwsh.exe", "cscript.exe", "wscript.exe", "rundll32.exe")
+
+    // Check for DebugRegister and BreakpointAddress indicating a hardware breakpoint.
+    // These fields would likely be found within 'extensions.api.parameters' or similar,
+    // depending on how MDE detailed API parameters are mapped to UDM.
+    // This part might need adjustment based on your specific UDM mapping.
+    // Example (assuming fields exist):
+    // $e.extensions.api.parameters.debug_register = /.*/ and // Check if DebugRegister exists
+    // $e.extensions.api.parameters.breakpoint_address != null // Check if BreakpointAddress is present
+
+    // FP Tuning: Exclude known and signed tools.
+    // Assuming InitiatingProcessSigner maps to principal.process.file.signer or principal.process.certificate.subject.
+    // Use a Chronicle Reference List for known benign signers or process names for more flexible tuning.
+    not $e.principal.process.file.signer = "Legitimate Security Vendor"
+    // Example: not $e.principal.process.file.full_path in %amsi_setthreadcontext_whitelist
+
+  outcome:
+    $timestamp = $e.metadata.event_timestamp.epoch_seconds // _time
+    $host = $e.principal.hostname // DeviceName
+    $user = $e.principal.user.userid // InitiatingProcessAccountName
+    $process_name = $e.principal.process.file.file_name // InitiatingProcessFileName
+    $process_command_line = $e.principal.process.command_line // InitiatingProcessCommandLine
+    $target_module_path = $e.target.process.file.full_path // TargetModulePath
+    // Fields for DebugRegister and BreakpointAddress will depend on your UDM mapping.
+    // Assuming mapping to extensions.api.parameters or a similar structure.
+    $debug_register_value = $e.extensions.api.parameters.debug_register // Example field mapping
+    $breakpoint_address = $e.extensions.api.parameters.breakpoint_address // Example field mapping
+
+  condition:
+    $e and $target_module_path != "" // Ensure target module path is present
+}

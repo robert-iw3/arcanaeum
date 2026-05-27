@@ -1,0 +1,32 @@
+// Name: Suspicious PowerShell Obfuscation Keywords
+// Author: RW
+// Date: 2025-07-31
+// Description: Detects PowerShell command lines containing keywords and patterns commonly associated with obfuscation techniques. Adversaries use obfuscation to hide malicious code from signature-based detections and security analysts.
+// Tags: TTPs, Defense Evasion, T1027
+
+DeviceProcessEvents
+// Filter for PowerShell processes.
+| where FileName in~ ("powershell.exe", "pwsh.exe")
+// Combine multiple conditions to identify obfuscated commands.
+| where
+    // Condition 1: Use of EncodedCommand, a very common method for hiding malicious scripts.
+    // The length check helps filter out benign, short encoded commands.
+    (ProcessCommandLine has_any ("-encodedcommand", "-ec", "-enc", "-en", "-e ") and strlen(ProcessCommandLine) > 200)
+    or
+    // Condition 2: Use of Invoke-Expression (IEX) with other obfuscation indicators.
+    // IEX is often used to execute strings built at runtime to evade static analysis.
+    (ProcessCommandLine has_any ("iex", "invoke-expression") and (ProcessCommandLine has_any ("+", "-join", "[char]", "frombase64string") or strlen(ProcessCommandLine) > 1024))
+    or
+    // Condition 3: High ratio of special characters or unusual command line length, often seen with obfuscation.
+    (strlen(ProcessCommandLine) > 400 and ProcessCommandLine has_any ("-join", "replace", "split"))
+// FP Tuning: Legitimate scripts, especially from management tools (e.g., SCCM, Intune), might use encoded commands.
+// Exclude known safe parent processes or command line patterns if they cause noise.
+// For example: | where InitiatingProcessFileName !in~ ("ccmexec.exe")
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    FileName,
+    ProcessCommandLine,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine

@@ -1,0 +1,74 @@
+// Name: Azure AD PTA Agent Compromise Attempt
+// Author: RW
+// Date: 2025-08-31
+// Description: Detects suspicious activity on hosts running the Azure AD Pass-through Authentication (PTA) agent, indicative of a
+// credential validation bypass exploit. The attack requires an attacker with local admin rights to inject a malicious DLL into the
+// PTA agent process ('AzureADConnectAuthenticationAgentService.exe'). This DLL then hooks authentication functions to always return
+// a successful validation, allowing the attacker to log in as any synced user with any password. This rule looks for indicators of
+// this DLL injection and artifact creation on the host.
+// False Positive Sensitivity: Medium
+// Tags: Credential Access, Azure, Entra ID, PTA, T1055, T1555
+
+let ptaProcess = "AzureADConnectAuthenticationAgentService.exe";
+
+// Define suspicious artifacts based on the Cymulate PoC.
+// Tuning recommendation: Add or remove paths/filenames based on your environment's baseline and other threat intelligence.
+let suspiciousPaths = dynamic([@"C:\Users\Public\", @"C:\Windows\Temp\", @"C:\Temp\"]);
+let suspiciousDlls = dynamic(["captainhook.dll", "0harmony.dll"]); // Harmony is a known .NET hooking library.
+let suspiciousLogFiles = dynamic(["hook.txt", "log.txt"]);
+
+// Detect suspicious DLLs being loaded by the PTA agent process. This is a strong indicator of process injection/hooking.
+let suspiciousDllLoads =
+    DeviceImageLoadEvents
+    | where InitiatingProcessFileName =~ ptaProcess
+    // A legitimate PTA agent should only load signed Microsoft DLLs from system/program files directories.
+    // An unsigned DLL or a DLL from a public/temp path is highly suspicious.
+    | where (IsSigned == false and not(isempty(Signer))) or FolderPath has_any (suspiciousPaths) or FileName in~ (suspiciousDlls)
+    // FP Tuning: If legitimate non-Microsoft tools interact with this service, they may need to be excluded.
+    // For example: | where not (Signer contains "MySecurityToolVendor")
+    | extend
+        Activity = "Suspicious DLL loaded by PTA Agent",
+        Tactic = "Privilege Escalation, Defense Evasion",
+        Technique = "T1055",
+        SuspiciousArtifact = FileName
+    | project
+        TimeGenerated,
+        DeviceName,
+        Activity,
+        Tactic,
+        Technique,
+        InitiatingProcessFileName,
+        SuspiciousArtifact,
+        FolderPath,
+        SHA1,
+        IsSigned,
+        Publisher;
+
+// Detect the creation of suspicious files by the PTA agent, which may be the malicious DLL itself or log files from the exploit.
+let suspiciousFileCreations =
+    DeviceFileEvents
+    | where InitiatingProcessFileName =~ ptaProcess and ActionType == "FileCreated"
+    | where FileName in~ (suspiciousDlls) or FileName in~ (suspiciousLogFiles) or FolderPath has_any (suspiciousPaths)
+    // FP Tuning: The PTA agent writing to temp/public folders might occur in rare legitimate scenarios (e.g., crash dumps).
+    // Investigate any hits to establish a baseline.
+    | extend
+        Activity = "Suspicious file created by PTA Agent",
+        Tactic = "Execution",
+        Technique = "T1055", // The file is an artifact of the injection technique.
+        SuspiciousArtifact = FileName,
+        IsSigned = "N/A",
+        Publisher = "N/A"
+    | project
+        TimeGenerated,
+        DeviceName,
+        Activity,
+        Tactic,
+        Technique,
+        InitiatingProcessFileName,
+        SuspiciousArtifact,
+        FolderPath,
+        SHA1,
+        IsSigned,
+        Publisher;
+
+union suspiciousDllLoads, suspiciousFileCreations

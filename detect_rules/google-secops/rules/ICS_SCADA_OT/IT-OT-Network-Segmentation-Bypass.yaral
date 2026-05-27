@@ -1,0 +1,54 @@
+rule it_ot_network_segmentation_bypass {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects network traffic that crosses the defined boundary between IT and OT network segments and is not explicitly allowed. This could indicate lateral movement from a compromised IT asset into the critical OT environment, or command-and-control/exfiltration from OT to IT. This rule is highly dependent on the accurate definition of IT/OT subnets and an allowlist of authorized cross-segment communications."
+    tactic = "TA0008, TA0011, TA0003"
+    technique = "T1210"
+    false_positives = "This rule will generate false positives if the IT/OT subnets are not correctly defined or if legitimate communication channels (e.g., from a data historian, jump box, or engineering workstation) are not added to the allowlist."
+
+  events:
+    $e.metadata.event_type = "NETWORK_CONNECTION"
+
+    // Identify traffic crossing the IT/OT boundary in either direction.
+    // Tuning: The %it_subnets and %ot_subnets reference lists must be populated with your network ranges.
+    (
+      (net.ip_in_range_cidr($e.principal.ip, %it_subnets) and net.ip_in_range_cidr($e.target.ip, %ot_subnets)) or
+      (net.ip_in_range_cidr($e.principal.ip, %ot_subnets) and net.ip_in_range_cidr($e.target.ip, %it_subnets))
+    )
+
+    // Filter out known, legitimate connections.
+    // Tuning: Add specific Source IPs, Destination IPs, and Destination Ports that are authorized.
+    not (
+      // Example: IT Historian Server pulling data from an OT PLC via Modbus
+      ($e.principal.ip = "192.168.1.50" and $e.target.ip = "172.16.10.100" and $e.target.port = 502) or
+      // Example: OT Jump Box accessing a file server in the IT network via SMB
+      ($e.principal.ip = "172.16.20.5" and $e.target.ip = "192.168.1.200" and $e.target.port = 445) or
+      // Example: Engineering Workstation in IT pushing a configuration to an HMI in OT
+      ($e.principal.ip = "192.168.5.25" and $e.target.ip = "172.16.30.15" and $e.target.port = 44818)
+    )
+
+    // Capture fields for matching and outcome.
+    $e.principal.ip = $source_ip
+    $e.target.ip = $dest_ip
+
+  match:
+    // Group unauthorized connections by the source and destination IP pair over 1 hour.
+    $source_ip, $dest_ip over 1h
+
+  outcome:
+    $risk_score = 60
+    $principal_ip = $source_ip
+    $target_ip = $dest_ip
+    $principal_hostname = array_distinct($e.principal.hostname)
+    $target_hostname = array_distinct($e.target.hostname)
+    $destination_ports = array_distinct($e.target.port)
+    $user = array_distinct($e.principal.user.userid)
+    $process_command_line = array_distinct($e.principal.process.command_line)
+    $event_count = count_distinct($e.metadata.id)
+    // Determine the direction of the traffic for easier analysis.
+    $traffic_direction = if(net.ip_in_range_cidr($source_ip, %it_subnets), "IT_to_OT", "OT_to_IT")
+
+  condition:
+    $e
+}

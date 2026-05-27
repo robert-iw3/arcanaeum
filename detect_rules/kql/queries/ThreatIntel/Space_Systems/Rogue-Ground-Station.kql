@@ -1,0 +1,38 @@
+// Name: Potential Rogue Ground Station Network Activity
+// Author: RW
+// Date: 2025-08-15
+// Description: Detects network connections to or from the ground station network that involve unauthorized external IP addresses.
+// This could indicate a compromised asset within the ground station network communicating with an external C2 server, or an external
+// system (like a rogue ground station's control node) communicating with the ground station network.
+// False Positive Sensitivity: Medium
+// Tactic: Command and Control
+// Technique: T1090 - Proxy, T1059 - Command and Scripting Interpreter
+
+let timeframe = 1d;
+// FP Tuning: Define the IP address ranges of your ground station network.
+let GroundStationNetworkIPs = dynamic([]);
+// FP Tuning: Define the IP addresses of all authorized external entities that communicate with the ground station network.
+// This could include the Mission Control Centre, other known ground stations, trusted partners, etc.
+let AuthorizedExternalIPs = dynamic([]);
+DeviceNetworkEvents
+| where TimeGenerated > ago(timeframe)
+// Focus on connections where one party is the ground station network.
+| where LocalIP in (GroundStationNetworkIPs) or RemoteIP in (GroundStationNetworkIPs)
+// Identify the ground station IP and the external IP.
+| extend GroundStationIP = iif(LocalIP in (GroundStationNetworkIPs), LocalIP, RemoteIP)
+| extend ExternalIP = iif(LocalIP in (GroundStationNetworkIPs), RemoteIP, LocalIP)
+// Filter out connections where the external IP is a known authorized entity.
+| where ExternalIP !in (AuthorizedExternalIPs)
+// Filter out private, loopback, and link-local addresses to focus on true external connections.
+| where not(is_ipv4_private(ExternalIP)) and ExternalIP !startswith "127." and ExternalIP !startswith "169.254." and ExternalIP != "::1"
+// FP Tuning: Legitimate new services, administrative activities, or misconfigurations can cause alerts.
+// Review the unauthorized connections and add legitimate IPs to the 'AuthorizedExternalIPs' list.
+| summarize StartTime = min(TimeGenerated), EndTime = max(TimeGenerated), ConnectionCount = count(), DestinationPorts = make_set(RemotePort) by GroundStationIP, ExternalIP, InitiatingProcessFileName, bin(TimeGenerated, 1h)
+| project
+    StartTime,
+    EndTime,
+    GroundStationIP,
+    ExternalIP,
+    ConnectionCount,
+    DestinationPorts,
+    InitiatingProcessFileName

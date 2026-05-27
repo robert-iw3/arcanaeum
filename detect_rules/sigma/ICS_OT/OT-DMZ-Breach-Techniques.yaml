@@ -1,0 +1,119 @@
+title: OT DMZ Breach Techniques - Process Events
+status: experimental
+description: >-
+  This rule combines multiple detection patterns based on process creation events associated with OT DMZ breaches.
+  It detects credential harvesting, various forms of RDP abuse (hijacking, shadowing), and hVNC-style activity.
+references:
+    - https://attack.mitre.org/techniques/T1563/002/
+    - https://github.com/WKL-Sec/HiddenDesktop?tab=readme-ov-file
+    - https://attack.mitre.org/techniques/T1003/
+    - https://attack.mitre.org/techniques/T1563/
+author: RW
+date: 2025-08-17
+tags:
+    - attack.credential_access
+    - attack.t1003
+    - attack.lateral_movement
+    - attack.t1563
+    - attack.t1563.002
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    # Credential Harvesting Tool Execution
+    cred_harvest_img:
+        Image|endswith:
+            - '\LaZagne.exe'
+            - '\mimikatz.exe'
+            - '\Seatbelt.exe'
+            - '\SharpDPAPI.exe'
+    cred_harvest_orig:
+        OriginalFileName:
+            - 'LaZagne.exe'
+            - 'mimikatz.exe'
+            - 'Seatbelt.exe'
+            - 'SharpDPAPI.exe'
+
+    # RDP Session Hijacking via tscon.exe
+    tscon_hijack:
+        Image|endswith: '\tscon.exe'
+        User: 'NT AUTHORITY\SYSTEM'
+        CommandLine|re: '(?i)\s(\d+|/dest:\w+)' # Matches a session ID number or /dest:console etc.
+
+    # RDP Shadowing Activity
+    rdp_shadow_process:
+        Image|endswith:
+            - '\mstsc.exe'
+            - '\shadow.exe'
+    rdp_shadow_flags:
+        CommandLine|contains:
+            - '/noConsentPrompt'
+            - '/control'
+    rdp_shadow_mstsc_flag:
+        Image|endswith: '\mstsc.exe'
+        CommandLine|contains: '/shadow'
+
+    # Hidden Desktop (hVNC) Abuse
+    hvnc_child:
+        Image|endswith:
+            - '\explorer.exe'
+            - '\iexplore.exe'
+            - '\chrome.exe'
+            - '\firefox.exe'
+            - '\msedge.exe'
+            - '\winword.exe'
+            - '\excel.exe'
+            - '\powerpnt.exe'
+            - '\outlook.exe'
+            - '\mstsc.exe'
+            - '\cmd.exe'
+            - '\powershell.exe'
+    hvnc_parent:
+        ParentImage|endswith:
+            - '\services.exe'
+            - '\svchost.exe'
+            - '\lsass.exe'
+            - '\wininit.exe'
+            - '\wmiprvse.exe'
+            - '\wmiadap.exe'
+    hvnc_system_child:
+        User: 'NT AUTHORITY\SYSTEM'
+
+    condition: >
+        1 of cred_harvest_* or
+        tscon_hijack or
+        (rdp_shadow_process and 1 of rdp_shadow_flags and (Image|endswith: '\shadow.exe' or rdp_shadow_mstsc_flag)) or
+        (1 of hvnc_child and (1 of hvnc_parent or hvnc_system_child))
+falsepositives:
+    # These tools and techniques may be used legitimately by penetration testers, security administrators, or remote support tools.
+    # Filter based on user accounts or specific hostnames where such activity is expected.
+    - Legitimate security testing or system administration activities.
+    - Legitimate remote support scenarios.
+level: high
+---
+title: OT DMZ Breach Techniques - Group Management
+status: experimental
+description: Detects the addition of a user to a sensitive OT-related security group, a potential sign of privilege escalation or persistence.
+references:
+    - https://attack.mitre.org/techniques/T1098/
+author: RW
+date: 2025-08-17
+tags:
+    - attack.persistence
+    - attack.privilege_escalation
+    - attack.t1098
+logsource:
+    product: windows
+    service: security
+detection:
+    selection:
+        EventID:
+            - 4728 # A member was added to a security-enabled global group
+            - 4756 # A member was added to a security-enabled universal group
+        TargetUserName: 'OT Remote Access Users' # Field representing the group name
+    condition: selection
+falsepositives:
+    # Legitimate administrators may perform this action as part of standard user provisioning.
+    # Filter based on the user performing the action (SubjectUserName).
+    - Legitimate user and identity management.
+level: high

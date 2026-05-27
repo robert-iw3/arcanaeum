@@ -1,0 +1,51 @@
+// Name: Unauthorized Internal Access via Tunnel Spoofing
+// Description: Detects egress network traffic from a private (RFC1918) source IP to a public destination IP.
+//              This is a strong indicator of a successful tunnel spoofing attack (e.g., GRE/GRETAP) or a severe
+//              network misconfiguration, as private IP addresses should not be routable over the public internet.
+//              The attack allows an external actor to bypass perimeter defenses and communicate with internal assets.
+// Tactic: Initial Access, Command and Control
+// Technique: T1090.002
+// Author: RW
+// Date: 2025-08-13
+// False Positives: High potential for false positives if not scoped to the correct log sources.
+// This can trigger on misconfigured networks or on logs from internal sensors before Network Address Translation (NAT) is applied.
+// This rule is most effective on perimeter firewall or router logs that inspect egress traffic.
+// Data Source: Network Session, Firewall Logs
+
+let timeframe = 5m;
+let event_threshold = 1;
+
+_Im_NetworkSession
+| where isnotempty(SrcIpAddr) and isnotempty(DstIpAddr)
+// Condition for private source IP (RFC1918).
+| where is_private_ipv4(SrcIpAddr)
+// Condition for public destination IP (not private or reserved).
+| where not(is_private_ipv4(DstIpAddr))
+    and not(ipv4_is_in_range(DstIpAddr, "127.0.0.0/8"))      // Loopback
+    and not(ipv4_is_in_range(DstIpAddr, "169.254.0.0/16")) // Link-local
+    and not(ipv4_is_in_range(DstIpAddr, "224.0.0.0/4"))       // Multicast
+// To improve fidelity, filter for specific log sources at the network edge.
+// For example: | where DvcVendor in ("Palo Alto Networks", "Cisco", "Fortinet")
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    EventCount = count(),
+    NetworkProtocols = make_set(NetworkProtocol),
+    DestinationPorts = make_set(DstPortNumber),
+    SrcHostnames = make_set(SrcHostname)
+    by InternalIp = SrcIpAddr, ExternalIp = DstIpAddr, bin(TimeGenerated, timeframe)
+// Require at least 2 packets to indicate communication, reducing noise from single stray packets.
+| where EventCount > event_threshold
+| project-reorder
+    StartTime,
+    EndTime,
+    InternalIp,
+    ExternalIp,
+    EventCount,
+    NetworkProtocols,
+    DestinationPorts,
+    SrcHostnames
+| extend
+    timestamp = StartTime,
+    SrcIpCustomEntity = InternalIp,
+    DstIpCustomEntity = ExternalIp

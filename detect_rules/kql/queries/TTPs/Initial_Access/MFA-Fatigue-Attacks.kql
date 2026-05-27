@@ -1,0 +1,41 @@
+// Name: MFA Fatigue Attack
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects a high number of MFA denials for a single user account in a short period.
+//              This pattern is indicative of an MFA fatigue or push notification spam attack, where
+//              an attacker who has obtained a user's password attempts to annoy the user into approving an MFA prompt.
+// False Positive Sensitivity: Medium
+// Tags:
+// - Tactic: Credential Access
+// - Technique: T1621, Multi-Factor Authentication Request Generation
+
+let timeframe = 30m;
+let denial_threshold = 5; // Minimum number of MFA denials for a single user to trigger an alert.
+
+SigninLogs
+| where TimeGenerated > ago(timeframe)
+// Expand the AuthenticationDetails array to inspect each authentication step.
+| mv-expand todynamic(AuthenticationDetails)
+// Filter for failed MFA steps, specifically targeting methods vulnerable to fatigue attacks like push notifications.
+| where AuthenticationDetails.succeeded == false
+  and AuthenticationDetails.authenticationMethod == "Phone App Notification"
+// Summarize the failed attempts for each user.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    MFADenialCount = count(),
+    TargetedApplications = make_set(AppDisplayName, 10),
+    SourceIpAddresses = make_set(IPAddress, 10)
+    by UserPrincipalName, UserDisplayName
+// Alert if the number of denials exceeds the defined threshold.
+| where MFADenialCount >= denial_threshold
+// FP Tuning: The denial_threshold may need to be adjusted. A user might accidentally deny a few legitimate prompts.
+// To increase fidelity, you could create a subsequent rule to look for a successful login for these users immediately following the denial storm.
+| project
+    StartTime,
+    EndTime,
+    UserPrincipalName,
+    UserDisplayName,
+    MFADenialCount,
+    TargetedApplications,
+    SourceIpAddresses

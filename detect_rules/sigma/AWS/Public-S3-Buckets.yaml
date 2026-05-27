@@ -1,0 +1,57 @@
+title: AWS S3 Bucket Made Public
+id: 07f7473d-be89-4d1d-9a7a-5958730adb45
+status: experimental
+description: Detects attempts to make an S3 bucket public, which is a common misconfiguration leveraged for data exfiltration. This includes modifying bucket ACLs, policies, or removing or weakening public access blocks.
+references:
+  - https://cloud.hacktricks.wiki/en/pentesting-cloud/aws-security/index.html
+  - https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-control-block-public-access.html
+author: RW
+date: 2025-08-19
+tags:
+  - attack.exfiltration
+  - attack.t1537
+  - attack.t1562.007
+  - cloud
+  - aws
+logsource:
+  service: aws.cloudtrail
+  category: cloud
+detection:
+  selection_acl:
+    # Detects making a bucket public via Access Control List (ACL)
+    eventName: 'PutBucketAcl'
+    requestParameters.AccessControlPolicy.Grant.Grantee.URI:
+      - 'http://acs.amazonaws.com/groups/global/AllUsers'
+      - 'http://acs.amazonaws.com/groups/global/AuthenticatedUsers'
+  selection_policy:
+    # Detects making a bucket public via a bucket policy with a wildcard principal
+    eventName: 'PutBucketPolicy'
+    requestParameters.bucketPolicy.Statement.Effect: 'Allow'
+    requestParameters.bucketPolicy.Statement.Principal:
+      AWS: '*'
+  selection_policy_alt:
+    eventName: 'PutBucketPolicy'
+    requestParameters.bucketPolicy.Statement.Effect: 'Allow'
+    requestParameters.bucketPolicy.Statement.Principal: '*'
+  selection_delete_block:
+    # Detects removal of the Public Access Block configuration from a bucket
+    eventName: 'DeletePublicAccessBlock'
+  selection_put_block_acls_disabled:
+    # Detects modification of the Public Access Block to allow public ACLs
+    eventName: 'PutPublicAccessBlock'
+    requestParameters.PublicAccessBlockConfiguration.BlockPublicAcls: false
+  selection_put_block_policy_disabled:
+    # Detects modification of the Public Access Block to allow public policies
+    eventName: 'PutPublicAccessBlock'
+    requestParameters.PublicAccessBlockConfiguration.BlockPublicPolicy: false
+  filter_success:
+    errorCode:      # Filter for successful API calls only
+  filter_known_activity:
+    # This is a placeholder. Tune this to your environment by excluding known roles or users.
+    userIdentity.arn:
+      - 'arn:aws:iam::123456789012:role/ExampleRoleForPublicWebsite'
+  condition: filter_success and (1 of selection_*) and not filter_known_activity
+falsepositives:
+  - Legitimate creation or modification of public buckets for intended purposes, such as hosting static websites or distributing public datasets.
+  - These actions should be rare and performed by a small, authorized set of users or roles. It is recommended to investigate the identity performing the action and the business justification for the public bucket.
+level: high

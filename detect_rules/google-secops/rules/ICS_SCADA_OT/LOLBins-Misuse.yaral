@@ -1,0 +1,53 @@
+rule lolbins_misuse {
+  meta:
+    description = "Detects suspicious usage of common Living Off the Land Binaries (LOLBins) such as regsvr32, msbuild, and bitsadmin. Adversaries abuse these trusted, signed utilities to proxy execution of malicious code, download payloads, and evade defenses, as referenced in the provided intelligence."
+    author = "RW"
+    date = "2025-08-18"
+    reference = "https://attack.mitre.org/techniques/T1218/010/, https://attack.mitre.org/techniques/T1127/001/, https://attack.mitre.org/techniques/T1197/"
+    tags = "DEFENSE_EVASION, EXECUTION, T1218.010, T1127.001, T1197, WINDOWS"
+    tactic = "TA0005, TA0002"
+    technique = "T1218.010, T1127.001, T1197"
+    false_positives = "Legitimate software updaters (e.g., Google Update) may use bitsadmin.exe. Developer environments may use msbuild.exe with project files in user directories. Exclusions for known safe parent processes or command lines may be necessary."
+
+  events:
+    $p.metadata.event_type = "PROCESS_CREATION"
+
+    (
+      // Detects regsvr32 used to execute code from a scriptlet or network location.
+      (
+        $p.target.process.file.name = "regsvr32.exe" nocase
+        and re.regex($p.target.process.command_line, `\/s`) // The silent flag is common in malicious use.
+        and (
+          re.regex($p.target.process.command_line, `scrobj\.dll`) // Used to process scriptlets.
+          or re.regex($p.target.process.command_line, `https?:\/\/`) // Fetching a remote payload.
+        )
+      )
+      or
+      // Detects msbuild executing a project file from a suspicious, user-writable location.
+      (
+        $p.target.process.file.name = "msbuild.exe" nocase
+        and re.regex($p.target.process.command_line, `C:\\(Users|ProgramData|Windows\\Temp|Temp|Perflogs)\\`)
+      )
+      or
+      // Detects bitsadmin being used to download a file from the internet.
+      (
+        $p.target.process.file.name = "bitsadmin.exe" nocase
+        and re.regex($p.target.process.command_line, `\/transfer`)
+        and re.regex($p.target.process.command_line, `https?:\/\/`)
+      )
+    )
+
+  condition:
+    $p
+
+  outcome:
+    // Risk score is medium, as these patterns can have legitimate use cases that require tuning.
+    $risk_score = 55
+    $lolbin_used = array_distinct($p.target.process.file.name)
+    $principal_hostname = array_distinct($p.principal.hostname)
+    $principal_user = array_distinct($p.principal.user.userid)
+    $process_path = array_distinct($p.target.process.file.full_path)
+    $command_line = array_distinct($p.target.process.command_line)
+    $parent_process_path = array_distinct($p.principal.process.file.full_path)
+    $parent_command_line = array_distinct($p.principal.process.command_line)
+}

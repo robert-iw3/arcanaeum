@@ -1,0 +1,59 @@
+rule waiting_thread_hijacking_basic_sequence {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects the basic Waiting Thread Hijacking (WTH) sequence where a process opens a handle to a remote thread, allocates memory, and then writes to it."
+    tactic = "TA0005"
+    technique = "T1055"
+    false_positives = "Debuggers, performance monitors, and some security tools may exhibit this behavior."
+
+  events:
+    // Event 1: A process opens a handle to a thread in another process.
+    $open.metadata.event_type = "PROCESS_API_CALL"
+    $open.security_result.action_details = "OpenThread"
+    $open.principal.process.pid = $source_pid
+    $open.target.process.pid = $target_pid
+
+    // Event 2: The same source process allocates memory in the target process.
+    $alloc.metadata.event_type = "PROCESS_API_CALL"
+    $alloc.security_result.action_details = "VirtualAllocEx"
+    $alloc.principal.process.pid = $source_pid
+    $alloc.target.process.pid = $target_pid
+
+    // Event 3: The same source process writes to the target process.
+    $write.metadata.event_type = "PROCESS_API_CALL"
+    $write.security_result.action_details = "WriteProcessMemory"
+    $write.principal.process.pid = $source_pid
+    $write.target.process.pid = $target_pid
+
+    // Filter out self-injection and known benign processes.
+    $source_pid != $target_pid
+    not strings.ends_with($open.principal.process.file.full_path, "\\procexp.exe")
+    and not strings.ends_with($open.principal.process.file.full_path, "\\procmon.exe")
+    and not strings.ends_with($open.principal.process.file.full_path, "\\windbg.exe")
+    and not strings.ends_with($open.principal.process.file.full_path, "\\x64dbg.exe")
+    and not strings.ends_with($open.principal.process.file.full_path, "\\ollydbg.exe")
+    and not strings.ends_with($open.principal.process.file.full_path, "\\perfview.exe")
+    and not strings.ends_with($open.principal.process.file.full_path, "\\ProcessHacker.exe")
+    and not strings.ends_with($open.principal.process.file.full_path, "\\SystemInformer.exe")
+
+  match:
+    // Correlate events by the source and target process IDs over a 10 minute window.
+    $source_pid, $target_pid over 10m
+
+  outcome:
+    $risk_score = 50
+    $technique = "WTH - Basic Sequence"
+    $principal_process_path = array_distinct($open.principal.process.file.full_path)
+    $principal_process_pid = $source_pid
+    $principal_process_cmdline = array_distinct($open.principal.process.command_line)
+    $target_process_path = array_distinct($write.target.process.file.full_path)
+    $target_process_pid = $target_pid
+    $target_process_cmdline = array_distinct($write.target.process.command_line)
+
+  condition:
+    // Ensure all three steps occurred in the correct order.
+    $open and $alloc and $write and
+    $alloc.metadata.collected_timestamp.seconds > $open.metadata.collected_timestamp.seconds and
+    $write.metadata.collected_timestamp.seconds > $alloc.metadata.collected_timestamp.seconds
+}

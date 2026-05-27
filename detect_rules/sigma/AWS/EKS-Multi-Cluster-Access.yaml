@@ -1,0 +1,37 @@
+title: AWS Principal Granted Access to Multiple EKS Clusters
+id: 3fc37901-cfbd-414b-b045-46db08822e6a
+status: experimental
+description: Detects when a single AWS principal is granted access to multiple EKS clusters in a short period. This could indicate an attacker with compromised credentials attempting to expand their access and move laterally across the environment.
+references:
+  - https://securitylabs.datadoghq.com/articles/eks-cluster-access-management-deep-dive/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.lateral_movement
+  - attack.t1078
+  - cloud
+  - aws
+  - eks
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    eventName:
+      - 'CreateAccessEntry'
+      - 'UpdateAccessEntry'
+      - 'AssociateAccessPolicy'
+    # This is an aggregation rule that requires a SIEM with correlation capabilities.
+  aggregation:
+        # Correlate events by the principal gaining access.
+    by: requestParameters.principalArn
+        # Count the number of unique clusters they gain access to.
+    count_distinct: requestParameters.name
+        # Alert if access is granted to 3 or more clusters within a 10 minute window.
+        # This threshold may need to be tuned for your environment.
+    where: count_distinct >= 3
+    timespan: 10m
+  condition: selection
+falsepositives:
+  - Legitimate administrative or automated (CI/CD) activities that provision access across multiple clusters at once. The threshold and timeframe may need to be tuned based on normal operational patterns. Consider excluding known administrative or service principals.
+level: medium

@@ -1,0 +1,62 @@
+rule silent_harvest_credential_access_remote_execution_and_exfiltration {
+  meta:
+    author = "RW"
+    date = "2025-08-24"
+    description = "This detection correlates multiple suspicious behaviors on a single host to identify advanced credential theft attacks like 'Silent Harvest'. It triggers when a non-SYSTEM process accesses sensitive registry hives (SAM/SECURITY) AND is either spawned by WMI (indicating remote execution) OR is followed by a large outbound data transfer (indicating exfiltration)."
+    tactic = "TA0003, TA0002, TA0010"
+    technique = "T1003.002, T1047, T1041, T1134.001"
+    false_positives = "Legitimate administrative scripts, backup software, or file synchronization clients might trigger this rule. Tuning the process exclusion list is recommended."
+
+  events:
+    // Event 1: A process is created by the WMI Provider Host.
+    $wmi_child.metadata.event_type = "PROCESS_LAUNCH"
+    $wmi_child.principal.hostname = $hostname
+    // The process that will perform the suspicious actions is the target of this event.
+    $wmi_child.target.process.product_specific_process_id = $process_guid
+    re.regex($wmi_child.principal.process.file.full_path, `(?i)\\WmiPrvSE\.exe$`)
+
+    // Event 2: A non-SYSTEM process accesses sensitive registry hives. This is the core indicator.
+    $reg_access.metadata.event_type = "REGISTRY_MODIFICATION"
+    $reg_access.principal.hostname = $hostname
+    $reg_access.principal.process.product_specific_process_id = $process_guid
+    // Filter for access to SAM or SECURITY hives.
+    re.regex($reg_access.target.registry.key, `(?i)hklm\\(sam|security)`)
+    // The "Silent Harvest" technique uses an Administrator account, not SYSTEM.
+    $reg_access.principal.user.userid != "S-1-5-18" // SID for NT AUTHORITY\SYSTEM
+
+    // FP Mitigation: Exclude known legitimate processes that might perform these actions.
+    not re.regex($reg_access.principal.process.file.full_path, `(?i)(\\outlook\.exe|\\teams\.exe|\\onedrive\.exe|\\msedge\.exe|\\chrome\.exe|\\firefox\.exe|\\gdrive\.exe|\\dropbox\.exe|\\Veeam\.EndPoint\.Service\.exe)$`)
+
+    // Event 3: The process initiates a large outbound network connection.
+    $net_upload.metadata.event_type = "NETWORK_CONNECTION"
+    $net_upload.principal.hostname = $hostname
+    $net_upload.principal.process.product_specific_process_id = $process_guid
+    $net_upload.network.direction = "OUTBOUND"
+    $net_upload.network.sent_bytes > 500000 // 500 KB
+
+  match:
+    // Correlate events by the same process GUID on the same host within a 30 minute window.
+    $hostname, $process_guid over 30m
+
+  outcome:
+    // Risk score can be adjusted based on environment sensitivity.
+    $risk_score = 65
+    $principal_hostname = $hostname
+    $principal_process_guid = $process_guid
+    $principal_process_path = array_distinct($reg_access.principal.process.file.full_path)
+    $principal_process_command_line = array_distinct($reg_access.principal.process.command_line)
+    $principal_user_id = array_distinct($reg_access.principal.user.userid)
+
+    // Contextual flags for the analyst.
+    $wmi_spawned = if(#wmi_child > 0, true, false)
+    $large_upload_observed = if(#net_upload > 0, true, false)
+
+    // Network context if exfiltration is observed.
+    $total_bytes_sent = sum($net_upload.network.sent_bytes)
+    $destination_ips = array_distinct($net_upload.target.ip)
+    $destination_ports = array_distinct($net_upload.target.port)
+
+  condition:
+    // The alert triggers if the registry access is accompanied by either WMI parentage or a large upload.
+    $reg_access and ($wmi_child or $net_upload)
+}

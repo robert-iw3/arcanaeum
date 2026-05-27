@@ -1,0 +1,17 @@
+[
+  {
+    "name": "Malicious VSCode Extension Activity Detection",
+    "description": "Detects a range of suspicious activities related to Visual Studio Code extensions, including non-standard installations, suspicious outbound network connections, file modifications in extension directories, and the loading of suspicious modules.",
+    "search": "| from datamodel=Endpoint.All_Models | eval detection_method=case(nodename=\"Processes\" AND Processes.process_name=\"Code.exe\" AND match(Processes.process, \"(?i)--open-url\") AND match(Processes.process, \"(?i)vscode://\"), \"VSCode URI Handler Installation\", nodename=\"Processes\" AND Processes.process_name=\"Code.exe\" AND match(Processes.process, \"(?i)--install-extension\") AND match(Processes.process, \"(?i)\\.vsix\"), \"VSCode Extension CLI Installation\", nodename=\"Network_Traffic\" AND Network_Traffic.process_name=\"Code.exe\" AND isnotnull(Network_Traffic.url) AND NOT match(Network_Traffic.url, \"(?i)marketplace\\\\.visualstudio\\\\.com|vscode\\\\.blob\\\\.core\\\\.windows\\\\.net|update\\\\.code\\\\.visualstudio\\\\.com|gallerycdn\\\\.vsassets\\\\.io\"), \"Suspicious Outbound Connection from VSCode\", nodename=\"Filesystem\" AND Filesystem.action=\"created\" AND (match(Filesystem.file_path, \"(?i)\\\\.vscode\\\\extensions\\\\\") OR match(Filesystem.file_path, \"(?i)\\\\Microsoft VS Code\\\\resources\\\\app\\\\extensions\\\\\")), \"File Write to VSCode Extension Directory\", nodename=\"Image_Loads\" AND Image_Loads.process_name=\"Code.exe\" AND match(Image_Loads.file_name, \"(?i)\\\\.node$\") AND (match(Image_Loads.file_path, \"(?i)\\\\AppData\\\\Local\") OR match(Image_Loads.file_path, \"(?i)\\\\Temp\")) AND NOT (match(Image_Loads.file_path, \"(?i)\\\\.vscode\\\\extensions|Microsoft VS Code\")), \"Suspicious Node Module Loaded by VSCode\") | where isnotnull(detection_method) | eval details=case(detection_method=\"VSCode URI Handler Installation\", \"URI Command: \" + Processes.process, detection_method=\"VSCode Extension CLI Installation\", \"Install Command: \" + Processes.process, detection_method=\"Suspicious Outbound Connection from VSCode\", \"Destination: \" + Network_Traffic.url, detection_method=\"File Write to VSCode Extension Directory\", \"File: \" + Filesystem.file_path + Filesystem.file_name, detection_method=\"Suspicious Node Module Loaded by VSCode\", \"Module: \" + Image_Loads.file_path + Image_Loads.file_name) | eval timestamp=_time, actor_process=coalesce(Processes.process, Network_Traffic.process, Filesystem.process, Image_Loads.process), actor_process_name=coalesce(Processes.process_name, Network_Traffic.process_name, Filesystem.process_name, Image_Loads.process_name), parent_process=coalesce(Processes.parent_process, Filesystem.parent_process), user=coalesce(Processes.user, Network_Traffic.user, Filesystem.user, Image_Loads.user), dest=coalesce(Processes.dest, Network_Traffic.dest, Filesystem.dest, Image_Loads.dest) | table timestamp, dest, user, parent_process, actor_process_name, actor_process, detection_method, details | `malicious_vscode_extension_activity_filter`",
+    "is_scheduled": 1,
+    "disabled": 0,
+    "cron_schedule": "*/30 * * * *",
+    "dispatch.earliest_time": "-24h",
+    "dispatch.latest_time": "now",
+    "sharing": "global",
+    "acl": {
+      "read": ["power", "admin"],
+      "write": ["admin"]
+    }
+  }
+]

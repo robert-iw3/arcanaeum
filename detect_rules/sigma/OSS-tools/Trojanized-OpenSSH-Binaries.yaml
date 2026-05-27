@@ -1,0 +1,41 @@
+title: Trojanized OpenSSH ShieldSlide Variant
+id: 12b3a9b8-3781-4542-ad49-2fa27d482ba4
+status: experimental
+description: >-
+  Detects potential execution of a trojanized OpenSSH binary, similar to the ShieldSlide tool used by the threat actor GLACIAL PANDA.
+  This detection identifies the sshd process running from a non-standard path or the sshd process spawning suspicious child processes commonly used for C2 or data exfiltration.
+author: RW
+date: 2025-08-22
+tags:
+  - attack.persistence
+  - attack.credential_access
+  - attack.t1021.004
+  - threat_actor.glacial_panda
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection_path:
+    # Detects the sshd process itself
+    process.name: 'sshd'
+  filter_path:
+    # Filters for legitimate, common paths for the sshd binary.
+    # This list may need to be tuned for specific environments.
+    process.executable:
+      - '/usr/sbin/sshd'
+      - '/sbin/sshd'
+  selection_child:
+    # Detects a legitimate sshd process spawning a suspicious child process.
+    parent.executable|endswith: '/sshd'
+    process.name:
+      - 'nc'
+      - 'netcat'
+      - 'ncat'
+      - 'socat'
+      - 'wget'
+      - 'curl'
+  condition: (selection_path and not filter_path) or selection_child
+falsepositives:
+  - Administrators running a test or development version of sshd from a non-standard location.
+  - Highly unusual administrative scripts that use SSH to trigger a download or network connection on a remote host.
+level: high

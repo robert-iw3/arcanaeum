@@ -1,0 +1,30 @@
+title: AWS CloudTrail or GuardDuty Tampering
+id: ab529e07-ed5b-4092-a157-1ab0292de4c1
+status: experimental
+description: Detects attempts to tamper with AWS CloudTrail or GuardDuty services. Attackers may perform these actions to evade detection by disabling or modifying security logging and monitoring.
+references:
+  - https://www.chrisfarris.com/post/aws-ir/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001
+  - attack.t1562.006
+  - attack.t1562.008
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+        # CloudTrail events indicating tampering with CloudTrail or GuardDuty
+    eventName:
+      - DeleteDetector
+      - DeleteTrail
+      - PutEventSelectors
+      - StopLogging
+  condition: selection
+falsepositives:
+    # These actions can be performed by administrators or automated systems (like Terraform) for legitimate reasons.
+    # It is recommended to baseline normal administrative activity and filter out trusted roles or IP addresses.
+  - Legitimate administrative activity.
+level: high

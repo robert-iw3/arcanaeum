@@ -1,0 +1,57 @@
+// Name: Suspended Process Injection via Entry Point Overwrite
+// Author: RW
+// Date: 2025-08-02
+// Description: Detects a process being created in a suspended state, followed by a memory write operation from the parent process. This pattern is indicative of process injection techniques like Entry Point Injection, where a malicious actor writes shellcode into the address space of a legitimate process before resuming its execution. The subsequent thread resume is often not logged, but this sequence is highly suspicious.
+// False Positives: Medium. Legitimate applications such as debuggers, anti-malware software, or software updaters may exhibit this behavior. Tuning may be required to exclude known good parent processes.
+// Tactic: Defense Evasion
+// Technique: T1055, Process Injection
+
+let timeWindow = 2m; // Time window to correlate the creation and memory write events.
+
+// Find processes created with the CREATE_SUSPENDED flag (0x4).
+let suspended_procs = DeviceProcessEvents
+| where ActionType == "ProcessCreated" and ProcessCreationFlags has "0x4"
+| project
+    CreationTime = Timestamp,
+    DeviceId,
+    ParentProcessId = InitiatingProcessId,
+    ParentProcessName = InitiatingProcessFileName,
+    SuspendedProcessId = ProcessId,
+    SuspendedProcessName = FileName,
+    SuspendedProcessCmd = ProcessCommandLine;
+
+// Find cross-process memory write events.
+// Note: The ActionType 'ProcessAccessed' is a placeholder. The actual event name for a remote memory write
+// may vary depending on the EDR solution (e.g., 'CrossProcessMemoryWrite', 'RemoteWrite', 'WriteProcessMemoryApiCall').
+let memory_writes = DeviceEvents
+| where ActionType == "ProcessAccessed"
+| project
+    WriteTime = Timestamp,
+    DeviceId,
+    ParentProcessId = InitiatingProcessId,
+    SuspendedProcessId = ProcessId;
+
+// Join the two event sets to find the suspicious sequence.
+suspended_procs
+| join kind=inner (
+    memory_writes
+) on DeviceId, ParentProcessId, SuspendedProcessId
+// Ensure the memory write happens shortly after the suspended process creation.
+| where WriteTime between (CreationTime .. (CreationTime + timeWindow))
+// FP Tuning: Add legitimate parent processes that perform this action to the exclusion list below.
+| where not(ParentProcessName has_any ("procexp.exe", "procmon.exe", "msmpeng.exe", "your_updater.exe"))
+| summarize
+    FirstSeen = min(CreationTime),
+    LastSeen = max(WriteTime),
+    SuspendedProcessName = take_any(SuspendedProcessName),
+    SuspendedProcessCommandLine = take_any(SuspendedProcessCmd)
+    by DeviceId, ParentProcessName, ParentProcessId, SuspendedProcessId
+| project
+    Timestamp = FirstSeen,
+    LastSeen,
+    DeviceId,
+    ParentProcessName,
+    ParentProcessId,
+    SuspendedProcessName,
+    SuspendedProcessId,
+    SuspendedProcessCommandLine

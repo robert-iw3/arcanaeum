@@ -1,0 +1,76 @@
+rule pipe_magic_backdoor_activity {
+  meta:
+    description = "Detects various Tactics, Techniques, and Procedures (TTPs) associated with the PipeMagic backdoor framework used by the Storm-2460 threat actor."
+    author = "RW"
+    date = "2025-08-20"
+    reference = "https://www.microsoft.com/en-us/security/blog/2025/08/18/dissecting-pipemagic-inside-the-architecture-of-a-modular-backdoor-framework/, https://securelist.com/pipemagic/117270/"
+    tags = "WINDOWS, BACKDOOR, PIPEMAGIC, STORM-2460"
+    tactic = "TA0002, TA0005, TA0006, TA0011"
+    technique = "T1059, T1218.010, T1140, T1003.001, T1071.001, T1055"
+    false_positives = "Legitimate use of certutil for file downloads, though the combination of arguments is suspicious. 'dllhost.exe' accessing 'lsass.exe' can be legitimate; requires investigation of parent process context. The named pipe pattern could potentially collide with legitimate software."
+
+  events:
+    // IOC Hashes for PipeMagic components
+    (
+      $file.metadata.event_type = "FILE_CREATION" or
+      $file.metadata.event_type = "PROCESS_LAUNCH"
+    ) and
+    $file.target.file.sha256 in (
+      "dc54117b965674bad3d7cd203ecf5e7fc822423a3f692895cf5e96e83fb88f6a", // In-memory dropper (trojanized ChatGPT)
+      "4843429e2e8871847bc1e97a0f12fa1f4166baa4735dff585cb3b4736e3fe49e", // PipeMagic backdoor (unpacked)
+      "297ea881aa2b39461997baf75d83b390f2c36a9a0a4815c81b5cf8be42840fd1"  // PipeMagic network module (unpacked)
+    )
+
+    or
+
+    // PipeMagic Named Pipe Creation for Inter-Process Communication
+    // This may require a specific log source that captures named pipe events.
+    $pipe.metadata.event_type = "PROCESS_UNCATEGORIZED" and
+    re.regex($pipe.target.file.full_path, `^\\\\\\\\.\\\\pipe\\\\1\\\\.[0-9a-fA-F]{32}$`)
+
+    or
+
+    // PipeMagic C2 Communication (Domain/IP and Port)
+    $c2_conn.metadata.event_type = "NETWORK_CONNECTION" and
+    (
+      $c2_conn.network.destination.domain = "aaaaabbbbbbb.eastus.cloudapp.azure.com" or
+      $c2_conn.network.destination.ip = "127.0.0.1"  // Local testing mode
+    ) and
+    $c2_conn.network.destination.port in (443, 8082)
+
+    or
+
+    // PipeMagic C2 HTTP Request Pattern
+    $c2_http.metadata.event_type = "NETWORK_HTTP" and
+    re.regex($c2_http.network.http.url, `.*/[a-fA-F0-9]{16}$`) and
+    // The following headers are strong indicators of the websocket upgrade attempt.
+    strings.to_lower($c2_http.network.http.request_headers) contains "upgrade: websocket" and
+    strings.to_lower($c2_http.network.http.request_headers) contains "connection: upgrade"
+
+    or
+
+    // Initial access using certutil to download payload
+    $certutil.metadata.event_type = "PROCESS_LAUNCH" and
+    re.regex($certutil.target.process.file.full_path, `\\certutil\.exe$`) nocase and
+    $certutil.target.process.command_line contains "-urlcache" and
+    $certutil.target.process.command_line contains "-f" and
+    re.regex($certutil.target.process.command_line, `\.(tmp|dat|msbuild)`)
+
+    or
+
+    // Execution of payload via MSBuild with a newly observed loader mechanism
+    $msbuild.metadata.event_type = "PROCESS_LAUNCH" and
+    re.regex($msbuild.principal.process.file.full_path, `\\msbuild\.exe$`) nocase and
+    $msbuild.target.process.command_line contains ".mshi"
+
+    or
+
+    // Credential dumping via LSASS access from a masqueraded process
+    // This can be noisy. Investigate the principal process and its ancestry.
+    $lsass.metadata.event_type = "PROCESS_OPEN" and
+    re.regex($lsass.target.process.file.full_path, `\\lsass\.exe$`) nocase and
+    re.regex($lsass.principal.process.file.full_path, `\\dllhost\.exe$`) nocase
+
+  condition:
+    $file or $pipe or $c2_conn or $c2_http or $certutil or $msbuild or $lsass
+}

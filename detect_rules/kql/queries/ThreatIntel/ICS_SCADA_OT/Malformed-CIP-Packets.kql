@@ -1,0 +1,42 @@
+// Name: Malformed CIP Packet Detection
+// Author: RW
+// Date: 2025-08-17
+// Description: Detects malformed Common Industrial Protocol (CIP) packets.
+// These can indicate attempts to trigger denial-of-service, cause memory corruption, or exploit vulnerabilities in the
+// target device's protocol stack. This detection relies on an OT security monitoring tool that can identify and alert on protocol violations.
+// False Positive Sensitivity: Medium
+// Tags: ICS, CIP, EtherNet/IP, Denial of Service, Exploitation
+
+// This rule requires alerts from an OT security monitoring tool (e.g., Microsoft Defender for IoT).
+// Replace 'SecurityAlert' with your specific alert table.
+SecurityAlert
+| where TimeGenerated > ago(1h)
+// Filter for alerts indicating malformed or non-compliant CIP/EtherNet/IP packets.
+// The AlertName values are examples; adjust them to match your monitoring tool's output.
+| where (AlertName has_any ("Malformed", "Violation", "Illegal") and Protocol in ("CIP", "EtherNet/IP"))
+    or AlertName in (
+        "Invalid CIP Packet Length",
+        "Invalid CIP Service",
+        "CIP Protocol Anomaly",
+        "Disallowed Function in CIP"
+    )
+// Summarize alerts to identify targeted attacks and reduce noise from single, potentially benign events.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    AlertCount = count(),
+    DistinctAlertNames = make_set(AlertName),
+    TargetedDevices = make_set(DeviceName) // Or DestinationIp if DeviceName is not available
+    by SourceIp, DestinationIp
+// Potential False Positives:
+// - A device using a non-standard or proprietary extension of the CIP protocol might be flagged as malformed.
+// - Network issues or misconfigurations could potentially corrupt packets.
+// - Investigation should focus on the specific violation reported and the source of the traffic.
+| project
+    StartTime,
+    EndTime,
+    SourceIp,
+    DestinationIp,
+    AlertCount,
+    DistinctAlertNames,
+    TargetedDevices

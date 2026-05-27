@@ -1,0 +1,101 @@
+{
+  "rule_id": "warlock_ransomware_attack_ttp_correlation",
+  "name": "Warlock Ransomware Multi-Stage Attack TTP Correlation",
+  "description": "Detects activity indicative of a multi-stage attack by correlating various Tactics, Techniques, and Procedures (TTPs) including initial access, discovery, credential access, defense evasion, C2, lateral movement, and exfiltration. An alert is triggered when two or more distinct TTPs are observed from the same host and user.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "FROM logs-endpoint.events.* | WHERE (@timestamp IS NOT NULL) AND ( (event.category == 'process' AND event.action == 'start' AND process.parent.name == 'w3wp.exe' AND process.parent.command_line LIKE '%SharePoint%' AND (process.command_line LIKE '%net user guest /active:yes%' OR process.command_line LIKE '%net localgroup administrators guest /add%' OR process.command_line LIKE '%New-GPO%')) OR (event.category == 'process' AND event.action == 'start' AND (process.command_line LIKE '%nltest /domain_trusts%' OR process.command_line LIKE '%wmic product get name,identifyingnumber%' OR process.command_line LIKE '%net group \"domain admins\"%' OR process.command_line LIKE '%net group \"domain computers\"%' OR process.command_line LIKE '%net group \"domain controllers\"%' OR process.command_line LIKE '%quser%')) OR (event.category == 'process' AND event.action == 'start' AND (process.name == 'mimikatz.exe' OR process.command_line LIKE '%reg*save*hklm\\sam%' OR process.command_line LIKE '%reg*save*hklm\\security%')) OR (event.category == 'process' AND event.action == 'start' AND process.parent.name == 'vmtools.exe' AND (process.command_line LIKE '%taskkill%' OR process.command_line LIKE '%net stop%')) OR (event.category == 'file' AND event.action == 'creation' AND file.name == 'googleApiUtil64.sys') OR (event.category == 'process' AND event.action == 'start' AND process.command_line LIKE '%tunnel*run*--token%') OR (event.category == 'process' AND event.action == 'start' AND process.command_line LIKE '%copy*\\c$\\users\\public%') OR (event.category == 'registry' AND event.action == 'modification' AND ((registry.path LIKE '%\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\\fDenyTSConnections' AND registry.data.strings == '0') OR (registry.path LIKE '%\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp\\UserAuthentication' AND registry.data.strings == '0'))) OR (event.category == 'process' AND event.action == 'start' AND (process.parent.name IN ('rclone.exe', 'TrendSecurity.exe')) AND process.command_line LIKE '%copy*--protondrive-username*--protondrive-password%') )",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0001",
+        "name": "Initial Access",
+        "reference": "https://attack.mitre.org/tactics/TA0001/"
+      }
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0004",
+        "name": "Privilege Escalation",
+        "reference": "https://attack.mitre.org/tactics/TA0004/"
+      }
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0007",
+        "name": "Discovery",
+        "reference": "https://attack.mitre.org/tactics/TA0007/"
+      }
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0006",
+        "name": "Credential Access",
+        "reference": "https://attack.mitre.org/tactics/TA0006/"
+      }
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0005",
+        "name": "Defense Evasion",
+        "reference": "https://attack.mitre.org/tactics/TA0005/"
+      }
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0011",
+        "name": "Command and Control",
+        "reference": "https://attack.mitre.org/tactics/TA0011/"
+      }
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0008",
+        "name": "Lateral Movement",
+        "reference": "https://attack.mitre.org/tactics/TA0008/"
+      }
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0003",
+        "name": "Persistence",
+        "reference": "https://attack.mitre.org/tactics/TA0003/"
+      }
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0010",
+        "name": "Exfiltration",
+        "reference": "https://attack.mitre.org/tactics/TA0010/"
+      }
+    }
+  ],
+  "interval": "1h",
+  "from": "now-1h",
+  "max_signals": 100,
+  "risk_score": 95,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [],
+  "tags": [
+    "Multi-Stage Attack",
+    "TTP Correlation",
+    "Advanced Threat"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "host.name, user.name"
+}

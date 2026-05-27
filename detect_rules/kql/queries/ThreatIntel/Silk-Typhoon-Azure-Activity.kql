@@ -1,0 +1,77 @@
+// title: Silk Typhoon Associated Cloud Activity
+// description: Detects a combination of techniques associated with the threat actor Silk Typhoon.
+// This includes the abuse of OAuth applications, suspicious sign-in patterns, password spray attempts, and the presence of specific vulnerabilities on devices that are known to be exploited by this actor.
+// references:
+//   - https://www.microsoft.com/en-us/security/blog/2025/03/05/silk-typhoon-targeting-it-supply-chain/
+// author: RW
+// date: 2025-08-22
+// tags:
+//   - attack.g0128
+//   - attack.persistence
+//   - attack.privilege_escalation
+//   - attack.collection
+//   - attack.credential_access
+//   - attack.initial_access
+//   - attack.t1098.001
+//   - attack.t1114.002
+//   - attack.t1110.003
+//   - attack.t1190
+// falsepositives:
+//   - Legitimate administrative activity, such as creating new applications or rotating credentials for service principals. Baselining normal administrative behavior is recommended.
+//   - Approved third-party applications that access mail data as part of their normal function (e.g., eDiscovery, backup, or CRM integration tools).
+//   - Vulnerability alerts require follow-up to confirm if exploitation has occurred. Patching may not remediate post-compromise activity.
+//   - Password spray logic may trigger on legitimate bulk failed logons, tuning the failure threshold is recommended.
+// level: medium
+
+let lookback = 1d;
+let spray_threshold = 10;
+// Part 1: Detects the addition of new credentials to a Service Principal or Application, or new Application creation.
+let AppAbuse = AuditLogs
+| where TimeGenerated > ago(lookback)
+| where Result == "Success"
+| where OperationName has_any (
+    "Add service principal credentials",
+    "Update service principal credentials",
+    "Add application"
+)
+| extend
+    Activity = "Application or Service Principal Abuse",
+    User = tostring(InitiatedBy.user.userPrincipalName),
+    Target = tostring(TargetResources[0].displayName),
+    IPAddress = tostring(InitiatedBy.user.ipAddress)
+| project TimeGenerated, Activity, User, IPAddress, Target, OperationName;
+// Part 2: Detects password spray attempts.
+let PasswordSpray = SigninLogs
+| where TimeGenerated > ago(lookback)
+| where ResultType == 50126 // "InvalidUserNameOrPassword" or "BadPassword"
+| summarize FailureCount = count(), StartTime = min(TimeGenerated), EndTime = max(TimeGenerated) by UserPrincipalName, IPAddress, AppDisplayName
+| where FailureCount > spray_threshold
+| extend
+    Activity = "Potential Password Spray",
+    User = UserPrincipalName,
+    Target = AppDisplayName
+| project StartTime, EndTime, Activity, User, IPAddress, Target, FailureCount;
+// Part 3: Detects the presence of vulnerabilities exploited by Silk Typhoon.
+let Vulnerabilities = DeviceTvmSoftwareVulnerabilities
+| where CveId in ("CVE-2025-0282", "CVE-2024-3400", "CVE-2023-3519", "CVE-2021-26855", "CVE-2021-26857", "CVE-2021-26858", "CVE-2021-27065")
+| extend
+    Activity = "Vulnerable Device Found",
+    Target = DeviceName,
+    Details = strcat("Vulnerability: ", CveId, " on software ", SoftwareName)
+| project TimeGenerated, Activity, Target, Details;
+// Part 4: Detects mail item access via an application, a technique used by Silk Typhoon for data exfiltration.
+// This can be noisy and is best used with aggregation or correlation with other signals.
+let MailCollection = OfficeActivity
+| where TimeGenerated > ago(lookback)
+| where Operation == "MailItemsAccessed" and LogonType == "Application"
+| summarize MailboxCount = dcount(MailboxOwnerUPN), ItemsAccessed = count() by AppId, ClientIP, UserId
+| where ItemsAccessed > 100 // Tune this threshold based on normal application behavior in your environment.
+| extend
+    Activity = "Anomalous Mail Collection by Application",
+    User = UserId,
+    IPAddress = ClientIP,
+    Target = AppId,
+    Details = strcat("Accessed ", tostring(ItemsAccessed), " items across ", tostring(MailboxCount), " mailboxes.")
+| project TimeGenerated = now(), Activity, User, IPAddress, Target, Details;
+// Union all detection parts
+union isfuzzy=true AppAbuse, PasswordSpray, Vulnerabilities, MailCollection

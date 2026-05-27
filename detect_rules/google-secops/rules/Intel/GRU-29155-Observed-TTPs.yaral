@@ -1,0 +1,93 @@
+rule gru_unit_29155_activity {
+  meta:
+    author = "RW"
+    date = "2025-08-21"
+    description = "Detects a wide range of Tactics, Techniques, and Procedures (TTPs) associated with the Russian GRU Unit 29155, also known as Ember Bear and Cadet Blizzard. This rule covers process execution, network communications, and specific tool usage as detailed in CISA advisory AA24-249A."
+    reference = "https://www.cisa.gov/news-events/cybersecurity-advisories/aa24-249a"
+    tags = "G1003, EMBER_BEAR, CADET_BLIZZARD, UNC2589, UAC-0056, WHISPERGATE, RUSSIA"
+    tactic = "TA0002, TA0005, TA0006, TA0007, TA0008, TA0010, TA0011"
+    technique = "T1059.001, T1562.001, T1003, T1550.002, T1567.002, T1572, T1090.003, T1071.004, T1071.001, T1105"
+    false_positives = "Legitimate use of tools such as Rclone, ProxyChains, and Ngrok may trigger this rule. Connections to Discord's CDN are common and should be correlated with other suspicious activity."
+
+  events:
+    // Event for suspicious process executions
+    (
+      $process.metadata.event_type = "PROCESS_LAUNCH" and
+      (
+        // WhisperGate stage2.exe PowerShell command (Decoded: Start-Sleep -s 10)
+        (
+          re.regex($process.target.process.file.full_path, `\\powershell\.exe$`) nocase and
+          re.regex($process.target.process.command_line, `(?i)-enc\s+UwB0AGEAcgB0AC0AUwBsAGUAZQBwACAALQBzACAAMQAwAA==`)
+        ) or
+        // PowerShell command to exclude C: drive from Windows Defender
+        (
+          re.regex($process.target.process.file.full_path, `\\powershell\.exe$`) nocase and
+          re.regex($process.target.process.command_line, `(?i)Set-MpPreference\s+-ExclusionPath\s+('|"|\\)C:\\`)
+        ) or
+        // AdvancedRun.exe used to disable Windows Defender
+        (
+          re.regex($process.target.process.file.full_path, `\\AdvancedRun\.exe$`) nocase and
+          re.regex($process.target.process.command_line, `(?i)(stop WinDefend|rmdir 'C:\\ProgramData\\Microsoft\\Windows Defender')`)
+        ) or
+        // InstallUtil.exe run from a temp directory, as seen in WhisperGate
+        (
+          re.regex($process.target.process.file.full_path, `\\InstallUtil\.exe$`) nocase and
+          re.regex($process.target.process.file.full_path, `(?i)(C:\\Users\\.*\\AppData\\Local\\Temp\\|C:\\Windows\\Temp\\)`)
+        ) or
+        // Impacket's secretsdump.py or psexec.py for credential dumping and lateral movement
+        re.regex($process.target.process.command_line, `(?i)(secretsdump|psexec)\.py`) or
+        // Rclone usage for data exfiltration to MEGA
+        (
+          re.regex($process.target.process.file.full_path, `\\rclone(\.exe)?$`) nocase and
+          re.regex($process.target.process.command_line, `(?i)mega(\.co)?\.nz`)
+        ) or
+        // GOST tunneling tool execution pattern (renamed to java)
+        (
+          re.regex($process.target.process.file.full_path, `\\java(\.exe)?$`) nocase and
+          re.regex($process.target.process.command_line, `(?i)-L\s+(socks5|rtcp)://`)
+        ) or
+        // ProxyChains usage
+        re.regex($process.target.process.command_line, `(?i)proxychains`) or
+        // su-bruteforce tool
+        re.regex($process.target.process.command_line, `(?i)su-bruteforce`) or
+        // LinPEAS privilege escalation script
+        re.regex($process.target.process.command_line, `(?i)linpeas\.(sh|py)`)
+      )
+    ) or
+    // Event for GOST tunneling tool file hash
+    (
+      $file.metadata.event_type = "FILE_CREATION" and
+      $file.target.file.md5 = "896e0f54fc67d72d94b40d7885f10c51"
+    ) or
+    // Event for C2 network connections
+    (
+      $network.metadata.event_type = "NETWORK_CONNECTION" and
+      (
+        // Connections to known Unit 29155 C2 IPs
+        $network.network.ip in (
+          "5.226.139.66", "45.141.87.11", "46.101.242.222", "62.173.140.223", "79.124.8.66",
+          "90.131.156.107", "112.51.253.153", "112.132.218.45", "154.21.20.82", "179.43.133.202",
+          "179.43.142.42", "179.43.162.55", "179.43.175.38", "179.43.175.108", "179.43.176.60",
+          "179.43.187.47", "179.43.189.218", "185.245.84.227", "185.245.85.251", "194.26.29.84",
+          "194.26.29.95", "194.26.29.98", "194.26.29.251"
+        ) or
+        // Connections to known jump host and C2 domains
+        $network.network.hostname in ("interlinks.top", "3proxy.ru", "nssm.cc") or
+        // Connections to Discord CDN for payload download
+        (
+          re.regex($network.network.hostname, `cdn\.discordapp\.com$`) and
+          re.regex($network.network.url, `/attachments/`)
+        ) or
+        // Connections to Ngrok, a legitimate but often abused service
+        re.regex($network.network.hostname, `ngrok\.com$`)
+      )
+    ) or
+    // Event for Iodine DNS tunneling
+    (
+      $dns.metadata.event_type = "DNS_LOOKUP" and
+      $dns.network.dns.question = "dns.test658324901domain.me"
+    )
+
+  condition:
+    $process or $file or $network or $dns
+}

@@ -1,0 +1,36 @@
+rule linux_nohup_reverse_shell {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects a Linux persistence technique where 'nohup' is used to execute a reverse shell that survives terminal closure. The command pattern includes 'bash -c' and network redirection via '/dev/tcp/' or '/dev/udp/'."
+    tactic = "TA0003, TA0005"
+    technique = "T1059.004, T1546.004"
+    false_positives = "Legitimate administrative scripts might use nohup with network-aware bash commands, although this is uncommon. Tuning may be required for specific environments."
+
+  events:
+    // Filter for process launch events on Linux systems.
+    $process.metadata.event_type = "PROCESS_LAUNCH"
+    $process.metadata.product_name = "Linux"
+
+    // The process launched is 'nohup'.
+    $process.target.process.file.name = "nohup"
+
+    // The command line contains 'bash -c' to execute a command string.
+    re.regex($process.target.process.command_line, `bash\s+-c`)
+
+    // The command line contains indicators of a reverse shell via TCP or UDP redirection.
+    re.regex($process.target.process.command_line, `\/dev\/(tcp|udp)\/`)
+
+  outcome:
+    // High risk score due to strong indication of persistence.
+    $risk_score = 75
+    $principal_hostname = $process.principal.hostname
+    $principal_user = $process.principal.user.userid
+    $target_process_command_line = $process.target.process.command_line
+    $target_process_pid = $process.target.process.pid
+    $parent_process_command_line = $process.principal.process.command_line
+    $parent_process_pid = $process.principal.process.pid
+
+  condition:
+    $process
+}

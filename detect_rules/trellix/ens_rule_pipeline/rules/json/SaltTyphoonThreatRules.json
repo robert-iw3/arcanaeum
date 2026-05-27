@@ -1,0 +1,86 @@
+[
+  {
+    "type": "firewall",
+    "name": "Detect Salt Typhoon C2 Connections (IOC Match - Broad Ports)",
+    "application": "**",
+    "direction": "out",
+    "protocol": "TCP,UDP",
+    "port": "80,443,53",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects outbound connections on common C2 ports (HTTP/HTTPS 80/443, DNS 53) potentially used by Salt Typhoon infrastructure. Group employs encrypted multi-hop C2, legitimate cloud services, and DNS for command/control. Specific IPs (e.g., 162.251.82.125) and domains (e.g., aria-hidden.com) not filterable in ENS Firewall; use Web Control for domain blocking and precision. Tune with baseline traffic exclusions."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Network Edge Device Exploitation Attempts (Placeholder)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**.exe\" }\n         Include -access \"CREATE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "Medium",
+    "enabled": true,
+    "description": "Placeholder for detecting suspicious process creation potentially related to edge device exploitation tools (e.g., targeting CVE-2023-20198 Cisco IOS XE, CVE-2024-3400 Palo Alto PAN-OS). Salt Typhoon's primary initial access vector is network appliance compromise. ENS is endpoint-focused; true detection requires IDS/IPS, network device logs, or EDR correlation. Tune or replace with device-specific monitoring."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Linux User Persistence via /etc/passwd or /etc/shadow Modifications",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match FILE {\n         Include OBJECT_NAME { -v \"/etc/passwd\" -v \"/etc/shadow\" }\n         Include -access \"WRITE,CREATE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects write/create operations on /etc/passwd or /etc/shadow — used for user persistence/backdoor creation on compromised Linux endpoints. Salt Typhoon occasionally targets Linux hosts; more common on network devices (Cisco IOS user accounts). Applies to Linux endpoints; network device persistence requires device logs. Tune for legitimate admin changes."
+  },
+  {
+    "type": "firewall",
+    "name": "Detect DNS Queries for ProtonMail-Registered Domains (Salt Typhoon IOC)",
+    "application": "**",
+    "direction": "out",
+    "protocol": "UDP",
+    "port": "53",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects outbound DNS queries (UDP 53) potentially resolving domains registered via ProtonMail — a known registration pattern for Salt Typhoon infrastructure (2024-2025 campaigns). WHOIS/domain-specific filtering not supported in ENS; enrich with external DNS logs or threat intel feeds. Tune for normal DNS traffic."
+  },
+  {
+    "type": "firewall",
+    "name": "Detect Configuration File Exfiltration via FTP-TFTP",
+    "application": "**",
+    "direction": "out",
+    "protocol": "TCP,UDP",
+    "port": "20,21,69",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects outbound FTP (20/21) or TFTP (69) traffic — used by Salt Typhoon for exfiltrating router/switch configuration files (.conf, .cfg) after compromise. File-specific filtering not supported; tune heavily for legitimate admin/backup traffic. Correlate with device logs for actual exfil."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Salt Typhoon Malware Execution (Placeholder)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**.exe\" }\n         Include -access \"CREATE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "Medium",
+    "enabled": true,
+    "description": "Broad placeholder for detecting process creation potentially related to Salt Typhoon malware (Demodex rootkit, SigRouter, China Chopper webshell variants). Group uses fileless/LOTL techniques; specific signatures require EDR integration (e.g., hash, behavior). Tune or replace with EDR rules."
+  },
+  {
+    "type": "expert",
+    "name": "Detect PowerShell Downgrade Attacks and AMSI Bypass",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"powershell.exe\" -v \"pwsh.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*-Version 2*\"\n         Include -command_line \"*-enc*\"\n         Include -command_line \"*-command*\"\n         Include -command_line \"*Set-MpPreference -DisableRealtimeMonitoring*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects PowerShell execution with downgrade (-Version 2), encoded (-enc), or command-line bypass arguments, plus Defender real-time monitoring disable — observed in Salt Typhoon and related PRC campaigns for evasion. Limited command-line matching in ENS; applies to Windows endpoints. Tune for legitimate scripting."
+  },
+  {
+    "type": "firewall",
+    "name": "Detect C2-Exfiltration via Public Services (Cloud Abuse)",
+    "application": "**",
+    "direction": "out",
+    "protocol": "TCP",
+    "port": "80,443",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects outbound HTTP/HTTPS traffic potentially used for C2 or exfiltration to public cloud services (e.g., github.com, gmail.com, dropbox) — Salt Typhoon blends malicious traffic with legitimate platforms. Domain-specific filtering and byte-size checks not supported; use Web Control for precision and domain blocking. Tune for baseline cloud usage."
+  }
+]

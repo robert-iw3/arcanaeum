@@ -1,0 +1,25 @@
+// Name: Lazarus Group Reused Favicon Hash
+// Author: RW
+// Date: 2025-07-31
+// Severity: High
+// Description: Detects a specific favicon file hash on disk that has been reused across multiple Lazarus Group campaigns, including the OtterCookie campaign. The presence of this file is a strong indicator of compromise.
+// Tactic: Command and Control
+// Technique: T1071.001 - Application Layer Protocol: Web Protocols
+
+let lazarus_favicon_hash = "41ee7ddb2be173686dc3a73a49b4e93bc883ef363acca770f7ede891451122ab"; // SHA256 hash of a favicon reused by Lazarus Group.
+
+DeviceFileEvents
+| where TimeGenerated > ago(7d)
+// Search for file creation or modification events matching the known malicious hash.
+| where SHA256 == lazarus_favicon_hash
+// Potential for False Positives: Extremely low. A SHA256 hash match for a file associated with a specific threat actor is a high-fidelity indicator.
+// No tuning is typically required for this type of detection.
+| project
+    TimeGenerated,
+    DeviceName,
+    FileName,
+    FolderPath,
+    SHA256,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessParentFileName

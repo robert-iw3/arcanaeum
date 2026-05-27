@@ -1,0 +1,89 @@
+{
+  "name": "Silk Typhoon Associated Activity",
+  "queries": [
+    {
+      "name": "suspicious_interactive_logon_by_entra_connect_account",
+      "query": "@user.name:(*AAD_* OR *MSOL_*) AND @event.category:signin",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "password_reset_by_entra_connect_account",
+      "query": "@event.action:\"Reset user password\" AND @event.outcome:success AND @event.initiated_by.user.userPrincipalName:(*AAD_* OR *MSOL_*)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "add_service_principal",
+      "query": "@event.category:ApplicationManagement AND @event.action:\"Add service principal\"",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "add_oauth2_permission_grant",
+      "query": "@event.category:ApplicationManagement AND @event.action:\"Add OAuth2 permission grant\"",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "add_owner_to_service_principal",
+      "query": "@event.category:ApplicationManagement AND @event.action:\"Add owner to service principal\"",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "update_application_certificates_and_secrets",
+      "query": "@event.category:ApplicationManagement AND @event.action:\"Update application - Certificates and secrets management\"",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "potential_high_volume_data_access",
+      "query": "@event.action:(MailItemsAccessed OR FileDownloaded)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "potential_web_shell_execution",
+      "query": "@process.parent.name:(*\\w3wp.exe OR *\\httpd.exe OR *\\nginx.exe OR *\\tomcat*.exe) AND @process.name:(*\\cmd.exe OR *\\powershell.exe OR *\\pwsh.exe OR *\\sh OR *\\bash)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "vulnerable_device_identified",
+      "query": "@vulnerability.id:(CVE-2025-0282 OR CVE-2024-3400 OR CVE-2023-3519 OR CVE-2021-26855 OR CVE-2021-26857 OR CVE-2021-26858 OR CVE-2021-27065)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    }
+  ],
+  "cases": [
+    {
+      "name": "Silk Typhoon Associated Activity",
+      "status": "high",
+      "condition": "event_count_0 >= 1 OR event_count_1 >= 1 OR event_count_2 >= 1 OR event_count_3 >= 1 OR event_count_4 >= 1 OR event_count_5 >= 1 OR event_count_6 >= 1 OR event_count_7 >= 1 OR event_count_8 >= 1"
+    }
+  ],
+  "options": {
+    "evaluation_window": 3600,
+    "keep_alive": 3600,
+    "max_signal_duration": 3600,
+    "correlation_based_signal": {
+      "correlation_inputs": [
+        {
+          "rule_id": "silk_typhoon_correlation"
+        }
+      ],
+      "correlated_by_fields": [
+        "@host",
+        "@usr"
+      ],
+      "distinct_fields": [
+        "case_id"
+      ]
+    }
+  },
+  "message": "Silk Typhoon Activity: {{distinct_count}} part(s) on host {{host}} by user {{usr}}: {{case_names}}",
+  "type": "correlation_based_signal",
+  "tags": [],
+  "is_enabled": true
+}

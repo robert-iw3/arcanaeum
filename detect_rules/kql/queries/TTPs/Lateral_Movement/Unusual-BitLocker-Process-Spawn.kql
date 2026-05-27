@@ -1,0 +1,28 @@
+// Name: Unusual BitLocker Process Spawn
+// Author: RW
+// Date: 2025-08-06
+// Description: Detects unusual parent-child process relationships involving BitLocker-related executables (BdeUISrv.exe, baaupdate.exe). This activity is associated with a COM hijacking technique used for lateral movement.
+// Tactic: Defense Evasion, Privilege Escalation
+// Technique: T1055 - Process Injection
+// False Positive Sensitivity: Medium
+
+DeviceProcessEvents
+// Look for the specific parent-child relationships associated with the BitLocker COM hijack technique.
+| where
+    (FileName =~ "BdeUISrv.exe" and InitiatingProcessFileName =~ "svchost.exe") or
+    (FileName =~ "baaupdate.exe" and InitiatingProcessFileName =~ "explorer.exe")
+// FP Tuning: Legitimate use cases for these specific process spawns are rare.
+// However, if false positives occur, consider correlating this activity with preceding registry modifications
+// to the CLSID {A7A63E5C-3877-4840-8727-C1EA9D7A4D50} or remote service changes to increase fidelity.
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    Tactic = "Defense Evasion, Privilege Escalation",
+    Technique = "T1055",
+    Description = "Unusual BitLocker-related process spawned, potentially indicating a COM hijacking attempt for lateral movement.",
+    ProcessFileName = FileName,
+    ProcessCommandLine,
+    ParentProcessFileName = InitiatingProcessFileName,
+    ParentProcessCommandLine = InitiatingProcessCommandLine,
+    InitiatingProcessAccountName

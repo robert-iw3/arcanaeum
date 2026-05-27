@@ -1,0 +1,63 @@
+{
+  "rule_id": "suspicious_werfault_outbound_connection",
+  "name": "Suspicious WerFault.exe Outbound Connection",
+  "description": "Detects outbound network connections made by the Windows Error Reporting process (WerFault.exe) to non-standard or non-Microsoft domains. This can indicate a hijacked process being used for Command and Control (C2) communication or data exfiltration.",
+  "severity": "high",
+  "enabled": true,
+  "language": "esql",
+  "query": "FROM logs-endpoint.events.* | WHERE (process.name == 'WerFault.exe' OR process.executable LIKE '%\\\\WerFault.exe') AND NOT (destination.domain LIKE '%.microsoft.com' OR destination.domain LIKE '%.windows.com' OR destination.domain LIKE '%.msftconnecttest.com' OR destination.domain LIKE '%.windowsupdate.com') | STATS count = COUNT(*), destinations = ARRAY_AGG(destination.domain) BY host.name, user.name, process.parent.name, process.name, process.executable, process.command_line | KEEP host.name, user.name, process.parent.name, process.name, process.executable, process.command_line, destinations, count",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0011",
+        "name": "Command and Control",
+        "reference": "https://attack.mitre.org/tactics/TA0011/"
+      },
+      "technique": [
+        {
+          "id": "T1071",
+          "name": "Application Layer Protocol",
+          "reference": "https://attack.mitre.org/techniques/T1071/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0005",
+        "name": "Defense Evasion",
+        "reference": "https://attack.mitre.org/tactics/TA0005/"
+      },
+      "technique": [
+        {
+          "id": "T1036",
+          "name": "Masquerading",
+          "reference": "https://attack.mitre.org/techniques/T1036/"
+        }
+      ]
+    }
+  ],
+  "interval": "5m",
+  "from": "now-5m",
+  "max_signals": 100,
+  "risk_score": 80,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://www.elastic.co/security-labs/upping-the-ante-detecting-in-memory-threats-with-kernel-call-stacks",
+    "https://www.elastic.co/guide/en/security/current/detect-uncommon-processes-with-network-connections.html"
+  ],
+  "tags": [
+    "Windows",
+    "WerFault",
+    "Command and Control",
+    "Defense Evasion"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "host.name, user.name, process.name, process.executable"
+}

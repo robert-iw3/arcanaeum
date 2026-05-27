@@ -1,0 +1,44 @@
+// Name: Shade BIOS Resource Restoration
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects a resource restoration technique used by Shade BIOS. The malware makes boot-time-only UEFI variables
+//              accessible at runtime by adding the Runtime Access (RT) attribute. This allows the malware to use boot services
+//              and configurations after the OS has loaded, enabling its persistence mechanism.
+// RequiredDataConnectors: This detection requires a specialized data source capable of monitoring modifications to UEFI variable attributes.
+// This is not a standard log source and may require hypervisor-level introspection (example: vmWare NSX/sVM/vShield)
+// or advanced EDR agents with firmware visibility (example: crowdstrike/sentinel one).
+// otherwise detect via mem forensic analysis: https://github.com/tandasat/kraft_dinner
+// Tactic: Persistence
+// TacticID: TA0003
+// Technique: Boot or Logon Autostart Execution: UEFI
+// TechniqueID: T1542.001
+
+let shadeBiosResourceRestoration = (v_table_name:string) {
+    table(v_table_name)
+    // This query assumes a custom log table with fields for UEFI variable monitoring.
+    // The ActionType 'UefiVariableModification' is a placeholder for this specific activity.
+    | where ActionType == "UefiVariableModification"
+    // Extract relevant details from the event. The field names are placeholders.
+    | extend VariableName = tostring(AdditionalFields.VariableName),
+             OriginalAttributes = tostring(AdditionalFields.OriginalAttributes),
+             NewAttributes = tostring(AdditionalFields.NewAttributes),
+             CallingModule = tostring(AdditionalFields.CallingModule)
+    // Core detection logic: Identify when the Runtime Access (RT) attribute is added to a variable that did not previously have it.
+    | where OriginalAttributes !contains "RT" and NewAttributes contains "RT"
+    // FP Tuning: Legitimate firmware updates or configuration tools might perform this action.
+    // If false positives occur, exclude known-good signed modules.
+    // For example: | where CallingModule !in ("KnownGoodUpdater.efi")
+    | project
+        TimeGenerated,
+        DeviceName,
+        ActionType,
+        VariableName,
+        OriginalAttributes,
+        NewAttributes,
+        CallingModule
+    | extend
+        timestamp = TimeGenerated,
+        HostCustomEntity = DeviceName
+};
+// Replace 'UefiEvents' with the actual table name containing UEFI monitoring logs.
+shadeBiosResourceRestoration('UefiEvents')

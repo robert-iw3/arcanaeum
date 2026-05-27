@@ -1,0 +1,47 @@
+stages:
+  - import
+
+sentinel_import_kql:
+  stage: import
+  image: python:3.12
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "release"'
+      changes:
+        - kql/queries/*
+      when: always
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}-pip
+    paths:
+      - .cache/pip
+  variables:
+    PIP_CACHE_DIR: .cache/pip
+    SUBSCRIPTION_ID: $AZURE_SUBSCRIPTION_ID
+    RESOURCE_GROUP_NAME: $RESOURCE_GROUP_NAME
+    WORKSPACE_NAME: $WORKSPACE_NAME
+    AZURE_LOCATION: $AZURE_LOCATION
+    QUERY_PACK_NAME: $QUERY_PACK_NAME
+    AZURE_CLIENT_ID: $AZURE_CLIENT_ID
+    AZURE_TENANT_ID: $AZURE_TENANT_ID
+    AZURE_SUBSCRIPTION_ID: $AZURE_SUBSCRIPTION_ID
+  environment:
+    name: azure
+  script:
+    - set -e
+    - cd kql
+    - pip install --upgrade pip
+    - pip install -r requirements.txt
+    - pip install flake8>=7.1.1 pytest>=8.3.3 pytest-cov>=5.0.0 safety>=3.2.0
+    - flake8 sentinel_pipeline.py tests/ --max-line-length=120
+    - for file in $(find . -name "*.kql"); do if ! grep -q "TimeGenerated" "$file"; then echo "Error: $file missing TimeGenerated filter"; exit 1; fi; if grep -qi "search" "$file"; then echo "Error: $file contains deprecated 'search' operator"; exit 1; fi; done
+    - safety check -r requirements.txt
+    - pytest tests/ --cov=sentinel_pipeline --cov-report=xml --cov-fail-under=90 --junitxml=test-results.xml
+    - coverage report -m
+    - az login --service-principal -u $AZURE_CLIENT_ID -p $AZURE_CLIENT_SECRET --tenant $AZURE_TENANT_ID
+    - python sentinel_pipeline.py
+  artifacts:
+    paths:
+      - kql/sentinel_pipeline.log
+      - kql/coverage.xml
+      - kql/test-results.xml
+    expire_in: 7 days
+    when: always

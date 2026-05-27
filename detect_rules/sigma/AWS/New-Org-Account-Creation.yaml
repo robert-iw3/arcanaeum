@@ -1,0 +1,26 @@
+title: New AWS Account Created or Invited to Organization
+id: b89241c0-bc42-4b1b-86a3-d5f09d0d2464
+status: experimental
+description: >-
+  Detects the creation or invitation of a new AWS account into an AWS Organization. An attacker with control over the management account could use this technique to create a new account under their control to establish a new foothold or expand their presence within the organization. This activity may be followed by the assumption of the 'OrganizationAccountAccessRole' in the new account.
+references:
+  - https://hackingthe.cloud/aws/general-knowledge/aws_organizations_defaults/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.t1136
+  - attack.t1098
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    # Events related to adding a new account to an AWS Organization
+    eventSource: 'organizations.amazonaws.com'
+    eventName:
+      - 'CreateAccount' # API call to create a new member account
+      - 'InviteAccountToOrganization' # API call to invite an existing account to join the organization
+  condition: selection
+falsepositives:
+  - Legitimate administrative activity when adding new accounts to the AWS Organization. This should be correlated with change management records or internal provisioning processes.
+level: medium

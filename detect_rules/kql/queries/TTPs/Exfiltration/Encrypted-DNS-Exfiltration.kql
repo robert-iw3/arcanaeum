@@ -1,0 +1,56 @@
+// Name: Potential Data Exfiltration over Encrypted DNS (DoH/DoT)
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects potential data exfiltration over encrypted DNS channels like DNS-over-TLS (DoT) or DNS-over-HTTPS (DoH).
+//              The detection identifies connections to known DoH/DoT resolvers where the volume of uploaded data is significantly
+//              higher than the downloaded data, which is anomalous for standard DNS query behavior and may indicate covert data transfer.
+// False Positive Sensitivity: Medium
+
+// --- Query Tuning ---
+// This list should be populated with the IP addresses of public DoH resolvers.
+// Examples are provided; this list should be maintained and expanded.
+let doh_resolvers = dynamic([
+    // Google
+    "8.8.8.8", "8.8.4.4",
+    // Cloudflare
+    "1.1.1.1", "1.0.0.1",
+    // Quad9
+    "9.9.9.9", "149.112.112.112",
+    // OpenDNS
+    "208.67.222.222", "208.67.220.220"
+]);
+// The minimum number of bytes sent to be considered for analysis. Helps reduce noise from small, legitimate queries.
+let min_upload_bytes = 1024;
+// The ratio of sent bytes to received bytes that triggers an alert. A value of 2 means uploads are twice as large as downloads.
+let upload_to_download_ratio_threshold = 2.0;
+
+// This query assumes a log source like a Next-Gen Firewall (NGFW) or network proxy that logs network flow data.
+// CommonSecurityLog is used as an example. You may need to adapt the table and field names (e.g., SentBytes, ReceivedBytes) for your environment.
+CommonSecurityLog
+| where TimeGenerated > ago(1h)
+// Filter for traffic that is either DoT (port 853) or potentially DoH (port 443 to a known resolver).
+| where
+    (DestinationPort == 853 and Protocol == "tcp") or // DNS-over-TLS
+    (DestinationPort == 443 and DestinationIP in (doh_resolvers)) // DNS-over-HTTPS
+// Ensure byte count fields are available and greater than zero to avoid division errors.
+| where isnotempty(SentBytes) and isnotempty(ReceivedBytes) and ReceivedBytes > 0
+// Core detection logic: Identify flows with anomalous data volumes.
+| where SentBytes > min_upload_bytes
+| extend upload_download_ratio = todouble(SentBytes) / ReceivedBytes
+| where upload_download_ratio > upload_to_download_ratio_threshold
+// Potential for false positives:
+// - Legitimate applications uploading data to services hosted on IPs that are also DoH resolvers.
+// - Some security products or browser features may use DoH for telemetry.
+// - Consider allowlisting specific source processes or IPs if legitimate behavior is identified.
+// Further enhancement: If your logs contain JA3 hashes (TLS fingerprints), you can hunt for rare or suspicious fingerprints making these connections.
+| project
+    TimeGenerated,
+    SourceIP,
+    SourceProcessName,
+    DestinationIP,
+    DestinationPort,
+    SentBytes,
+    ReceivedBytes,
+    upload_download_ratio,
+    DeviceVendor,
+    DeviceProduct

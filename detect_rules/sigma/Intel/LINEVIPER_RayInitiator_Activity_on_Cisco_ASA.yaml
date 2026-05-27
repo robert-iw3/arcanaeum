@@ -1,0 +1,66 @@
+title: LINE VIPER and RayInitiator Activity on Cisco ASA
+id: cb341d8f-6c01-4a7e-80dc-5e3cadf356ac
+status: experimental
+description: >-
+  Detects multiple indicators of compromise (IOCs) and tactics, techniques, and procedures (TTPs) associated with the
+  LINE VIPER and RayInitiator malware on Cisco ASA devices, as detailed in the NCSC report.
+  This rule combines detections for covert packet captures, anti-forensic commands, unexpected reboots, potential AAA bypass,
+  malware delivery vectors, and C2 indicators.
+references:
+  - https://www.ncsc.gov.uk/static-assets/documents/malware-analysis-reports/RayInitiator-LINE-VIPER/ncsc-mar-rayinitiator-line-viper.pdf
+author: RW
+date: 2025-09-27
+tags:
+  - attack.credential_access
+  - attack.t1040
+  - attack.command_and_control
+  - attack.t1071.001
+  - attack.defense_evasion
+  - attack.t1202
+  - attack.t1562
+  - attack.impact
+  - attack.t1529
+  - malware.line_viper
+  - malware.rayinitiator
+logsource:
+  product: cisco
+  service: asa
+detection:
+  selection_cli_commands:
+    # Corresponds to command harvesting, covert packet captures, and anti-forensic techniques.
+    message_id:
+      - 111008
+      - 111009
+    message|contains:
+      # Note: For 'capture', the threat report specifies captures of 'radius', 'ldap', and 'tacacs'.
+      - 'capture '
+      - 'copy system:/text'
+      - 'verify'
+  selection_reboot:
+    # Corresponds to the anti-forensic reboot capability.
+    message_id:
+      - 199001
+      - 199002
+      - 104001
+  selection_aaa_bypass:
+    # Detects a WebVPN XML pattern used for AAA bypass.
+    message|contains: '<device-id computer-name="" device-type=""'
+  selection_webvpn_delivery:
+    # Detects WebVPN XML patterns used for malware delivery.
+    message|contains:
+      - '<client-cert cert-format="pkcs7">'
+      - '<client-cert-auth-signature'
+  selection_c2_indicators:
+    # Syslog messages related to C2 activity that LINE VIPER may attempt to suppress.
+    message_id:
+      - 302013
+      - 302014
+      - 609002
+      - 710005
+  condition: 1 of them
+falsepositives:
+  - Legitimate administrative activity may trigger parts of this rule. The 'capture' command, in particular, can be used for valid troubleshooting.
+  - Device reboots ('selection_reboot') are common during planned maintenance. Correlate with change management data.
+  - The WebVPN patterns ('selection_aaa_bypass', 'selection_webvpn_delivery') could be triggered by misconfigured or non-standard clients.
+  - The C2 indicators ('selection_c2_indicators') are general and may occur during normal operations. LINE VIPER's attempt to suppress these logs is the more significant indicator, which requires separate volumetric analysis.
+level: high

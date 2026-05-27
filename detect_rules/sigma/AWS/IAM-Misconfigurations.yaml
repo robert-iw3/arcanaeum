@@ -1,0 +1,50 @@
+title: AWS IAM Privilege Escalation Attempt
+id: c8d65e97-591f-4a53-9f93-6f67f9335f7d
+status: experimental
+description: Detects attempts to escalate privileges in AWS by modifying IAM users, roles, or policies. Attackers with limited permissions may use these techniques to gain broader access.
+references:
+  - https://rhinosecuritylabs.com/aws/aws-privilege-escalation-methods-mitigation/
+  - https://cloud.hacktricks.wiki/en/pentesting-cloud/aws-security/index.html
+author: RW
+date: 2025-08-19
+tags:
+  - attack.privilege_escalation
+  - attack.t1098
+  - attack.t1484
+  - cloud
+  - aws
+logsource:
+  service: aws.cloudtrail
+  category: cloud
+detection:
+  selection:
+    eventName:
+            # Policy and permission modifications
+      - 'CreatePolicyVersion'
+      - 'SetDefaultPolicyVersion'
+      - 'AttachUserPolicy'
+      - 'AttachRolePolicy'
+      - 'PutUserPolicy'
+      - 'PutRolePolicy'
+            # User and credential modifications
+      - 'CreateAccessKey'
+      - 'CreateLoginProfile'
+      - 'UpdateLoginProfile'
+      - 'CreateUser'
+      - 'AddUserToGroup'
+    errorCode:          # Filter for successful API calls only
+  filter_known_activity:
+        # This filter is a placeholder for known good behavior.
+        # Tune this section to exclude legitimate administrative roles, users, or automation tools.
+    userIdentity:
+      arn:
+        - 'arn:aws:iam::*role/OrganizationAccountAccessRole'         # Default role for cross-account access from management account
+        - 'arn:aws:iam::*role/aws-reserved/sso.amazonaws.com/*'         # AWS SSO roles can perform these actions legitimately
+    userAgent|startswith:
+      - 'Terraform/'       # Exclude known Infrastructure as Code tools
+      - 'CloudFormation'
+  condition: selection and not filter_known_activity
+falsepositives:
+  - Legitimate administrative actions performed by system administrators or DevOps engineers.
+  - Automated provisioning and configuration management by tools like Terraform, CloudFormation, or CI/CD pipelines. It is crucial to tune the filter section to exclude these known sources.
+level: high

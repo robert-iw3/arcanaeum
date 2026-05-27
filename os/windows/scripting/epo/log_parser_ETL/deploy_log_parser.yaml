@@ -1,0 +1,67 @@
+---
+- name: Deploy Trellix Log Parser Container
+  hosts: all
+  vars:
+    container_runtime: "{{ container_runtime | default('docker') }}"
+    image_name: trellix-log-parser
+    container_name: trellix-log-parser
+    log_paths:
+      - /var/log/trellix
+      - /var/McAfee
+      - /var/log/mcafee
+    config_dir: /etc/trellix-log-parser
+  tasks:
+    - name: Install container runtime
+      package:
+        name: "{{ container_runtime }}"
+        state: present
+      become: yes
+
+    - name: Create config directory
+      file:
+        path: "{{ config_dir }}"
+        state: directory
+        mode: '0755'
+      become: yes
+
+    - name: Copy config.json
+      copy:
+        src: config.json
+        dest: "{{ config_dir }}/config.json"
+        mode: '0644'
+      become: yes
+
+    - name: Build container image
+      command: "{{ container_runtime }} build -t {{ image_name }} ."
+      args:
+        chdir: "{{ playbook_dir }}"
+      when: container_runtime in ['docker', 'podman']
+
+    - name: Ensure log directories exist
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop: "{{ log_paths }}"
+      become: yes
+
+    - name: Run container
+      command: >
+        {{ container_runtime }} run -d
+        --name {{ container_name }}
+        {% for path in log_paths %}
+        -v {{ path }}:{{ path }}{% if container_runtime == 'podman' %}:Z{% endif %}
+        {% endfor %}
+        -v {{ config_dir }}/config.json:/app/config.json
+        -e AWS_ACCESS_KEY_ID={{ aws_access_key_id | default(omit) }}
+        -e AWS_SECRET_ACCESS_KEY={{ aws_secret_access_key | default(omit) }}
+        -e AWS_SESSION_TOKEN={{ aws_session_token | default(omit) }}
+        {{ image_name }}
+      when: container_runtime in ['docker', 'podman']
+      become: yes
+
+    - name: Ensure container is running
+      command: "{{ container_runtime }} ps -q -f name={{ container_name }}"
+      register: container_status
+      failed_when: container_status.stdout == ""
+      changed_when: false

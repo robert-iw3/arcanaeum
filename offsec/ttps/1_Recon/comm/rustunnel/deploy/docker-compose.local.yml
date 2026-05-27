@@ -1,0 +1,60 @@
+name: rustunnel-local
+
+networks:
+  rustunnel:
+    driver: bridge
+
+volumes:
+  rustunnel-data: {}
+  postgres-local-data: {}
+
+services:
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: rustunnel
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: rustunnel_test
+    networks:
+      - rustunnel
+    volumes:
+      - postgres-local-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rustunnel"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rustunnel-server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: rustunnel-server:local
+    container_name: rustunnel-server-local
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - rustunnel
+    ports:
+      - "8080:8080"   # HTTP edge
+      - "8443:8443"   # HTTPS edge
+      - "4040:4040"   # Control-plane WebSocket
+      - "4041:4041"   # Dashboard UI / API
+      - "20000-20099:20000-20099"   # TCP tunnel range
+    volumes:
+      - ./server.local.toml:/etc/rustunnel/server.toml:ro
+      # Mount the self-signed cert generated on the host.
+      # Default path: /tmp/rustunnel-certs — override with CERT_DIR env var.
+      - ${CERT_DIR:-/tmp/rustunnel-certs}:/certs:ro
+      - rustunnel-data:/var/lib/rustunnel
+    environment:
+      RUST_LOG: "rustunnel_server=debug,warn"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsk http://localhost:4041/api/status || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

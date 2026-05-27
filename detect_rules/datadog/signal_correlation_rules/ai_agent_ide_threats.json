@@ -1,0 +1,122 @@
+{
+  "name": "AI Agent and IDE Threat Detection",
+  "message": "AI Agent/IDE Threat: {{distinct_count}} type(s) on host {{@host}} by user {{@user.name}} involving process {{@process.name}}: {{case_names}}. Details: {{@description}}",
+  "isEnabled": true,
+  "type": "signal_correlation",
+  "options": {
+    "evaluationWindow": 3600,
+    "keepAlive": 3600,
+    "maxSignalDuration": 3600
+  },
+  "queries": [
+    {
+      "name": "Direct Prompt Injection",
+      "query": "source:ai_agent_logs (@prompt:*ignore*instructions* OR @prompt:*disregard*instructions* OR @prompt:*repeat*instructions* OR @prompt:*reveal*prompt* OR @prompt:*</system\\ prompt>*)",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name"
+      ]
+    },
+    {
+      "name": "Indirect Prompt Injection",
+      "query": "source:ai_agent_logs @retrieved_data:* AND (@retrieved_data:*ignore*instructions* OR @retrieved_data:*run\\ the\\ following*) -@prompt:*ignore*instructions*",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name"
+      ]
+    },
+    {
+      "name": "AI Agent RCE via Code Generation",
+      "query": "source:ai_agent_code_logs (@executed_code:*os.system\\(* OR @executed_code:*subprocess.run\\(* AND @executed_code:*base64.b64decode\\(*)",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name"
+      ]
+    },
+    {
+      "name": "AI Agent Tool Misuse",
+      "query": "source:ai_agent_tool_logs ((@tool_name:(cat OR type OR Get-Content) AND @tool_params:(*/etc/passwd* OR *.ssh/id_rsa* OR *secrets.txt*)) OR (@tool_name:(bash OR powershell.exe OR cmd.exe) AND @tool_params:(*whoami* OR *hostname* OR *net\\ user*)) OR (@tool_name:(curl OR wget) AND @tool_params:(-d* OR *-X\\ POST*)))",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name"
+      ]
+    },
+    {
+      "name": "OSS Watering Hole Attack",
+      "query": "source:(sysmon OR linux_audit) (@event_id:1 AND ((@process.name:(powershell.exe OR pwsh.exe) AND @process.command_line:(*Invoke-Expression* OR *DownloadString*)) OR (@process.name:(pip.exe OR uv.exe) AND @process.command_line:*install\\ \\(git\\|http* -@process.command_line:*-r* --requirement*) OR (@parent_process.name:python.exe AND @process.name:powershell.exe AND @process.command_line:*DownloadString*)))",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name"
+      ]
+    },
+    {
+      "name": "Agentic IDE Unauthorized Code Execution",
+      "query": "source:(sysmon OR linux_audit) ((@event_id:1 AND @parent_process.name:(cursor.exe OR Code.exe) AND @process.name:(powershell.exe OR cmd.exe OR bash OR curl OR wget) AND @process.command_line:(*Invoke-Expression* OR *whoami* OR *net\\ user* OR */etc/passwd*)) OR (@event_id:11 AND @file.name:*.cursorrules))",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name"
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "status": "high",
+      "condition": "event_count(\"Direct Prompt Injection\") >= 1"
+    },
+    {
+      "status": "high",
+      "condition": "event_count(\"Indirect Prompt Injection\") >= 1"
+    },
+    {
+      "status": "critical",
+      "condition": "event_count(\"AI Agent RCE via Code Generation\") >= 1"
+    },
+    {
+      "status": "high",
+      "condition": "event_count(\"AI Agent Tool Misuse\") >= 1"
+    },
+    {
+      "status": "high",
+      "condition": "event_count(\"OSS Watering Hole Attack\") >= 1"
+    },
+    {
+      "status": "high",
+      "condition": "event_count(\"Agentic IDE Unauthorized Code Execution\") >= 1"
+    }
+  ],
+  "tags": [
+    "security",
+    "threat-detection",
+    "ai",
+    "tactic:TA0001",
+    "tactic:TA0002",
+    "tactic:TA0005",
+    "tactic:TA0007",
+    "tactic:TA0010",
+    "technique:T1059",
+    "technique:T1190",
+    "technique:T1195.001",
+    "technique:T1005",
+    "technique:T1082",
+    "technique:T1567"
+  ],
+  "is_default": false
+}

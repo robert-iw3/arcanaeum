@@ -1,0 +1,75 @@
+// Name: Windows Defender Folder Redirect Technique
+// Author: RW
+// Date: 2025-09-08
+// Tactic: Defense Evasion
+// Technique: T1562.001 (Disable or Modify Tools)
+// Description: Detects a technique where an attacker creates a symbolic link in the Windows Defender Platform folder to redirect the service to
+// an attacker-controlled directory. This allows for tampering with or disabling Defender. This rule combines three detection methods: symbolic
+// link creation, unusual process execution path for MsMpEng.exe, and modification of the WinDefend service's ImagePath registry key.
+// False Positive Sensitivity: Medium. Legitimate administrative or software management activities could potentially create symbolic links or run
+// processes from non-standard paths, though it is uncommon for the specific paths targeted in this rule.
+// Tuning may be required by excluding specific tools or user accounts.
+
+let timeframe = 1d;
+
+// Detects the creation of a symbolic link in the Defender Platform folder.
+let symlinkCreation =
+DeviceProcessEvents
+| where Timestamp > ago(timeframe)
+| where FileName =~ "mklink.exe"
+| where ProcessCommandLine has "/d" and ProcessCommandLine has_all (@"C:\ProgramData\Microsoft\Windows Defender\Platform\")
+| extend
+    DetectionMethod = "SymbolicLinkCreation",
+    SuspiciousActivity = ProcessCommandLine
+| project
+    Timestamp,
+    DeviceName,
+    DetectionMethod,
+    SuspiciousActivity,
+    InitiatingProcessFileName,
+    AccountName = iff(isnotempty(InitiatingProcessAccountName), InitiatingProcessAccountName, AccountName);
+
+// Detects the Defender service executable (MsMpEng.exe) running from a non-standard location.
+let unusualDefenderProcess =
+DeviceProcessEvents
+| where Timestamp > ago(timeframe)
+| where FileName =~ "MsMpEng.exe"
+// The legitimate path for the service executable is within the ProgramData\Microsoft\Windows Defender\Platform directory.
+// Execution from other locations is highly suspicious. Consider adding other known legitimate paths to this list if needed for tuning.
+| where not(FolderPath has_prefix @"C:\ProgramData\Microsoft\Windows Defender\Platform\")
+| extend
+    DetectionMethod = "UnusualDefenderProcessPath",
+    SuspiciousActivity = FolderPath
+| project
+    Timestamp,
+    DeviceName,
+    DetectionMethod,
+    SuspiciousActivity,
+    InitiatingProcessFileName,
+    AccountName;
+
+// Detects modification of the WinDefend service ImagePath registry value to a non-standard path.
+let servicePathChange =
+DeviceRegistryEvents
+| where Timestamp > ago(timeframe)
+| where ActionType == "RegistryValueSet"
+| where RegistryKey has_all (@"SYSTEM\CurrentControlSet\Services\WinDefend", "ImagePath")
+// The legitimate ImagePath value should point to the Platform directory.
+| where isnotempty(RegistryValueData) and not(RegistryValueData has_prefix @"%ProgramData%\Microsoft\Windows Defender\Platform\" or RegistryValueData has_prefix @"C:\ProgramData\Microsoft\Windows Defender\Platform\")
+| extend
+    DetectionMethod = "DefenderServicePathChange",
+    SuspiciousActivity = strcat("Registry Key: ", RegistryKey, " | New Value: ", RegistryValueData)
+| project
+    Timestamp,
+    DeviceName,
+    DetectionMethod,
+    SuspiciousActivity,
+    InitiatingProcessFileName,
+    AccountName;
+
+// Combine the results from the different detection methods.
+union symlinkCreation, unusualDefenderProcess, servicePathChange
+| extend
+    RuleName = "Windows Defender Folder Redirect",
+    Tactic = "Defense Evasion",
+    TechniqueId = "T1562.001"

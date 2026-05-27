@@ -1,0 +1,64 @@
+// Name: Outbound SSH Tunneling or High Data Transfer from ICS/OT Asset
+// Author: RW
+// Date: 2025-08-17
+// Description: Detects outbound SSH from critical ICS/OT assets to the public internet that exhibits signs of being used for C2 or proxying.
+// The rule looks for either explicit command-line flags used for tunneling or high-volume data transfers over SSH. According to intelligence,
+// 45% of assessed OT environments have SSH communicating to public addresses, which can be leveraged by adversaries for C2 tunnels and proxies.
+// False Positive Sensitivity: Medium
+// Tactic: Command and Control
+// Technique: T1090, T1572
+
+let timeframe = 1d;
+// FP Tuning: Define identifiers for your critical OT/ICS assets. This is the most important step to reduce noise.
+// Use hostnames, naming conventions, or device groups. Example: dynamic(["HMI-01", "EWS-PROD", "HistorianDB"])
+let ot_asset_identifiers = dynamic([]);
+// FP Tuning: Add your corporate, VPN, and trusted partner IP ranges to prevent false positives from legitimate remote access.
+let corporate_ip_ranges = dynamic(["192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"]);
+// FP Tuning: Adjust the data transfer threshold (in MB) to suit your environment's baseline for legitimate SSH activity.
+let data_transfer_threshold_mb = 10;
+
+// Pattern 1: Detects command-line arguments indicating SSH tunneling. This is a high-fidelity indicator of proxying.
+let ssh_tunneling_commands =
+DeviceProcessEvents
+| where TimeGenerated > ago(timeframe)
+// Check for common SSH clients
+| where FileName in~ ("ssh.exe", "plink.exe", "putty.exe")
+// Check for dynamic, local, or remote port forwarding flags
+| where ProcessCommandLine has_any ("-D ", "-L ", "-R ")
+// Filter for events on designated OT assets.
+| where array_length(ot_asset_identifiers) == 0 or DeviceName has_any (ot_asset_identifiers)
+| extend Pattern = "SSH Tunneling Command Detected", TotalBytesTransferred = "N/A"
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    Pattern,
+    FileName,
+    ProcessCommandLine,
+    RemoteIP = "N/A", // IP is not available in ProcessEvents, but may be in command line.
+    TotalBytesTransferred;
+
+// Pattern 2: Detects high-volume data transfers over SSH to a public IP address.
+let high_data_transfer_ssh =
+DeviceNetworkEvents
+| where TimeGenerated > ago(timeframe)
+| where RemotePort == 22 and ActionType == "ConnectionSuccess"
+// Filter for events on designated OT assets.
+| where array_length(ot_asset_identifiers) == 0 or DeviceName has_any (ot_asset_identifiers)
+// Exclude connections to internal/corporate networks.
+| where not(ipv4_is_in_any_range(RemoteIP, corporate_ip_ranges))
+// Check for data transfer exceeding the defined threshold.
+| where (TotalBytesOut > (data_transfer_threshold_mb * 1024 * 1024)) or (TotalBytesIn > (data_transfer_threshold_mb * 1024 * 1024))
+| extend Pattern = "High Data Transfer over SSH to Public IP"
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName = InitiatingProcessAccountName,
+    Pattern,
+    FileName = InitiatingProcessFileName,
+    ProcessCommandLine = InitiatingProcessCommandLine,
+    RemoteIP,
+    TotalBytesTransferred = format_bytes(TotalBytesOut + TotalBytesIn, 2, "MB");
+
+// Combine the results from both patterns.
+union ssh_tunneling_commands, high_data_transfer_ssh

@@ -1,0 +1,33 @@
+// Name: UAT-7237 Remote File Download
+// Author: RW
+// Date: 2025-08-15
+// Description: Detects command prompt or PowerShell being used to initiate the download of files with names or to paths associated with UAT-7237 activity.
+// False Positive Sensitivity: Medium
+// References: https://blog.talosintelligence.com/uat-7237-targets-web-hosting-infra/
+// MITRE TTPs: T1105, T1573
+
+let timeframe = 1d;
+// Suspicious keywords observed in UAT-7237's download commands.
+let suspicious_keywords = dynamic(["win-x64.rar", "vpn.rar"]);
+// Suspicious destination paths used by the threat actor.
+let suspicious_paths = dynamic(["C:\\temp\\WM7Lite\\", "C:\\Windows\\Temp\\vmware-SYSTEM\\"]);
+
+DeviceProcessEvents
+| where TimeGenerated > ago(timeframe)
+// Look for downloads initiated by common command-line interpreters.
+| where InitiatingProcessFileName in~ ("cmd.exe", "powershell.exe")
+// The command line of the executed process contains keywords or paths specific to UAT-7237 TTPs.
+// This can detect both PowerShell inline downloads and cmd launching a separate downloader tool.
+| where ProcessCommandLine has_any (suspicious_keywords) or ProcessCommandLine has_any (suspicious_paths)
+// Note: This logic is broad to catch custom tools. If false positives occur, consider adding more specific process names
+// (e.g., powershell.exe, curl.exe, wget.exe) to the filter.
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    FileName,
+    ProcessCommandLine,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    MD5,
+    SHA256

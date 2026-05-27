@@ -1,0 +1,78 @@
+// Rule Title: ICS Operational Deviation Detected
+// Description: This rule detects potential manipulation of Industrial Control Systems (ICS) by monitoring for two types of host-level artifacts: modifications to critical configuration files and the appearance of high-risk commands in application logs. Cyberattacks targeting physical processes often involve altering system configurations or issuing unauthorized commands. This rule provides a framework for detecting such deviations from normal operations.
+// Author: RW
+// Date: 2025-08-17
+// References:
+// - https://www.cisa.gov/news-events/ics-advisories/icsa-25-226-03
+// False Positive Sensitivity: Medium
+// - Legitimate maintenance, software updates, or engineering changes will trigger this alert. It is crucial to correlate alerts with planned work.
+// - The rule's effectiveness is highly dependent on the accurate and comprehensive population of the 'ics_config_files' and 'critical_ot_commands' lists. These must be tailored to your specific ICS/OT environment.
+// - The application log portion of this rule requires that ICS/OT application logs are being ingested into your SIEM.
+// Detection Comment Level: Medium
+
+// Define critical ICS/OT configuration file names or paths.
+// This list MUST be customized with file types relevant to your environment (e.g., project files, logic files, configuration backups).
+let ics_config_files = dynamic([
+    // Rockwell / Allen-Bradley
+    "*.ACD", "*.L5K", "*.L5X",
+    // Siemens
+    "*.S7P", "*.AP??", "*.MCP",
+    // Schneider Electric
+    "*.XEF", "*.PCX", "*.STU",
+    // General
+    "*project.cfg", "*config.ini", "*backup.zip"
+]);
+
+// Define keywords for high-risk commands that may appear in ICS application logs.
+// This list MUST be customized based on the logging capabilities of your specific ICS software.
+let critical_ot_commands = dynamic([
+    "STOP_PROCESS", "EMERGENCY_SHUTDOWN", "SETPOINT_OVERRIDE", "DOWNLOAD_PROJECT",
+    "Forcing I/O", "Controller mode change", "Logic Download", "Firmware Update"
+]);
+
+// Part 1: Detect modifications to critical ICS configuration files.
+let config_file_changes =
+DeviceFileEvents
+| where TimeGenerated > ago(1d)
+| where ActionType in ("FileCreated", "FileModified", "FileRenamed")
+| where has_any_wildcard(FileName, ics_config_files) or has_any_wildcard(FolderPath, ics_config_files)
+// FP Reduction: Exclude temporary files created by legitimate applications if they cause noise.
+| where not (FolderPath has_any ("\\Temp\\", "\\AppData\\Local\\"))
+| extend
+    Activity = strcat("ICS Config File Modified: ", FileName),
+    AccountName = InitiatingProcessAccountName,
+    SuspiciousEntity = InitiatingProcessFolderPath;
+
+// Part 2: Detect high-risk commands in ingested ICS application logs.
+// Note: This requires a custom log table (e.g., 'ICS_Application_Logs_CL') to be configured for your ICS application logs.
+let ot_app_log_events =
+// Replace 'ICS_Application_Logs_CL' with the actual table name of your ingested logs.
+// Replace 'LogMessage' with the field containing the log event text.
+ICS_Application_Logs_CL
+| where TimeGenerated > ago(1d)
+| where LogMessage has_any (critical_ot_commands)
+| extend
+    Activity = strcat("Critical OT Command Detected: ", LogMessage),
+    // Replace 'UserName' and 'SourceHost' with the relevant fields from your custom log.
+    AccountName = UserName,
+    DeviceName = SourceHost,
+    SuspiciousEntity = LogMessage;
+
+// Combine findings from both detection methods.
+union isfuzzy=true config_file_changes, ot_app_log_events
+| where isnotempty(Activity)
+// Summarize the findings to create a concise alert for each affected device.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    Activities = make_set(Activity, 5),
+    Accounts = make_set(AccountName, 3),
+    SuspiciousEntities = make_set(SuspiciousEntity, 3)
+    by DeviceName
+| extend
+    RuleTitle = "ICS Operational Deviation Detected",
+    Description = strcat(
+        "Potential ICS operational deviation detected on host '", DeviceName,
+        "'. This may indicate unauthorized configuration changes or commands. Observed activities: ",
+        tostring(Activities)
+    )

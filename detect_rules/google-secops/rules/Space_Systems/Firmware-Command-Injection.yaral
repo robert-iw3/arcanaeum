@@ -1,0 +1,66 @@
+rule ground_system_firmware_or_command_injection {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects potentially malicious activity on ground station systems, including anomalous firmware updates or command injection attempts. Anomalous firmware updates are identified by being unsigned or initiated by unauthorized users. Command injection is identified when a common server process spawns a shell, a classic indicator of a web shell or exploited vulnerability."
+    reference = "id-76c7b8b0b6d27f004dcbec4248f3eaded30e1641a5a37b59d97465c08c28876d"
+    tactic = "TA0002, TA0001"
+    technique = "T1059, T1566"
+    false_positives = "Legitimate administrative tasks, such as manual firmware updates by authorized personnel or specific applications designed to spawn shells, may trigger this rule. Tuning the reference lists for authorized users, server processes, and ground station assets is critical."
+    severity = "HIGH"
+
+  events:
+    // Event for anomalous firmware updates. Note: 'FIRMWARE_UPDATE' is a potential UDM event type and may need to be adjusted based on available log sources.
+    $firmware_update.metadata.event_type = "FIRMWARE_UPDATE"
+    $firmware_update.target.hostname = $hostname
+    $firmware_update.target.hostname in %ground_station_assets
+    (
+      // Detects if the firmware is not signed by a trusted authority.
+      $firmware_update.target.file.signature.trusted = false or
+      // Detects if the update was initiated by a user not on the authorized list.
+      not $firmware_update.principal.user.userid in %authorized_firmware_admins
+    )
+
+    // Event for command injection, where a server process spawns a shell.
+    $command_injection.metadata.event_type = "PROCESS_LAUNCH"
+    $command_injection.principal.hostname = $hostname
+    $command_injection.principal.hostname in %ground_station_assets
+    // The parent process is a common web or application server. The '%server_processes_regex' list should contain regex for processes like w3wp.exe, httpd, nginx, tomcat, etc.
+    re.regex($command_injection.principal.process.file.full_path, %server_processes_regex)
+    // The child process is a command-line shell. The '%shell_processes_regex' list should contain regex for processes like cmd.exe, powershell.exe, /bin/bash, etc.
+    re.regex($command_injection.target.process.file.full_path, %shell_processes_regex)
+
+  match:
+    // Correlate events by hostname over a 15-minute window.
+    $hostname over 15m
+
+  outcome:
+    // Set a high risk score due to the critical nature of these events.
+    $risk_score = 75
+    $principal_hostname = array_distinct($hostname)
+
+    // Summarize the type of activity detected.
+    $detection_summary = if(
+      #firmware_update > 0 and #command_injection > 0,
+      "Anomalous Firmware Update and Command Injection Detected",
+      if(
+        #firmware_update > 0,
+        "Anomalous Firmware Update Detected",
+        "Command Injection Detected"
+      )
+    )
+
+    // Capture details specific to firmware updates.
+    $firmware_file_path = array_distinct($firmware_update.target.file.full_path)
+    $firmware_initiating_user = array_distinct($firmware_update.principal.user.userid)
+    $firmware_is_untrusted = array_distinct($firmware_update.target.file.signature.trusted)
+
+    // Capture details specific to command injection.
+    $injection_parent_process = array_distinct($command_injection.principal.process.command_line)
+    $injection_child_process = array_distinct($command_injection.target.process.command_line)
+    $event_count = count_distinct($firmware_update.metadata.id) + count_distinct($command_injection.metadata.id)
+
+  condition:
+    // Trigger if either a firmware anomaly or a command injection event is found for a given host.
+    $hostname and (#firmware_update > 0 or #command_injection > 0)
+}

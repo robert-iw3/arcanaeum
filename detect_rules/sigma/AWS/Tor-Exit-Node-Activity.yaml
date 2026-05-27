@@ -1,0 +1,50 @@
+title: AWS Activity From Known Malicious Tor Exit Node
+id: 27796546-749d-4c12-b158-85655f5886ea
+status: experimental
+description: Detects AWS API activity from known Tor exit nodes used by threat actors for reconnaissance and initial access during a large-scale cloud extortion campaign.
+references:
+  - https://unit42.paloaltonetworks.com/large-scale-cloud-extortion-operation/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.initial_access
+  - attack.ta0001
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+        # List of Tor exit nodes used in the campaign for reconnaissance and initial access
+    sourceIPAddress:
+      - '109.70.100.71'
+      - '144.172.118.62'
+      - '176.123.8.245'
+      - '185.100.85.25'
+      - '185.100.87.41'
+      - '185.220.101.19'
+      - '185.220.101.190'
+      - '185.220.101.21'
+      - '185.220.101.29'
+      - '185.220.101.30'
+      - '185.220.101.86'
+      - '185.220.103.113'
+      - '192.42.116.18'
+      - '192.42.116.181'
+      - '192.42.116.187'
+      - '192.42.116.192'
+      - '192.42.116.199'
+      - '192.42.116.201'
+      - '192.42.116.208'
+      - '192.42.116.218'
+      - '198.251.88.142'
+      - '199.249.230.161'
+      - '45.83.104.137'
+      - '62.171.137.169'
+      - '80.67.167.81'
+      - '89.234.157.254'
+      - '94.142.241.194'
+      - '95.214.234.103'
+  condition: selection
+falsepositives:
+  - Legitimate use of Tor for privacy. However, connections from Tor nodes to enterprise cloud environments are often suspicious and warrant investigation. Consider filtering for specific sensitive API calls if false positives are frequent.
+level: medium

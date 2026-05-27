@@ -1,0 +1,38 @@
+[
+    {
+        "type": "access_protection",
+        "name": "Block Startup Folder Writes",
+        "executables": "**",
+        "target": {
+            "type": "FILE",
+            "value": "**\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\**"
+        },
+        "subrule": {
+            "include": {
+                "object_name": "**\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\**"
+            }
+        },
+        "operations": ["create", "write"],
+        "action": "Block and Report",
+        "severity": "Medium",
+        "enabled": true
+    },
+    {
+        "type": "expert",
+        "name": "Block Adobe Reader JavaScript",
+        "content": "Rule {\n   Process {\n      Include OBJECT_NAME { -v \"AcroRd32.exe\" }\n   }\n   Target {\n      Match FILE {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n      }\n   }\n}",
+        "action": "Block and Report",
+        "severity": "High",
+        "enabled": true
+    },
+    {
+        "type": "firewall",
+        "name": "Allow MyApp on Port 8443",
+        "application": "C:\\Program Files\\MyApp\\MyApp.exe",
+        "direction": "both",
+        "protocol": "TCP",
+        "port": "8443",
+        "action": "Allow",
+        "enabled": true
+    }
+]

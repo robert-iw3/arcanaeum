@@ -1,0 +1,29 @@
+title: AWS Lambda Runtime API Hijacking
+id: 32341d98-31b1-4929-9ec5-18679d8f922b
+status: experimental
+description: Detects attempts to hijack the AWS Lambda execution environment by modifying the 'AWS_LAMBDA_RUNTIME_API' environment variable. As described by the LambdaSpy proof-of-concept, a malicious Lambda extension can overwrite this variable in the 'Rapid' process's memory to man-in-the-middle all communication between the Lambda runtime and other extensions, allowing for data interception and manipulation.
+references:
+  - https://www.clearvector.com/blog/lambda-spy/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.persistence
+  - attack.defense_evasion
+  - attack.t1574.006
+  - cloud
+  - aws
+  - aws.lambda
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  # Detects a process where the AWS_LAMBDA_RUNTIME_API environment variable is present
+  selection:
+    Environment|contains: 'AWS_LAMBDA_RUNTIME_API='
+  # Filters out the legitimate, default value for the AWS Lambda Runtime API
+  filter:
+    Environment|contains: 'AWS_LAMBDA_RUNTIME_API=127.0.0.1:9001'
+  condition: selection and not filter
+falsepositives:
+  - Legitimate debugging, security, or performance monitoring tools might proxy the Lambda Runtime API in a similar manner. However, this is expected to be rare. Investigate the process and any associated Lambda layers to determine their legitimacy.
+level: high

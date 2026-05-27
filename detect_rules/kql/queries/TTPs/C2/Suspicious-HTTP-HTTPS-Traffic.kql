@@ -1,0 +1,71 @@
+// Name: Suspicious HTTP/HTTPS Traffic Pattern
+// Author: RW
+// Date: 2025-08-02
+// Description: Detects suspicious HTTP/HTTPS traffic patterns that may indicate C2 communications attempting
+//              to masquerade as legitimate web traffic. This rule specifically looks for a mismatch between the
+//              HTTP 'Accept' header and the requested resource type, a technique highlighted in the reference
+//              intel where a request for a non-CSS file (like a font or binary) uses an 'Accept' header for CSS.
+//              It also includes logic to detect connections to newly registered domains (NRDs).
+// Tactic: Command and Control
+// Technique: T1071.001, T1090.003
+// False Positive Sensitivity: Medium. Some applications or web frameworks might generate unusual header combinations.
+// Connections to legitimate, newly-created domains could also trigger alerts. Review the initiating process and destination URL/IP for context.
+
+// Define a list of file extensions that are not typically associated with CSS.
+let NonCssExtensions = dynamic([".ttf", ".woff", ".woff2", ".eot", ".bin", ".dat", ".dll", ".exe", ".zip", ".ps1"]);
+// Define the suspicious Accept header pattern from the intel.
+let SuspiciousAcceptHeader = "text/css,*/*;q=0.1";
+
+// Part 1: Detect header/resource mismatch
+let HeaderMismatch = DeviceNetworkEvents
+| where Timestamp > ago(1d)
+| where isnotempty(RemoteUrl) and isnotempty(AdditionalFields)
+// Parse headers from the AdditionalFields column.
+| extend ParsedFields = parse_json(AdditionalFields)
+| extend AcceptHeader = tostring(ParsedFields.Accept)
+// Core detection logic: Find requests with a CSS Accept header for a non-CSS file type.
+| where AcceptHeader has SuspiciousAcceptHeader and RemoteUrl has_any (NonCssExtensions)
+| project
+    Timestamp,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RemoteUrl,
+    RemoteIP,
+    DetectionMethod = "Header/Resource Mismatch",
+    Description = strcat("Process '", InitiatingProcessFileName, "' requested a non-CSS file '", RemoteUrl, "' with a CSS Accept header."),
+    AcceptHeader;
+
+// Part 2: Detect connections to Newly Registered Domains (NRDs)
+// This part requires a Threat Intelligence feed of NRDs in the ThreatIntelligenceIndicator table.
+let NRDConnections = ThreatIntelligenceIndicator
+| where Timestamp > ago(1d)
+| where ThreatType == "MaliciousUrl" and Description has "Newly Registered Domain"
+| join kind=inner (
+    DeviceNetworkEvents
+    | where Timestamp > ago(1d)
+    | where isnotempty(RemoteUrl)
+) on $left.Url == $right.RemoteUrl
+| project
+    Timestamp,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RemoteUrl,
+    RemoteIP,
+    DetectionMethod = "Newly Registered Domain",
+    Description = strcat("Process '", InitiatingProcessFileName, "' connected to a newly registered domain: ", RemoteUrl),
+    AcceptHeader = ""; // Placeholder column to match schema
+
+// Combine the results from both detection methods.
+union HeaderMismatch, NRDConnections
+| project-reorder
+    Timestamp,
+    DeviceName,
+    DetectionMethod,
+    Description,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RemoteUrl,
+    RemoteIP,
+    AcceptHeader

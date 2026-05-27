@@ -1,0 +1,49 @@
+// Name: Potential RCE via AI Agent Code Generation
+// Author: RW
+// Date: 2025-08-15
+// Description: This rule detects potential Remote Code Execution (RCE) attempts via AI agents capable of generating
+// and executing code (e.g., data analysis agents like PandasAI). It identifies when the agent generates or executes
+// code containing suspicious patterns, such as calls to system command interpreters (os.system, subprocess) often
+// combined with obfuscation techniques (base64 decoding), as seen in exploits like CVE-2024-12366.
+// False Positive Sensitivity: Medium
+// References:
+// - From Prompts to Pwns: Exploiting and Securing AI Agents (Black Hat USA 2025)
+// - https://developer.nvidia.com/blog/agentic-autonomy-levels-and-security/
+// - https://owasp.org/www-project-top-10-for-large-language-model-applications/llm-top-10-2023/llm01-prompt-injection
+// Tactics: Execution
+// Techniques: T1059
+// Assumes a log source that captures code generated and/or executed by an AI agent.
+
+// Define suspicious functions that can execute system commands or arbitrary code.
+let suspiciousFunctions = dynamic([
+    "os.system(",
+    "subprocess.run(",
+    "subprocess.call(",
+    "subprocess.Popen(",
+    "eval(",
+    "exec("
+]);
+
+// Define common obfuscation functions used to hide malicious payloads.
+let obfuscationFunctions = dynamic([
+    "base64.b64decode(",
+    "b64decode("
+]);
+
+// This table is hypothetical. Replace 'AIAgentCodeExecutionLogs' with the actual table containing your AI agent's code execution data.
+// The field 'ExecutedCode' is assumed to contain the code snippet run by the agent.
+AIAgentCodeExecutionLogs
+// Look for code that both calls a suspicious execution function and decodes a base64 string.
+| where isnotempty(ExecutedCode)
+  and ExecutedCode has_any (suspiciousFunctions)
+  and ExecutedCode has_any (obfuscationFunctions)
+// FP Tuning: Some legitimate, complex scripts might use these patterns.
+// Consider excluding trusted applications or specific, vetted scripts if false positives occur.
+// Example: `| where not Application in ("TrustedDataScienceApp")`
+| project
+    TimeGenerated,
+    Application, // The application hosting the AI agent
+    UserPrincipalName, // The user whose prompt initiated the action
+    PromptText, // The user's original prompt, for context
+    ExecutedCode, // The malicious code snippet that was executed
+    SrcIpAddr // The source IP of the request

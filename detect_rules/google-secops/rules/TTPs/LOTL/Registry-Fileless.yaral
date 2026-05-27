@@ -1,0 +1,53 @@
+rule lolbin_suspicious_registry_modification {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects a Living-Off-the-Land Binary (LOLBin) performing a suspicious registry modification. The rule triggers on several conditions indicative of fileless malware techniques, such as writing large data blobs, hexadecimal content, anomalously long values, or modifying uncommon registry keys within the HKEY_CURRENT_USER hive."
+    tactic = "TA0005, TA0003"
+    technique = "T1112"
+    false_positives = "Legitimate software installers, updaters, or configuration scripts may write large or encoded data to the registry. Tuning of length thresholds or the 'common_hkcu_registry_keys' reference list may be required."
+
+  events:
+    // Event: A registry value is created or modified.
+    $reg.metadata.event_type = "REGISTRY_SET_VALUE"
+
+    // Filter for modifications made by common LOLBins.
+    re.regex($reg.principal.process.file.full_path, `\\(powershell\.exe|pwsh\.exe|powershell_ise\.exe|reg\.exe|wscript\.exe|cscript\.exe|mshta\.exe|rundll32\.exe)$`) nocase
+
+    // Focus on the HKEY_CURRENT_USER hive, a common target for user-level persistence and payload staging.
+    re.regex($reg.target.registry.key, `^HKEY_CURRENT_USER\\`) nocase
+
+    // Ensure the registry value data is not empty.
+    $reg.target.registry.data.bytes != ""
+
+  outcome:
+    // Risk score can be adjusted based on environment sensitivity.
+    $risk_score = 40
+    $principal_hostname = $reg.principal.hostname
+    $principal_process_path = $reg.principal.process.file.full_path
+    $principal_process_cmdline = $reg.principal.process.command_line
+    $principal_user = $reg.principal.user.userid
+    $registry_key = $reg.target.registry.key
+    $registry_value_name = $reg.target.registry.value_name
+    $registry_data_length = strings.len($reg.target.registry.data.bytes)
+    $registry_data_sample = strings.substring($reg.target.registry.data.bytes, 0, 256)
+
+    // Identify which specific condition triggered the detection for easier analysis.
+    $matched_condition = if(re.regex($reg.target.registry.data.bytes, `(?i)\b(0x)?[a-f0-9]{30,}\b`), "Hex-like Content", if((strings.len($reg.target.registry.data.bytes) > 200 and not re.regex($reg.target.registry.data.bytes, `\s`)), "Large Data Blob", if(strings.len($reg.target.registry.data.bytes) > 1024, "Anomalously Long Value", "Uncommon Registry Key")))
+
+  condition:
+    $reg and (
+      // Condition 1: The registry value contains a long hexadecimal string, often used for shellcode.
+      re.regex($reg.target.registry.data.bytes, `(?i)\b(0x)?[a-f0-9]{30,}\b`) or
+
+      // Condition 2: The value is a large blob of data with no spaces, typical of encoded payloads.
+      (strings.len($reg.target.registry.data.bytes) > 200 and not re.regex($reg.target.registry.data.bytes, `\s`)) or
+
+      // Condition 3: The value is exceptionally long, which is anomalous for most legitimate registry writes.
+      strings.len($reg.target.registry.data.bytes) > 1024 or
+
+      // Condition 4: The write is to a key not on a pre-defined list of common keys.
+      // This requires a reference list named 'common_hkcu_registry_keys' to be populated with legitimate keys.
+      not $reg.target.registry.key in %common_hkcu_registry_keys
+    )
+}

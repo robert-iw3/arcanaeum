@@ -1,0 +1,36 @@
+title: AWS Lambda Unusual Outbound DNS Query
+id: 4d581a1b-631f-4d4b-a74c-f83c76fa9ebc
+status: experimental
+description: Detects DNS queries originating from AWS Lambda functions to domains that are not on an established allowlist. Malicious Lambda extensions may initiate outbound connections for command-and-control (C2) or data exfiltration, and these connections are often preceded by a DNS query to an unusual or non-standard domain.
+references:
+  - https://www.clearvector.com/blog/lambda-spy/
+  - https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/resolver-query-logs.html
+author: RW
+date: 2025-08-19
+tags:
+  - attack.command_and_control
+  - attack.exfiltration
+  - attack.t1071
+  - cloud
+  - aws
+  - aws.lambda
+logsource:
+  product: aws
+  service: route53
+detection:
+  selection:
+    # This selection identifies DNS queries from an Elastic Network Interface (ENI).
+    # For this rule to be effective, you should ensure Route 53 Resolver Query Logging is enabled for the VPCs where your Lambda functions run.
+    srcids.instance|startswith: 'eni-'
+  filter_known_domains:
+    # This filter must be customized with domains that are legitimately queried by your Lambda functions.
+    query_name|endswith:
+      - '.amazonaws.com.'
+      - '.aws.amazon.com.'
+      - '.yourcompany.com.'      # Placeholder for your organization's domains
+      - '.trustedpartner.com.'  # Placeholder for trusted third-party domains
+  condition: selection and not filter_known_domains
+falsepositives:
+  - Legitimate DNS queries to new or unlisted third-party domains (e.g., new API endpoints, software updates).
+  - This rule is designed to be a template and will likely generate false positives until it is tuned for your specific environment by populating the 'filter_known_domains' list.
+level: medium

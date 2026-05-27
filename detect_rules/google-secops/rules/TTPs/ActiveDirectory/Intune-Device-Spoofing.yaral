@@ -1,0 +1,57 @@
+rule Intune_Device_Name_Spoofing_and_Cert_Enrollment {
+  meta:
+    author = "RW"
+    description = "Detects potential Intune device spoofing by correlating Intune device name changes with subsequent certificate issuance from NDES/Intune Connector servers within a short time window (1 hour)."
+    severity = "CRITICAL"
+
+  events:
+    // Event 1: Intune Device Name Change (from Intune audit logs)
+    $intune_change.metadata.event_type = "CONFIGURATION_CHANGE" // UDM event type for configuration changes.
+    $intune_change.metadata.vendor_name = "Microsoft"
+    $intune_change.metadata.product_name = "Intune"
+    $intune_change.metadata.product_event_type = "Patch device" // Maps to "OperationName"="Patch device".
+    $intune_change.metadata.action = "MODIFY" // "Patch" is a modification action.
+    $intune_change.principal.resource.type = "Device" // "ActivityType"=Device.
+    $intune_change.target.resource.name = "Device Name" // Properties.DisplayName == "Device Name".
+    $intune_change.target.resource.new_value = $new_device_name // Properties.NewValue as new_device_name.
+
+    // Normalize the device name: lower case and remove domain suffix (e.g., from "device.domain.com" to "device").
+    $device_name_norm_intune = lower(re.replace($new_device_name, `\..*`, ""))
+
+    // Event 2: Certificate Issuance from NDES/Intune Connector servers (from Certificates datamodel).
+    $cert_issue.metadata.event_type = "CERTIFICATE_REQUEST" // UDM event type for certificate requests or issuance.
+    $cert_issue.metadata.action = "ISSUE" // Filters for issued certificates (Certificates.action=issued).
+
+    // Filter for requests from NDES/Intune Connector servers using a Chronicle Reference List.
+    // This replaces the `get_ndes_or_intune_connector_servers` macro.
+    $cert_issue.principal.ip in %ndes_intune_connector_ips // Use a Reference List for NDES/Intune Connector IPs.
+
+    // Extract the device name from the certificate's Subject Alternative Name (SAN).
+    $cert_issue.principal.x509_certificate.san.other_name = /DNS Name=(?<san_device_name>[^,;]+)/ nocase // Extract SAN device name.
+
+    // Normalize the device name from SAN.
+    $device_name_norm_san = lower(re.replace($san_device_name, `\..*`, ""))
+
+    // Join conditions: Correlate events based on normalized device name and time.
+    $device_name_norm_intune = $device_name_norm_san // Joins on normalized device name.
+    $cert_issue.metadata.event_timestamp.epoch_seconds > $intune_change.metadata.event_timestamp.epoch_seconds // issue_time > change_time.
+
+  match:
+    // Time window: Certificate issuance must occur within 1 hour after the device name change.
+    $device_name_norm_intune over 1h after $intune_change // (issue_time - change_time) <= 3600.
+
+  outcome:
+    $firstTime = $intune_change.metadata.event_timestamp.epoch_seconds // First seen timestamp.
+    $lastTime = $cert_issue.metadata.event_timestamp.epoch_seconds // Last seen timestamp.
+    $device_name = $device_name_norm_intune // Normalized device name.
+    $intune_change_user = $intune_change.principal.user.userid // User who changed the device name (Actor.Upn).
+    $cert_requester = $cert_issue.principal.user.userid // Certificate requester (Certificates.Requester_Name).
+    $cert_subject = $cert_issue.principal.x509_certificate.subject // Certificate subject.
+    $cert_san = $cert_issue.principal.x509_certificate.san.other_name // Certificate SAN.
+    $certificate_server = $cert_issue.target.hostname // Destination of certificate issue (Certificates.dest).
+    $cert_issue_time = $cert_issue.metadata.event_timestamp.epoch_seconds // Time of certificate issuance.
+    $intune_change_time = $intune_change.metadata.event_timestamp.epoch_seconds // Time of Intune device change.
+
+  condition:
+    $intune_change and $cert_issue // Both events must be present and correlated.
+}

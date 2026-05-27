@@ -1,0 +1,56 @@
+{
+  "rule_id": "create_computer_account_by_non_admin",
+  "name": "New Computer Account Created by Non-Admin",
+  "description": "Detects the creation of new computer accounts (Event ID 4741) by users who are not on a designated admin user list.",
+  "severity": "medium",
+  "enabled": true,
+  "language": "kuery",
+  "query": "event.module:\"windows\" and winlog.event_id:4741 and not winlog.event_data.SubjectUserName:/.*\\$$/",
+  "type": "query",
+  "threat": [],
+  "timestamp_override": "@timestamp",
+  "index": [
+    "logs-endpoint.events.*",
+    "logs-windows.events.*"
+  ],
+  "author": [
+    "RW"
+  ],
+  "false_positives": [
+    "Known administrative tasks."
+  ],
+  "interval": "5m",
+  "from": "now-5m",
+  "max_signals": 100,
+  "risk_score": 50,
+  "output_index": ".siem-signals-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://docs.microsoft.com/en-us/windows/security/threat-protection/auditing/event-4741"
+  ],
+  "tags": [
+    "Active Directory",
+    "Account Creation"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "exemptions": [
+    {
+      "name": "admin_users_exemption",
+      "_comment": "Execute ../aux_rule_files/create_admin_users_exemption_list.sh to create the list",
+      "description": "Exempts known administrative user accounts from triggering the rule.",
+      "conditions": [
+        {
+          "field": "winlog.event_data.SubjectUserName",
+          "operator": "included",
+          "type": "list",
+          "list_id": "admin_users"
+        }
+      ],
+      "enabled": true
+    }
+  ],
+  "custom_query_fields": [],
+  "event_group": "winlog.event_data.SubjectUserName"
+}

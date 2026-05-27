@@ -1,0 +1,28 @@
+title: AWS S3 Bucket Versioning Disabled
+id: 8c4900f9-0f7f-4e00-9fda-e48f252be19a
+status: experimental
+description: >-
+  Detects when versioning is disabled (suspended) on an S3 bucket. Disabling versioning is a tactic used by attackers, often as a precursor to a ransomware attack, to prevent the recovery of overwritten or deleted objects.
+references:
+  - https://rhinosecuritylabs.com/aws/s3-ransomware-part-1-attack-vector/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.impact
+  - attack.t1486
+  - attack.defense_evasion
+  - attack.t1562.001
+logsource:
+  product: aws
+  service: s3
+detection:
+  # Detects the API call to modify bucket versioning
+  selection:
+    eventName: 'PutBucketVersioning'
+    # Specifically looks for the status being set to 'Suspended', which disables versioning
+    requestParameters.VersioningConfiguration.Status: 'Suspended'
+  condition: selection
+falsepositives:
+  - Legitimate administrative actions, such as initial bucket configuration or decommissioning of a bucket.
+  - Can be noisy in development or testing environments where infrastructure is frequently changed. Consider filtering by account or user identity for production environments.
+level: high

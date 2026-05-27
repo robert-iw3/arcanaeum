@@ -1,0 +1,50 @@
+// Name: Secure Boot State Disabled or Tampered
+// Author: RW
+// Date: 2025-08-12
+// Description: Detects attempts to disable or tamper with UEFI Secure Boot settings using common administrative tools or by
+//              directly modifying the registry. This activity is a critical step for bootkits to achieve persistence by
+//              allowing unsigned code to run at boot.
+// Tactic: Defense Evasion
+// Technique: T1542.003, T1553.002
+// False Positive Sensitivity: Medium
+// References: https://github.com/TheMalwareGuardian/Abyss, https://github.com/TheMalwareGuardian/Benthic
+
+// This rule detects activities that are common post-exploitation outcomes for vulnerabilities like CVE-2022-21894 (Baton Drop), which involve tampering with boot settings.
+let tampering_events = union isouter=true (
+    // Look for bcdedit commands that weaken boot security
+    DeviceProcessEvents
+    | where FileName =~ "bcdedit.exe"
+    | where ProcessCommandLine has_any ("/set", "/deletevalue")
+        and (
+            ProcessCommandLine has "testsigning on" or
+            ProcessCommandLine has "nointegritychecks on" or
+            ProcessCommandLine has_all ("{bootmgr}", "path")
+        )
+    // FP Note: System administrators or developers may enable test signing for legitimate driver testing. Baseline this activity if it's common in your environment.
+    | extend Tactic="Defense Evasion", Technique="T1553.002", Description="bcdedit.exe used to enable test signing or modify boot manager path."
+    | project-reorder TimeGenerated, DeviceName, Description, Tactic, Technique, InitiatingProcessCommandLine, ProcessCommandLine, AccountName, AccountDomain, InitiatingProcessAccountName, InitiatingProcessAccountDomain
+    ),
+    (
+    // Look for PowerShell commands used to disable Secure Boot or modify signature databases
+    DeviceProcessEvents
+    | where (ProcessFileName =~ "powershell.exe" or InitiatingProcessFileName =~ "powershell.exe")
+    | where ProcessCommandLine has "Set-SecureBootUEFI"
+        and (
+            ProcessCommandLine has_any ("-Enable $false", "Enable-False") or
+            ProcessCommandLine has_any ("-AppendedContentFilePath", "Append-ContentFilePath") // Detects tampering with db/dbx
+        )
+    | extend Tactic="Defense Evasion", Technique="T1542.003", Description="PowerShell used to disable Secure Boot or modify signature databases via Set-SecureBootUEFI cmdlet."
+    | project-reorder TimeGenerated, DeviceName, Description, Tactic, Technique, InitiatingProcessCommandLine, ProcessCommandLine, AccountName, AccountDomain, InitiatingProcessAccountName, InitiatingProcessAccountDomain
+    ),
+    (
+    // Look for direct registry modification of the Secure Boot state
+    DeviceRegistryEvents
+    | where RegistryKey =~ @"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\SecureBoot\State"
+    | where RegistryValueName =~ "UEFISecureBootEnabled"
+    // Check that the value was changed from enabled (1) to disabled (0)
+    | where isnotempty(PreviousRegistryValueData) and PreviousRegistryValueData in ("1", "0x1") and RegistryValueData in ("0", "0x0")
+    | extend Tactic="Defense Evasion", Technique="T1542.003", Description="Secure Boot state was disabled directly in the registry.", ProcessCommandLine=tostring(pack("InitiatingProcess", InitiatingProcessFileName, "Action", "RegistryValueSet", "Key", RegistryKey, "Value", RegistryValueName))
+    | project-reorder TimeGenerated, DeviceName, Description, Tactic, Technique, InitiatingProcessCommandLine, ProcessCommandLine, AccountName, AccountDomain, InitiatingProcessAccountName, InitiatingProcessAccountDomain
+    )
+;
+tampering_events

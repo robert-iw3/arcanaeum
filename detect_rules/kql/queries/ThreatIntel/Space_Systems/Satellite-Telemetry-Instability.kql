@@ -1,0 +1,59 @@
+// Name: Satellite Telemetry Instability
+// Author: RW
+// Date: 2025-08-18
+// Description: Detects anomalous rapid increases in satellite telemetry data, specifically reaction wheel speed and angular velocity.
+// Such spikes can indicate a loss of stability, potentially caused by malicious commands targeting the Attitude Determination and
+// Control System (ADCS), as seen in the Hack-A-Sat competition. This rule uses time series anomaly detection to identify sudden
+// deviations from the established baseline for each satellite.
+// False Positive Sensitivity: Medium. False positives may occur if a satellite performs a legitimate but aggressive maneuver that causes
+// a rapid change in wheel speed or angular velocity. System tests or specific operational modes might also trigger alerts.
+// Tuning:
+// - The 'SatelliteTelemetry_CL' table and its fields ('WheelSpeed_RPM', 'AngularVelocity_deg_s', 'SatelliteID') are placeholders.
+// - Adjust them to match your specific data schema.
+// - The 'series_step' should be adjusted based on the frequency of your telemetry data. A 1-minute step is a reasonable starting point.
+// - The 'anomaly_threshold' controls the sensitivity of the anomaly detection.
+// - A higher value (e.g., 2.0 or 2.5) will make the detection less sensitive and reduce noise.
+
+let time_window = 24h;
+let series_step = 1m;
+let anomaly_threshold = 1.5;
+
+// This query assumes a custom log table containing satellite telemetry data.
+// Replace 'SatelliteTelemetry_CL' with your actual table name.
+SatelliteTelemetry_CL
+| where TimeGenerated > ago(time_window)
+| where isnotempty(SatelliteID) and (isnotempty(WheelSpeed_RPM) or isnotempty(AngularVelocity_deg_s))
+// Create time series for wheel speed and angular velocity for each satellite.
+| summarize
+    Timestamps = make_series(TimeGenerated, series_step),
+    WheelSpeeds = make_series(avg(WheelSpeed_RPM), series_step, default=0),
+    AngularVelocities = make_series(avg(AngularVelocity_deg_s), series_step, default=0)
+    by SatelliteID
+// Apply KQL's built-in time series anomaly detection function.
+| extend
+    WheelSpeedAnomalies = series_decompose_anomalies(WheelSpeeds, anomaly_threshold),
+    AngularVelocityAnomalies = series_decompose_anomalies(AngularVelocities, anomaly_threshold)
+// Expand the time series arrays to evaluate each data point individually.
+| mv-expand i=range(0, array_length(Timestamps)-1) to typeof(int)
+| extend
+    Timestamp = Timestamps[i],
+    WheelSpeed = WheelSpeeds[i],
+    WheelSpeedAnomalyScore = WheelSpeedAnomalies[i],
+    AngularVelocity = AngularVelocities[i],
+    AngularVelocityAnomalyScore = AngularVelocityAnomalies[i]
+// Filter for data points identified as positive anomalies (spikes) in either metric.
+| where WheelSpeedAnomalyScore >= anomaly_threshold or AngularVelocityAnomalyScore >= anomaly_threshold
+// Format the output for the alert.
+| project
+    Timestamp,
+    SatelliteID,
+    // Include details of the specific metric(s) that were anomalous.
+    AnomalousMetric = case(
+        WheelSpeedAnomalyScore >= anomaly_threshold and AngularVelocityAnomalyScore >= anomaly_threshold, "WheelSpeed and AngularVelocity",
+        WheelSpeedAnomalyScore >= anomaly_threshold, "WheelSpeed",
+        "AngularVelocity"
+    ),
+    WheelSpeed,
+    WheelSpeedAnomalyScore,
+    AngularVelocity,
+    AngularVelocityAnomalyScore

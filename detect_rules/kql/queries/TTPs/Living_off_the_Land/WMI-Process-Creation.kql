@@ -1,0 +1,28 @@
+// Name: WMI Process Creation
+// Author: RW
+// Date: 2025-08-08
+// Description: Detects the use of the Windows Management Instrumentation Command-line (WMIC) to create a new process.
+//              This technique (T1047) is frequently used by threat actors for remote execution of malicious commands,
+//              tools, or scripts as part of lateral movement or execution.
+// False Positive Sensitivity: Medium
+// Tactics: Execution, Lateral Movement
+// Techniques: T1047
+
+DeviceProcessEvents
+// Identifies the execution of the WMIC tool
+| where FileName =~ "wmic.exe" or ProcessVersionInfoOriginalFileName =~ "wmic.exe"
+// Looks for the specific command used to create a process
+| where ProcessCommandLine has_all ("process", "call", "create")
+// FP Tuning: WMIC is a legitimate administrative tool. Process creation via WMIC can be normal for remote administration or system management tools (e.g., SCCM).
+// Investigate the full command line to determine if the created process is suspicious (e.g., ntdsutil.exe, execution from temp directories, obfuscated commands).
+// Exclude known administrative scripts or management server activity if this is common in your environment.
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    ProcessCommandLine,
+    InitiatingProcessCommandLine,
+    InitiatingProcessFileName,
+    ReportId,
+    ProcessId,
+    InitiatingProcessId

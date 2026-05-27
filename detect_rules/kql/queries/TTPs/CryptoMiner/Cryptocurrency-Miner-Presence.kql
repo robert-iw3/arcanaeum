@@ -1,0 +1,58 @@
+// Name: Cryptocurrency Miner Execution
+// Description: Detects cryptocurrency miner activity by looking for suspicious process command-line arguments or network connections
+// to known mining pool domains and ports. This behavior is indicative of resource hijacking (T1496), often deployed by stealer loaders.
+// Author: RW
+// Date: 2025-08-18
+// MITRE TTPs: T1496
+
+// Define indicators for crypto mining activity
+let miner_args = dynamic(["--donate-level", "-o stratum+tcp://", "-xmr", "--proxy", "-pool", "pool.minexmr.com", "moneroocean.stream", "--threads", "--cpu-affinity", "--randomx", "xmrig"]);
+let miner_keywords = dynamic(["stratum", "monero", "xmrpool", "nanopool", "ethermine", "minergate", "nicehash"]);
+let miner_ports = dynamic([3333, 4444, 5555, 6666, 7777, 8888, 9999, 14444, 20580]);
+
+union isfuzzy=true DeviceProcessEvents, DeviceNetworkEvents
+| where TimeGenerated > ago(24h)
+// Part 1: Look for suspicious command line arguments associated with miners
+| where (TableName == "DeviceProcessEvents" and ProcessCommandLine has_any (miner_args))
+// Part 2: Look for suspicious network connections (URL keywords or common ports)
+or (
+    TableName == "DeviceNetworkEvents" and
+    (RemoteUrl has_any (miner_keywords) or RemotePort in (miner_ports)) and
+    // FP Filter: Exclude common web traffic to reduce noise
+    RemotePort !in (80, 443)
+)
+// Normalize fields for consistent output across event types
+| extend
+    ProcessName = case(TableName == "DeviceProcessEvents", FileName, InitiatingProcessFileName),
+    ProcessCommandLine = case(TableName == "DeviceProcessEvents", ProcessCommandLine, InitiatingProcessCommandLine),
+    ProcessId = case(TableName == "DeviceProcessEvents", ProcessId, InitiatingProcessId),
+    Evidence = case(
+        TableName == "DeviceProcessEvents", "ProcessCommandLineIndicator",
+        TableName == "DeviceNetworkEvents" and RemoteUrl has_any (miner_keywords), "NetworkUrlIndicator",
+        "NetworkPortIndicator"
+    ),
+    Indicator = case(
+        TableName == "DeviceProcessEvents", ProcessCommandLine,
+        TableName == "DeviceNetworkEvents", strcat(RemoteUrl, ":", RemotePort)
+    )
+// FP Filtering: Miners often masquerade as system processes but rarely run from the correct system directory.
+// This helps filter legitimate svchost from a masquerading miner. This may need to be tuned for your environment.
+| where not(ProcessName =~ "svchost.exe" and FolderPath contains "system32")
+// Summarize findings to create a single alert per process
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    EvidenceTypes = make_set(Evidence),
+    Indicators = make_set(Indicator),
+    RemoteIPs = make_set(RemoteIP)
+    by DeviceId, DeviceName, ProcessId, ProcessName, ProcessCommandLine, bin(TimeGenerated, 10m)
+| project
+    StartTime,
+    EndTime,
+    DeviceName,
+    ProcessName,
+    ProcessId,
+    ProcessCommandLine,
+    EvidenceTypes,
+    Indicators,
+    RemoteIPs

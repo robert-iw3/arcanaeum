@@ -1,0 +1,30 @@
+title: AWS IAM Role Backdoor via Trust Policy
+id: 190b48ee-e8d8-489a-8e1b-6b152fce36a9
+status: experimental
+description: Detects the creation or modification of an AWS IAM role's trust policy to allow principals from an external AWS account to assume the role. This is a common technique used by adversaries to establish persistent access to a compromised environment.
+references:
+  - https://stratus-red-team.cloud/attack-techniques/AWS/aws.persistence.iam-backdoor-role/
+  - https://stratus-red-team.cloud/attack-techniques/AWS/aws.persistence.iam-create-backdoor-role/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.t1098
+  - attack.t1136.003
+  - attack.persistence
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+        # Events for creating or updating an IAM role
+    eventName:
+      - CreateRole
+      - UpdateAssumeRolePolicy
+        # The assume role policy document contains a principal from another AWS account
+        # This is a strong indicator of a cross-account trust relationship being established
+    requestParameters.assumeRolePolicyDocument|contains: '"Principal":{"AWS":'
+  condition: selection
+falsepositives:
+  - Legitimate cross-account roles are common for third-party integrations (e.g., SaaS vendors, security tools) or for access between accounts within an organization.
+  - It is recommended to create an allowlist for known and approved external AWS Account IDs found in the `requestParameters.assumeRolePolicyDocument` field to reduce noise.
+level: medium

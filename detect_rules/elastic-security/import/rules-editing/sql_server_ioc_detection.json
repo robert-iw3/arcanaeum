@@ -1,0 +1,21 @@
+{
+  "type": "detection-engine.rule",
+  "id": "sql-server-ioc-detection",
+  "attributes": {
+    "risk_score": 90,
+    "enabled": true,
+    "name": "SQL Server Vulnerability and IOC Detection",
+    "description": "Detects SQL Server vulnerabilities and IOCs, including high-risk procedure enablement, CLR configuration changes, suspicious startup procedures, shell spawning, sqlcmd usage, CLR assembly loading, and Invoke-Sqlcmd with suspicious arguments.",
+    "rule_id": "sql_server_ioc_detection",
+    "index": [
+      "logs-winlogbeat.*",
+      "logs-endpoint.events.*"
+    ],
+    "language": "kuery",
+    "query": "(/* High-Risk SQL Procedure Enabled */ (winlog.event_id:15457 AND (winlog.event_data.Data1:\"xp_cmdshell\" OR winlog.event_data.Data1:\"Ole Automation Procedures\") AND winlog.event_data.Data2:\"1\") OR /* SQL CLR Enabled */ (winlog.event_id:15457 AND winlog.event_data.Data1:\"clr enabled\" AND winlog.event_data.Data2:\"1\") OR /* SQL CLR Strict Security Disabled */ (winlog.event_id:15457 AND winlog.event_data.Data1:\"clr strict security\" AND winlog.event_data.Data2:\"0\") OR /* Suspicious SQL Startup Procedure */ (winlog.event_id:17135 AND (winlog.event_data.Data1:/\\*xp_*\\/ OR winlog.event_data.Data1:/\\*sp_*\\/ OR winlog.event_data.Data1:\"*cmdshell*\" OR winlog.event_data.Data1:\"*shell*\" OR winlog.event_data.Data1:\"*exec*\")) OR /* SQL Server Spawning Shell */ (process.parent.name:\"sqlservr.exe\" AND process.name:(\"cmd.exe\" OR \"powershell.exe\")) OR /* Suspicious sqlcmd.exe Usage */ (process.name:\"sqlcmd.exe\" AND (process.command_line:/\\*xp_cmdshell*\\/ OR process.command_line:/\\*sp_oacreate*\\/ OR process.command_line:/\\*sp_add_trusted_assembly*\\/ OR process.command_line:/\\*sp_configure*\\/ OR process.command_line:/\\*OPENROWSET*\\/ OR process.command_line:/\\*-o *\\/ OR process.command_line:/\\*--outputfile*\\/ OR process.command_line:/\\*http*\\/\\/*\\/ OR process.command_line:/\\*-t 0*\\/ OR process.command_line:/\\*--query_timeout=0*\\/)) OR /* Potential SQL CLR Assembly Loaded */ (event.action:\"creation\" AND file.name:/\\*.dll/ AND file.path:/\\*\\\\Microsoft SQL Server\\\\*\\\\MSSQL\\\\Binn\\\\*\\/) OR /* Suspicious Invoke-Sqlcmd Usage */ (winlog.event_id:4104 AND winlog.event_data.ScriptBlockText:/\\*Invoke-Sqlcmd*\\/ AND (winlog.event_data.ScriptBlockText:/\\*xp_cmdshell*\\/ OR winlog.event_data.ScriptBlockText:/\\*sp_oacreate*\\/ OR winlog.event_data.ScriptBlockText:/\\*sp_add_trusted_assembly*\\/ OR winlog.event_data.ScriptBlockText:/\\*sp_configure*\\/ OR winlog.event_data.ScriptBlockText:/\\*OPENROWSET*\\/ OR winlog.event_data.ScriptBlockText:/\\*-QueryTimeout 0*\\/)))",
+    "interval": "15m",
+    "severity": "critical",
+    "type": "query",
+    "version": "1"
+  }
+}

@@ -1,0 +1,60 @@
+// Name: Ransomware Activity in ICS/OT Environment
+// Author: RW
+// Date: 2025-08-17
+// Description: Detects common ransomware TTPs that are highly anomalous in an Industrial Control Systems (ICS) or
+// Operational Technology (OT) environment. The query identifies shadow copy deletion, disabling of recovery features,
+// and mass file renaming indicative of encryption. The detection is focused on behaviors that are particularly
+// suspicious on critical assets like Engineering Workstations (EWS) or Human-Machine Interfaces (HMI).
+// False Positive Sensitivity: Medium
+// Tactic: Impact
+// Technique: T1490, T1486
+
+let timeframe = 1h;
+// Define the threshold for mass file renaming.
+// FP Tuning: This value may need to be increased if legitimate applications in your environment perform large-scale file renaming operations.
+let fileRenameThreshold = 100;
+
+// TTP 1: Deletion of volume shadow copies using vssadmin.
+let shadowCopyDeletion =
+DeviceProcessEvents
+| where TimeGenerated > ago(timeframe)
+| where FileName =~ "vssadmin.exe"
+| where ProcessCommandLine has "delete" and ProcessCommandLine has "shadows"
+| extend TTP = "Shadow Copy Deletion via vssadmin", TechniqueId = "T1490";
+
+// TTP 2: Disabling system recovery features using bcdedit.
+let recoveryDisabled =
+DeviceProcessEvents
+| where TimeGenerated > ago(timeframe)
+| where FileName =~ "bcdedit.exe"
+| where ProcessCommandLine has "recoveryenabled no" or ProcessCommandLine has "bootstatuspolicy ignoreallfailures"
+| extend TTP = "System Recovery Disabled via bcdedit", TechniqueId = "T1490";
+
+// TTP 3: Mass file renaming, indicative of data encryption for impact.
+let massFileRename =
+DeviceFileEvents
+| where TimeGenerated > ago(timeframe)
+| where ActionType == "FileRenamed"
+// Extract the new file extension.
+| extend NewExtension = tostring(extract(@"\.([a-zA-Z0-9]+)$", 1, FileName))
+| where isnotempty(NewExtension)
+// Summarize file rename activity by the initiating process.
+| summarize RenamedFileCount = dcount(FileName), DistinctExtensions = dcount(NewExtension) by bin(TimeGenerated, 10m), DeviceId, DeviceName, InitiatingProcessFileName, InitiatingProcessCommandLine
+| where RenamedFileCount > fileRenameThreshold and DistinctExtensions == 1
+| extend TTP = "Mass File Renaming", TechniqueId = "T1486";
+
+// Combine findings from the different TTPs.
+union shadowCopyDeletion, recoveryDisabled, massFileRename
+// FP Tuning: To focus this detection on critical ICS/OT assets, filter by device groups or naming conventions.
+// Example: | where DeviceName has_any ("HMI", "EWS", "HISTORIAN") or "OT-Systems" in DeviceGroup
+| project
+    TimeGenerated,
+    DeviceName,
+    TTP,
+    TechniqueId,
+    FileName,
+    ProcessCommandLine,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RenamedFileCount,
+    DeviceId

@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: suricata
+  namespace: {{namespace}}
+spec:
+  replicas: {{replicas}}
+  selector:
+    matchLabels:
+      app: suricata
+  template:
+    metadata:
+      labels:
+        app: suricata
+    spec:
+      hostNetwork: true
+      containers:
+      - name: suricata
+        image: suricata:{{SURICATA_VERSION}}
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: SURICATA_OPTIONS
+          value: "-i {{interface}} -vv"
+        volumeMounts:
+        - name: localtime
+          mountPath: /etc/localtime
+          readOnly: true
+        - name: logs
+          mountPath: /var/log/suricata
+        - name: rules
+          mountPath: /var/lib/suricata
+        - name: config
+          mountPath: /etc/suricata
+        securityContext:
+          capabilities:
+            add: ["NET_ADMIN", "NET_RAW", "SYS_NICE"]
+        resources:
+          limits:
+            cpu: "2"
+            memory: "4Gi"
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+        livenessProbe:
+          exec:
+            command: ["pidof", "suricata"]
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          exec:
+            command: ["pidof", "suricata"]
+          initialDelaySeconds: 10
+          periodSeconds: 10
+      volumes:
+      - name: localtime
+        hostPath:
+          path: /etc/localtime
+      - name: logs
+        persistentVolumeClaim:
+          claimName: suricata-logs
+      - name: rules
+        persistentVolumeClaim:
+          claimName: suricata-rules
+      - name: config
+        persistentVolumeClaim:
+          claimName: suricata-config

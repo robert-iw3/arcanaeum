@@ -1,0 +1,66 @@
+{
+  "name": "Container Security Threat Detection",
+  "queries": [
+    {
+      "name": "high_critical_vulnerabilities",
+      "query": "@vulnerability.severity:(High OR Critical)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "privileged_containers",
+      "query": "@kubernetes.pod.security_context.privileged:true -@kubernetes.audit.user.username:(system:masters OR cluster-admin OR azure-operator)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "runtime_escape_attempts",
+      "query": "@process.parent.executable:(*runc* OR *containerd-shim*) AND @process.name:(nsenter OR insmod OR modprobe OR chroot)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "insecure_api_access",
+      "query": "@kubernetes.audit.verb:create AND @kubernetes.audit.objectRef.resource:clusterrolebindings AND @kubernetes.audit.requestObject.roleRef.name:(cluster-admin OR admin) -@kubernetes.audit.user.username:(system:masters OR cluster-admin OR azure-operator)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "untrusted_registry",
+      "query": "@container.image.name:* -@container.image.name:(mcr.microsoft.com/* OR docker.io/* OR k8s.gcr.io/* OR quay.io/* OR gcr.io/*)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    }
+  ],
+  "cases": [
+    {
+      "name": "Container Security Threat Detection",
+      "status": "high",
+      "condition": "event_count_0 >= 1 OR event_count_1 >= 1 OR event_count_2 >= 1 OR event_count_3 >= 1 OR event_count_4 >= 1"
+    }
+  ],
+  "options": {
+    "evaluation_window": 3600,
+    "keep_alive": 3600,
+    "max_signal_duration": 3600,
+    "correlation_based_signal": {
+      "correlation_inputs": [
+        {
+          "rule_id": "container_security_correlation"
+        }
+      ],
+      "correlated_by_fields": [
+        "@host",
+        "@kubernetes.audit.user.username",
+        "@container.image.name"
+      ],
+      "distinct_fields": [
+        "case_id"
+      ]
+    }
+  },
+  "message": "Container Threat: {{distinct_count}} type(s) on host {{host}} involving entity {{container.image.name or kubernetes.audit.user.username}}: {{case_names}}",
+  "type": "correlation_based_signal",
+  "tags": [],
+  "is_enabled": true
+}

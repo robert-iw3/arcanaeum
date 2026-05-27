@@ -1,0 +1,35 @@
+// Name: Non-Standard Process Loading Remote Session Enumeration DLL
+// Author: RW
+// Date: 2025-08-06
+// Description: Detects when DLLs associated with remote session enumeration (winsta.dll, wtsapi32.dll) are loaded by non-standard processes. This is a behavior of the BitLockMove tool, which uses these libraries to identify active user sessions on a target host.
+// Tactic: Discovery, Defense Evasion
+// Technique: T1073 - DLL Side-Loading
+// False Positive Sensitivity: Medium
+
+DeviceImageLoadEvents
+// Look for the specific DLLs used for remote session enumeration.
+| where FileName in~ ("winsta.dll", "wtsapi32.dll")
+// Exclude known legitimate processes that normally load these DLLs for remote desktop or session management functions.
+| where not(InitiatingProcessFileName in~ (
+    "qwinsta.exe",
+    "tsadmin.msc",
+    "mstsc.exe",
+    "svchost.exe",
+    "taskmgr.exe",
+    "explorer.exe",
+    "logonui.exe"
+    ))
+// FP Tuning: The exclusion list contains common Microsoft processes. Custom remote administration tools or third-party software
+// might also legitimately load these DLLs. Add any environment-specific processes to the exclusion list above to reduce noise.
+| project
+    Timestamp,
+    DeviceName,
+    AccountName = InitiatingProcessAccountName,
+    Tactic = "Discovery, Defense Evasion",
+    Technique = "T1073",
+    Description = "A non-standard process loaded a DLL used for remote session enumeration, a behavior seen in the BitLockMove tool.",
+    LoadedDll = FileName,
+    LoadingProcess = InitiatingProcessFileName,
+    LoadingProcessCommandLine = InitiatingProcessCommandLine,
+    ReportId,
+    DeviceId

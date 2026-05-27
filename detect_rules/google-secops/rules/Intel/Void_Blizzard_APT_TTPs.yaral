@@ -1,0 +1,56 @@
+rule laundry_bear_void_blizzard_ioc_match {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects network activity associated with the Russian APT group Laundry Bear (also known as Void Blizzard). This rule identifies connections to known malicious domains, IP addresses, or HTTP responses with body hashes linked to their phishing infrastructure."
+    tags = "LAUNDRY_BEAR, VOID_BLIZZARD, APT, PHISHING, RUSSIA"
+    tactic = "TA0001"
+    technique = "T1566"
+    false_positives = "IP addresses, particularly those on shared cloud infrastructure, may be reassigned over time and could cause false positives. IOCs should be reviewed periodically for freshness."
+
+  events:
+    // The rule matches on one of three conditions: a DNS query for a known malicious domain,
+    // a network connection to a known malicious IP, or an HTTP response with a known malicious body hash.
+    (
+      $e.metadata.event_type = "NETWORK_DNS" and
+      $e.network.dns.questions.name in (
+        "micsrosoftonline.com", "ebsumrnit.eu", "ebsurnmit.eu", "ebsummlt.eu", "ebsummt.eu",
+        "walshhgroup.com", "enticator-secure.com", "maidservant.shop", "it-sharepoint.com",
+        "deloittesharepoint.com", "microffice.org", "portal-microsoftonline.com", "teamsupportonline.top",
+        "spidergov.org", "aoc-gov.us", "mail-forgot.com", "remerelli.com", "weblogmail.live",
+        "x9a7lm02kqaccountprotectionaccountsecuritynoreply.com"
+      )
+    ) or (
+      // Using NETWORK_CONNECTION for broader IP matching against both HTTP and non-HTTP traffic.
+      // Note: IP-based IOCs can have a higher false positive rate if infrastructure is shared.
+      $e.metadata.event_type = "NETWORK_CONNECTION" and
+      any $ip in $e.target.ip where $ip in (
+        "104.36.83.170", "34.204.123.157", "54.144.139.77", "3.64.201.107",
+        "3.126.53.226", "5.230.36.62", "64.23.244.176", "64.226.126.33",
+        "52.78.180.48", "54.167.184.45", "104.168.144.21", "154.216.18.83",
+        "170.64.163.105", "170.64.209.129", "176.97.124.54"
+      )
+    ) or (
+      // These hashes correspond to specific HTML redirector pages used in phishing campaigns.
+      $e.metadata.event_type = "NETWORK_HTTP" and
+      $e.network.http.response_body_sha1 in (
+        "38c47d338a9c5ab7ccef7413edb7b2112bdfc56f", // redirects to outlook.live.com
+        "2c0fa608bd243fce6f69ece34addf32571e8368f"  // redirects to login.live.com
+      )
+    )
+
+  outcome:
+    // Risk score is set to medium-high due to matching specific threat intelligence.
+    $risk_score = 65
+    // The non-null outcome field indicates the reason for the match.
+    $principal_ip = array_distinct($e.principal.ip)
+    $principal_hostname = array_distinct($e.principal.hostname)
+    $target_ip = array_distinct($e.target.ip)
+    $target_domain = array_distinct($e.network.dns.questions.name)
+    $target_url = array_distinct($e.network.http.url)
+    $http_response_body_sha1 = $e.network.http.response_body_sha1
+    $actor = "Laundry Bear / Void Blizzard"
+
+  condition:
+    $e
+}

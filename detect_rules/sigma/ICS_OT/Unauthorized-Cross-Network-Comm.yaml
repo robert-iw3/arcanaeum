@@ -1,0 +1,42 @@
+title: Unauthorized IT to OT Network Communication
+status: experimental
+description: >-
+  Detects network traffic originating from a defined IT network segment and destined for a protected OT network segment.
+  This could indicate a network segmentation breach, unauthorized access attempts, or lateral movement from the IT environment into the OT environment.
+  This rule requires tuning by defining the specific IP ranges for your IT and OT networks.
+references:
+  - https://www.cisa.gov/uscert/ics/recommended-practices
+author: RW
+date: 2025-08-18
+tags:
+  - attack.lateral_movement
+  - attack.discovery
+  - attack.t1046
+  - attack.t1572
+  - attack.t1090
+logsource:
+  category: network_traffic
+  product: zeek
+detection:
+  selection:
+    # This section requires customization.
+    # Define your general IT network ranges here.
+    source.ip|cidr:
+      - '192.168.0.0/16'   # Placeholder for corporate IT network
+      - '10.0.0.0/8'       # Placeholder for corporate IT network
+    # Define your protected OT network ranges here.
+    destination.ip|cidr:
+      - '172.16.0.0/12'    # Placeholder for OT/ICS network
+      - '100.64.0.0/10'    # Placeholder for OT/ICS network
+  # This section is for defining allowed exceptions.
+  # Add IPs of authorized systems (e.g., HMIs, data historians, jump servers) that are permitted to communicate from IT to OT.
+  filter_known_good:
+    source.ip:
+      - '192.168.1.50' # Placeholder for an authorized engineering workstation
+      - '10.10.1.100'  # Placeholder for a data historian server
+  condition: selection and not filter_known_good
+falsepositives:
+  - Authorized communication from systems like data historians, HMIs, or engineering workstations that are designed to bridge IT and OT networks. These should be added to the 'filter_known_good' section.
+  - Misconfiguration of the IT/OT network IP ranges in the rule.
+  - Network scanning from authorized vulnerability management tools. The source IP of the scanner should be added to the filter.
+level: high

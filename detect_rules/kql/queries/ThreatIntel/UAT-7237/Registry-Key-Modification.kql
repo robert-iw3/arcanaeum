@@ -1,0 +1,32 @@
+// Name: UAT-7237 Defense Evasion via Registry Modification
+// Author: RW
+// Date: 2025-08-15
+// Description: Detects attempts to modify specific registry keys to weaken security controls, a technique used by UAT-7237.
+// This includes disabling UAC remote restrictions and enabling WDigest to store credentials in cleartext.
+// False Positive Sensitivity: Medium
+// References: https://blog.talosintelligence.com/uat-7237-targets-web-hosting-infra/
+// MITRE TTPs: T1112, T1547.001
+
+let timeframe = 1d;
+DeviceRegistryEvents
+| where TimeGenerated > ago(timeframe)
+// Filter for registry modification events, typically initiated by reg.exe.
+| where ActionType == "RegistryValueSet" and InitiatingProcessFileName in~ ("reg.exe", "cmd.exe", "powershell.exe")
+| where
+    // Detects disabling of UAC remote restrictions (enables pass-the-hash for local accounts).
+    (RegistryKey endswith @"\Policies\system" and RegistryValueName =~ "LocalAccountTokenFilterPolicy" and RegistryValueData == "1")
+    or
+    // Detects enabling of WDigest cleartext credential caching.
+    (RegistryKey endswith @"\SecurityProviders\WDigest" and RegistryValueName =~ "UseLogonCredential" and RegistryValueData == "1")
+// Note: While these changes are highly suspicious, they may be performed by administrators in specific scenarios.
+// Review the initiating process and user context for any alerts.
+| project
+    TimeGenerated,
+    DeviceName,
+    ActionType,
+    RegistryKey,
+    RegistryValueName,
+    RegistryValueData,
+    InitiatingProcessAccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine

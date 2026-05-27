@@ -1,0 +1,54 @@
+{
+  "data": {
+    "type": "signal_correlation",
+    "attributes": {
+      "name": "Consolidated C2 Detection TTPs",
+      "enabled": true,
+      "cases": [
+        {
+          "name": "C2 Redirector with Unusual User-Agent",
+          "status": "medium",
+          "query": "source:(nginx* OR apache_access OR iis) @http.user_agent:*-* -@http.user_agent:(Mozilla/* OR Opera/* OR curl/* OR Wget/* OR Python-urllib/* OR Go-http-client/* OR Java/* OR *bot* OR *spider* OR *crawler* OR *scanner*) | groupby @http.user_agent, @network.source.ip, @network.destination.ip count as event_count | filter event_count < 10"
+        },
+        {
+          "name": "Suspicious HTTP/HTTPS Traffic for C2",
+          "status": "high",
+          "query": "source:(zeek_ssl OR zeek_http) -(@tls.sni:(*.google.com OR *.akamaiedge.net OR *.amazonaws.com OR *.azureedge.net OR *.cloudflare.net OR *.fastly.net OR *.cloudfront.net) OR @http.host:(*.google.com OR *.akamaiedge.net OR *.amazonaws.com OR *.azureedge.net OR *.cloudflare.net OR *.fastly.net OR *.cloudfront.net)) (@http.content_type:application/octet-stream -(@http.uri:*\\.(exe|zip|rar|dll|msi|iso|pkg|dmg)$ OR @http.filename:*-*) OR (@http.host:*-* @tls.sni:*-* @http.host!=@tls.sni -@http.host:*.*@tls.sni))"
+        },
+        {
+          "name": "Anomalous DNS Queries for C2",
+          "status": "high",
+          "query": "source:stream_dns OR tag:dns -@dns.query:localhost -@dns.domain:(*.amazonaws.com OR *.google.com OR *.microsoft.com OR *.icloud.com OR *.akamai.net) | groupby @network.source.ip, @dns.domain count as total_queries, dc(@dns.query) as distinct_query_count, values(@dns.query) as sample_queries, values(@dns.query_type) as query_types, avg(len(@dns.query)) as avg_query_len, max(len(replace(@dns.query, '[^0-9]', ''))/len(@dns.query)) as max_numeric_ratio, count(@dns.query_type:TXT) as total_txt_queries | filter ((distinct_query_count > 15 AND avg_query_len > 20 AND max_numeric_ratio > 0.2) OR (total_txt_queries > 10 AND distinct_query_count > 5))"
+        },
+        {
+          "name": "Non-Standard Protocol Usage for C2",
+          "status": "high",
+          "query": "source:network tag:(network AND communicate) ((@app:dns -@network.destination.port:53) OR (@app:smtp -@network.destination.port:(25 OR 465 OR 587)) OR (@network.destination.port:(80 OR 443) -@app:(http OR ssl OR https OR quic OR http-proxy OR unknown OR bittorrent)) OR (@network.transport:icmp | groupby @network.source.ip, @network.destination.ip, @network.transport sum(@network.bytes) as total_bytes, dc(@network.icmp_type) as distinct_icmp_types, count as pkt_count | filter pkt_count > 100 AND total_bytes > 20480)) -@network.source.ip:(10.0.0.0/8 OR 127.0.0.1) -@network.destination.ip:(224.0.0.0/4 OR 255.255.255.255)"
+        },
+        {
+          "name": "Rapid IP Address Changes for a Domain",
+          "status": "medium",
+          "query": "source:network_resolution @dns.query_type:(A OR AAAA) -@dns.answers:(10.* OR 172.1[6-9].* OR 172.2[0-9].* OR 172.3[0-1].* OR 192.168.* OR 127.0.0.1) -@dns.query:(*.google.com OR *.googleapis.com OR *.microsoft.com OR *.windowsupdate.com OR *.apple.com OR *.icloud.com OR *.amazonaws.com OR *.cloudfront.net OR *.akamaitechnologies.com OR *.akamai.net OR *.cloudflare.com OR *.fastly.net OR *.office365.com) | groupby @dns.query dc(@dns.answers) as distinct_ip_count | filter distinct_ip_count > 3"
+        }
+      ],
+      "group_by_fields": ["@network.source.ip", "@host"],
+      "distinct_fields": ["case_id"],
+      "correlation": {
+        "expression": "distinct_count >= 2",
+        "timeframe": "1h"
+      },
+      "message": "Consolidated C2 Detection: {distinct_count} distinct TTPs detected on source IP {@network.source.ip} or host {@host}. Techniques: {case_names}. Details: {@http.user_agent OR @http.host OR @tls.sni OR @dns.query OR @network.transport OR @dns.answers}. Timeframe: {first_activity} to {last_activity}",
+      "severity": "high",
+      "tags": [
+        "security:attack",
+        "tactic:TA0011",
+        "technique:T1071.001",
+        "technique:T1071.004",
+        "technique:T1572"
+      ],
+      "options": {
+        "evaluation_window": "1h"
+      }
+    }
+  }
+}

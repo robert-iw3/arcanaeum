@@ -1,0 +1,51 @@
+rule ransomware_activity_inhibiting_system_recovery {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects the execution of commands commonly used by ransomware to inhibit system recovery on IT or OT systems. This includes deleting volume shadow copies, disabling boot recovery options, and clearing event logs. Such activities are strong indicators of a ransomware infection in progress and are critical to detect in both IT and OT environments, such as those found in the maritime industry, to prevent widespread impact."
+    reference = "https://attack.mitre.org/techniques/T1490/, https://attack.mitre.org/techniques/T1070/001/"
+    false_positives = "Legitimate administrative scripts, although clearing shadow copies or disabling recovery outside of a controlled maintenance window is highly unusual., Some backup or system management software might perform these actions, but should be validated."
+    tags = "attack.impact, ransomware, industry.ics, industry.maritime"
+    tactic = "TA0040"
+    technique = "T1490, T1070.001"
+
+  events:
+    $process.metadata.event_type = "PROCESS_LAUNCH"
+
+    // Detects execution of utilities used to inhibit system recovery or clear logs.
+    (
+      // vssadmin is used to delete volume shadow copies.
+      (
+        re.regex($process.target.process.file.full_path, `\\vssadmin\.exe$`) and
+        re.regex($process.target.process.command_line, `(?i)delete\s+shadows`)
+      ) or
+      // wmic is another tool used for deleting shadow copies.
+      (
+        re.regex($process.target.process.file.full_path, `\\wmic\.exe$`) and
+        re.regex($process.target.process.command_line, `(?i)shadowcopy\s+delete`)
+      ) or
+      // bcdedit is used to disable automatic repair features.
+      (
+        re.regex($process.target.process.file.full_path, `\\bcdedit\.exe$`) and
+        re.regex($process.target.process.command_line, `(?i)\/set\s+.*recoveryenabled\s+No`)
+      ) or
+      // wevtutil is used to clear event logs to cover tracks.
+      (
+        re.regex($process.target.process.file.full_path, `\\wevtutil\.exe$`) and
+        re.regex($process.target.process.command_line, `(?i)\s+(cl|clear-log)\s`)
+      )
+    )
+
+  outcome:
+    // High risk score as these actions are strongly indicative of ransomware.
+    $risk_score = 85
+    $principal_hostname = array_distinct($process.principal.hostname)
+    $principal_user = array_distinct($process.principal.user.userid)
+    $parent_process = array_distinct($process.principal.process.command_line)
+    $target_process_path = array_distinct($process.target.process.file.full_path)
+    $target_process_command_line = array_distinct($process.target.process.command_line)
+    $target_process_hash = array_distinct($process.target.process.file.sha256)
+
+  condition:
+    $process
+}

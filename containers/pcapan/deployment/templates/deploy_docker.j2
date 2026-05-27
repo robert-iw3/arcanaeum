@@ -1,0 +1,9 @@
+---
+- hosts: localhost
+  tasks:
+    - name: Build Rust Docker
+      command: docker build -t pcapan:{{ image_tag }} ../rust-app
+    - name: Build Web Docker
+      command: docker build -t pcapan-web:{{ image_tag }} ../web-app
+    - name: Run Analysis
+      command: docker run --rm -v {{ pcap_dir }}:/pcaps pcapan:{{ image_tag }} --dir /pcaps --whitelist /whitelist.yaml

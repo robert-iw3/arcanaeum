@@ -1,0 +1,36 @@
+// Name: Lazarus Group OtterCookie C2 Communication
+// Author: RW
+// Date: 2025-07-31
+// Severity: High
+// Description: Detects network traffic associated with the Lazarus Group's OtterCookie malware. This rule looks for POST requests to known C2 domains on port 6168, a TTP observed in recent campaigns.
+// Tactic: Command and Control
+// Technique: T1071.001 - Application Layer Protocol: Web Protocols
+
+let ioc_domains = dynamic([
+    "fashdefi.store",
+    "bujey.store"
+]); // Known C2 domains used by Lazarus Group for payload delivery.
+
+// Search for network connections in proxy or firewall logs.
+CommonSecurityLog
+| where TimeGenerated > ago(1d)
+// The malware communicates over the non-standard port 6168.
+| where DestinationPort == 6168
+// The payload delivery mechanism uses POST requests.
+| where isnotempty(RequestMethod) and RequestMethod =~ "POST"
+// Search for connections to the specific C2 domains.
+| where Computer has_any (ioc_domains) or RequestURL has_any (ioc_domains) or DestinationHost has_any (ioc_domains)
+// Potential for False Positives: Low. These indicators are highly specific.
+// However, the threat actor may rotate domains. Consider monitoring for any POST request over non-standard web ports to broaden detection, though this may increase noise.
+// | where SourceIP !in ("<known_good_IPs>") // Placeholder for tuning
+| project-reorder
+    TimeGenerated,
+    SourceIP,
+    DestinationHost,
+    DestinationPort,
+    RequestMethod,
+    RequestURL,
+    DeviceVendor,
+    DeviceProduct,
+    Computer,
+    AdditionalExtensions

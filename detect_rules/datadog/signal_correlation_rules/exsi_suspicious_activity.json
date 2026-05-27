@@ -1,0 +1,141 @@
+{
+  "name": "ESXi Host Suspicious Activity",
+  "type": "signal_correlation",
+  "message": "ESXi Suspicious Activity: {{distinct_count}} tactic(s) on host {{host}} by user {{usr}}: {{case_names}}",
+  "is_enabled": true,
+  "options": {
+    "detection_method": "signal_correlation",
+    "correlation_rule": {
+      "correlated_by_fields": [
+        "host",
+        "usr"
+      ],
+      "distinct_fields": [
+        "case_id"
+      ],
+      "correlation_expression": "distinct_count >= 1",
+      "correlation_time_frame": 3600
+    },
+    "evaluation_window": 3600,
+    "keep_alive": 3600,
+    "max_signal_duration": 3600
+  },
+  "queries": [
+    {
+      "name": "esxi_system_reconnaissance",
+      "query": "@message:*esxcli\\ system* AND (@message:*\\ get* OR @message:*\\ list*) -@message:*filesystem*",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "external_root_login_to_esxi_ui",
+      "query": "@message:*root*logged\\ in*",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "user_granted_admin_role_on_esxi",
+      "query": "@message:*esxcli\\ system\\ permission\\ set* AND @message:*role\\ Admin*",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "vib_acceptance_level_tampering",
+      "query": "@message:*esxcli\\ software\\ acceptance\\ set*",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "ssh_enabled_on_esxi_host",
+      "query": "@message:*SSH\\ access\\ has\\ been\\ enabled*",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "esxi_encryption_settings_modified",
+      "query": "@message:*system\\ settings\\ encryption\\ set* AND (@message:*--require-secure-boot=0* OR @message:*--require-exec-installed-only=0* OR @message:*execInstalledOnly=false*)",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "vm_exported_via_remote_tool",
+      "query": "@message:*File\\ download\\ from\\ path* AND @message:*was\\ initiated\\ from*",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "esxi_audit_tampering",
+      "query": "@message:*esxcli\\ system\\ auditrecords*",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "esxi_syslog_tampering",
+      "query": "@message:*syslog\\ config\\ set* AND @message:*esxcli* OR @message:*Set\\ called\\ with\\ key* AND (@message:*Syslog.global.logHost* OR @message:*Syslog.global.logdir*)",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "esxi_system_clock_manipulation",
+      "query": "@message:*NTPClock* AND @message:*system\\ clock\\ stepped*",
+      "data_source": "logs",
+      "aggregation": "count"
+    }
+  ],
+  "cases": [
+    {
+      "name": "ESXi System Reconnaissance",
+      "status": "medium",
+      "condition": "esxi_system_reconnaissance >= 1"
+    },
+    {
+      "name": "External Root Login to ESXi UI",
+      "status": "high",
+      "condition": "external_root_login_to_esxi_ui >= 1"
+    },
+    {
+      "name": "User Granted Admin Role on ESXi",
+      "status": "high",
+      "condition": "user_granted_admin_role_on_esxi >= 1"
+    },
+    {
+      "name": "VIB Acceptance Level Tampering",
+      "status": "medium",
+      "condition": "vib_acceptance_level_tampering >= 1"
+    },
+    {
+      "name": "SSH Enabled on ESXi Host",
+      "status": "medium",
+      "condition": "ssh_enabled_on_esxi_host >= 1"
+    },
+    {
+      "name": "ESXi Encryption Settings Modified",
+      "status": "high",
+      "condition": "esxi_encryption_settings_modified >= 1"
+    },
+    {
+      "name": "VM Exported via Remote Tool",
+      "status": "high",
+      "condition": "vm_exported_via_remote_tool >= 1"
+    },
+    {
+      "name": "ESXi Audit Tampering",
+      "status": "medium",
+      "condition": "esxi_audit_tampering >= 1"
+    },
+    {
+      "name": "ESXi Syslog Tampering",
+      "status": "medium",
+      "condition": "esxi_syslog_tampering >= 1"
+    },
+    {
+      "name": "ESXi System Clock Manipulation",
+      "status": "medium",
+      "condition": "esxi_system_clock_manipulation >= 1"
+    }
+  ],
+  "tags": [
+    "rule_id:esxi_suspicious_correlation",
+    "severity:high"
+  ]
+}

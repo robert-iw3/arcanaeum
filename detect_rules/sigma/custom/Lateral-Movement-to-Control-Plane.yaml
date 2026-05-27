@@ -1,0 +1,59 @@
+title: Lateral Movement to Cloud Control Plane
+id: 1c2e061e-18fc-4e7b-a367-31363d3035b0
+status: experimental
+description: Detects successful authentication to a cloud control plane that exhibits signs of lateral movement from a compromised machine, such as using a programmatic user-agent or an IP address associated with an anonymization service (VPN, TOR, hosting). This aligns with threat intelligence on cloud-conscious actors who leverage compromised machines or scripting tools to move laterally to the control plane.
+references:
+  - Threat Intel ID: 6e487ba759c8e80223efef2a739cd68b6586a6454f568bafdb580d896b47660a
+author: RW
+date: 2025-08-19
+tags:
+  - attack.lateral_movement
+  - attack.t1021
+logsource:
+  category: cloud
+detection:
+  # Generic successful login events across different cloud providers
+  login_success:
+    - product: aws
+      service: cloudtrail
+      aws.eventName: 'ConsoleLogin'
+      aws.responseElements.ConsoleLogin: 'Success'
+    - product: azure
+      category: signinlogs
+      status.errorCode: 0
+    - product: gcp
+      service: gcp.audit
+      gcp.method_name: 'google.login.LoginService.loginSuccess'
+    - product: okta
+      event_type: 'user.session.start'
+      outcome.result: 'SUCCESS'
+
+  # User-agents commonly associated with scripts, CLIs, or other non-standard tools
+  suspicious_ua:
+    http.user_agent|startswith:
+      - 'curl/'
+      - 'Wget/'
+      - 'python-requests/'
+      - 'Go-http-client/'
+      - 'Java/'
+      - 'aws-cli/'
+      - 'gcloud/'
+      - 'AZURECLI/'
+    http.user_agent|contains:
+      - 'PowerShell'
+
+  # IP addresses associated with anonymization or non-standard infrastructure
+  # Note: These fields depend on log enrichment from your security tools (e.g., GeoIP, ASN).
+  suspicious_ip:
+    source.ip.is_hosting: true
+    source.ip.is_vpn: true
+    source.ip.is_proxy: true
+    source.ip.is_tor: true
+
+  condition: login_success and (suspicious_ua or suspicious_ip)
+falsepositives:
+  - Legitimate administrative scripts or CI/CD pipelines using programmatic access.
+  - Administrators using cloud CLI tools (aws-cli, gcloud, az) for management.
+  - Users legitimately connecting from a corporate or personal VPN.
+  - It is recommended to baseline normal user-agents and IP sources for administrative accounts and filter out known-good activity.
+level: medium

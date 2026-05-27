@@ -1,0 +1,62 @@
+title: Disruptive Impact Techniques in Cloud Environments
+id: 7e17a1fd-9d96-4d02-81c0-de7b686a93c4
+status: experimental
+description: Identifies disruptive impact techniques such as the deletion of backups, snapshots, critical resources (VMs, volumes), or user accounts. This behavior is indicative of an adversary attempting to cause damage, destroy data (T1485), or remove access, as highlighted in threat intelligence.
+references:
+  - Threat Intel ID: 6e487ba759c8e80223efef2a739cd68b6586a6454f568bafdb580d896b47660a
+author: RW
+date: 2025-08-19
+tags:
+  - attack.impact
+  - attack.t1485
+  - attack.t1531
+  - attack.t1489
+logsource:
+  category: cloud
+detection:
+  # AWS: Deletion of backups, critical resources, or user access
+  aws_destruction:
+    product: aws
+    service: cloudtrail
+    aws.eventName:
+      - 'DeleteBackupVault' # Deletes a backup vault
+      - 'DeleteRecoveryPoint' # Deletes a backup recovery point
+      - 'DeleteSnapshot' # Deletes an EBS snapshot
+      - 'DeleteVolume' # Deletes an EBS volume
+      - 'DeleteDBInstance' # Deletes a database instance
+      - 'DeleteObjects' # Deletes multiple S3 objects in a single request
+      - 'DeleteUser' # Deletes an IAM user
+      - 'DeleteLoginProfile' # Removes password access from an IAM user
+
+  # Azure: Deletion of backups, critical resources, or user accounts
+  azure_destruction:
+    product: azure
+    service: auditlogs
+    operationName|endswith:
+      - '/snapshots/delete' # Deletes a virtual machine snapshot
+      - '/disks/delete' # Deletes a virtual machine disk
+      - '/virtualMachines/delete' # Deletes a virtual machine
+      - '/protectedItems/delete' # Deletes a backup item from a Recovery Services vault
+      - '/vaults/delete' # Deletes a Recovery Services vault
+      - '/users/delete' # Deletes a user from Entra ID
+      - '/blobs/delete' # Deletes a storage blob (requires thresholding)
+
+  # GCP: Deletion of backups, critical resources, or service accounts
+  gcp_destruction:
+    product: gcp
+    service: gcp.audit
+    gcp.method_name:
+      - 'v1.compute.snapshots.delete' # Deletes a persistent disk snapshot
+      - 'v1.compute.disks.delete' # Deletes a persistent disk
+      - 'v1.compute.instances.delete' # Deletes a VM instance
+      - 'storage.objects.delete' # Deletes a cloud storage object (requires thresholding)
+      - 'google.iam.admin.v1.IAM.DeleteServiceAccount' # Deletes a service account
+      - 'v1.compute.snapshots.delete' # From intel, page 41
+
+  condition: 1 of them
+falsepositives:
+  - Legitimate decommissioning of cloud resources by administrators or automated scripts (e.g., Terraform, CloudFormation).
+  - Cleanup of development or test environments.
+  - Events like object/blob deletion are common and should be correlated or have thresholds applied in the SIEM to detect mass deletion, rather than alerting on single events.
+  - It is highly recommended to scope this detection to production environments and filter out known service principals used for infrastructure-as-code.
+level: high

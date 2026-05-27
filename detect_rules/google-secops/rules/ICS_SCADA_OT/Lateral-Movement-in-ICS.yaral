@@ -1,0 +1,59 @@
+rule lateral_movement_in_segmented_ics_environment {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects potential lateral movement activities within or between segmented network zones, specifically focusing on traffic patterns that violate typical ICS/OT network segmentation policies. This rule identifies two primary suspicious patterns: 1) Direct communication between IT and OT zones that bypasses designated DMZ/jump hosts. 2) Use of common administrative protocols (e.g., RDP, SMB, SSH) for peer-to-peer communication between assets within the OT zone, which is often anomalous."
+    tactic = "TA0007"
+    technique = "T0864, T0865"
+    tags = "ICS, OT, LATERAL_MOVEMENT, SEGMENTATION"
+    false_positives = "Misconfigured network segment definitions in the rule's reference lists. Legitimate, but unlisted, administrative or maintenance activity from a new or temporary system. Authorized network discovery or vulnerability scans that have not been added to the exclusion list."
+
+  events:
+    // This rule is best applied to logs from core network firewalls or network sensors (e.g., Zeek)
+    // that have visibility into both IT and OT segments.
+    $event.metadata.event_type = "NETWORK_CONNECTION"
+
+    // The logic is split into two main patterns of suspicious lateral movement.
+    (
+      // Pattern 1: Detects direct communication between IT and OT zones, bypassing designated DMZ/jump hosts.
+      (
+        // CRITICAL: The '%it_network_ranges' list must be populated with your corporate IT network CIDR ranges.
+        net.ip_in_range_cidr($event.principal.ip, %it_network_ranges) and
+        // CRITICAL: The '%ot_network_ranges' list must be populated with your critical OT/ICS network CIDR ranges.
+        net.ip_in_range_cidr($event.target.ip, %ot_network_ranges)
+      )
+      or
+      (
+        // Communication from OT back to IT.
+        net.ip_in_range_cidr($event.principal.ip, %ot_network_ranges) and
+        net.ip_in_range_cidr($event.target.ip, %it_network_ranges)
+      )
+    )
+    or
+    // Pattern 2: Detects anomalous peer-to-peer communication within the OT zone using administrative protocols.
+    (
+      // Both source and destination are within the OT zone.
+      net.ip_in_range_cidr($event.principal.ip, %ot_network_ranges) and
+      net.ip_in_range_cidr($event.target.ip, %ot_network_ranges) and
+      // Using common administrative/remote service ports.
+      $event.target.port in (22, 135, 445, 3389, 5900, 5985, 5986) // SSH, RPC, SMB, RDP, VNC, WinRM
+    )
+
+    // This filter is critical for reducing false positives.
+    // Create a reference list named 'authorized_lateral_movement_sources' containing the IP addresses
+    // of authorized systems like jump hosts, engineering workstations, and patch management servers.
+    not $event.principal.ip in %authorized_lateral_movement_sources
+
+  outcome:
+    // A high risk score is assigned as this indicates a direct violation of segmentation policy.
+    $risk_score = 70
+    $principal_ip = array_distinct($event.principal.ip)
+    $principal_hostname = array_distinct($event.principal.hostname)
+    $target_ip = array_distinct($event.target.ip)
+    $target_hostname = array_distinct($event.target.hostname)
+    $target_port = array_distinct($event.target.port)
+    $network_protocol = array_distinct($event.network.application_protocol)
+
+  condition:
+    $event
+}

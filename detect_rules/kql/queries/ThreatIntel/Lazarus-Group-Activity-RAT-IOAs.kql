@@ -1,0 +1,93 @@
+// Name: Lazarus Group Activity Associated with PondRAT, ThemeForestRAT, and RemotePE
+// Author: RW
+// Date: 2025-09-03
+// Description: This query detects Tactics, Techniques, and Procedures (TTPs) and Indicators of Compromise (IOCs) associated with a
+// Lazarus Group subgroup activity involving PondRAT, ThemeForestRAT, and RemotePE malware.
+// False Positive Sensitivity: Medium
+
+// Define IOCs from the report
+let lazarusHashes = dynamic([
+    "24d5dd3006c63d0f46fb33cbc1f576325d4e7e03e3201ff4a3c1ffa604f1b74a", "4715e5522fc91a423a5fcad397b571c5654dc0c4202459fdca06841eba1ae9b3",
+    "8c3c8f24dc0c1d165f14e5a622a1817af4336904a3aabeedee3095098192d91f", "f4d8e1a687e7f7336162d3caed9b25d9d3e6cfe75c89495f75a92ca87025374b",
+    "85045d9898d28c9cdc4ed0ca5d76eceb457d741c5ca84bb753dde1bea980b516", "5e40d106977017b1ed235419b1e59ff090e1f43ac57da1bb5d80d66ae53b1df8",
+    "c66ba5c68ba12eaf045ed415dfa72ec5d7174970e91b45fda9ebb32e0a37784a", "ff32bc1c756d560d8a9815db458f438d63b1dcb7e9930ef5b8639a55fa7762c9",
+    "cc4c18fefb61ec5b3c69c31beaa07a4918e0b0184cb43447f672f62134eb402b", "6510d460395ca3643133817b40d9df4fa0d9dbe8e60b514fdc2d4e26b567dfbd",
+    "973f7939ea03fd2c9663dafc21bb968f56ed1b9a56b0284acf73c3ee141c053c", "f0321c93c93fa162855f8ea4356628eef7f528449204f42fbfa002955a0ba528",
+    "4f6ae0110cf652264293df571d66955f7109e3424a070423b5e50edc3eb43874", "aa4a2d1215f864481994234f13ab485b95150161b4566c180419d93dda7ac039",
+    "159471e1abc9adf6733af9d24781fbf27a776b81d182901c2e04e28f3fe2e6f3", "7a05188ab0129b0b4f38e2e7599c5c52149ce0131140db33feb251d926428d68",
+    "37f5afb9ed3761e73feb95daceb7a1fdbb13c8b5fc1a2ba22e0ef7994c7920ef", "59a651dfce580d28d17b2f716878a8eff8d20152b364cf873111451a55b7224d",
+    "3c8f5cc608e3a4a755fe1a2b099154153fb7a88e581f3b122777da399e698cca", "d998de6e40637188ccbb8ab4a27a1e76f392cb23df5a6a242ab9df8ee4ab3936",
+    "e4ce73b4dbbd360a17f482abcae2d479bc95ea546d67ec257785fa51872b2e3f", "1a051e4a3b62cd2d4f175fb443f5172da0b40af27c5d1ffae21fde13536dd3e1",
+    "9dddf5a1d32e3ba7cc27f1006a843bfd4bc34fa8a149bcc522f27bda8e95db14", "2c164237de4d5904a66c71843529e37cea5418cdcbc993278329806d97a336a5"
+]);
+let lazarusDomains = dynamic([
+    "calendly.live", "picktime.live", "oncehub.co", "go.oncehub.co", "dpkgrepo.com", "pypilibrary.com",
+    "pypistorage.com", "keondigital.com", "arcashop.org", "jdkgradle.com", "latamics.org", "lmaxtrd.com",
+    "paxosfuture.com", "plexisco.com", "ftxstock.com", "natefi.org", "nansenpro.com", "aes-secure.net",
+    "azureglobalaccelerator.com", "azuredeploypackages.net"
+]);
+let lazarusIPs = dynamic(["144.172.74.120", "192.52.166.253"]);
+let lazarusFileNames = dynamic([
+    "tmpntl.dat", "TMP01.dat", "netraid.inf", "perfh011.dat", "hsu.dat", "pfu.dat", "fpc.dat", "fp.exe",
+    "tsvipsrv.dll", "wlbsctrl.dll", "adepfx.exe", "hd.exe", "msnprt.exe", "cmui.exe"
+]);
+let lazarusFilePaths = dynamic([
+    "\\tmpntl.dat", "\\TMP01.dat", "\\netraid.inf", "/var/crash/cups", "/private/etc/imap", "\\apdl.cf", "/tmp/xweb_log.md",
+    "\\perfh011.dat", "\\IconCache.log", "/private/etc/pdpaste", "/private/etc/xmem", "/private/etc/tls3", "\\Microsoft\\Software\\Cache", "\\system32\\cmui.exe"
+]);
+(union isfuzzy=true
+    // Detects file creations based on known Lazarus hashes
+    (DeviceFileEvents
+    | where SHA256 in (lazarusHashes)
+    | extend MatchedIndicator = SHA256, DetectionMethod = "File Hash IOC"
+    ),
+    // Detects file creations based on known Lazarus file names and paths
+    (DeviceFileEvents
+    | where FileName in (lazarusFileNames) or has_any_ipv4(FolderPath, lazarusFilePaths)
+    | extend MatchedIndicator = iif(FileName in (lazarusFileNames), FileName, FolderPath), DetectionMethod = "File Path/Name IOC"
+    // Potential for FPs: some filenames are generic (e.g., fp.exe, hd.exe).
+    // Consider adding process/parent process context to reduce noise.
+    // For example: | where InitiatingProcessFileName !in ("explorer.exe", "cmd.exe")
+    ),
+    // Detects network connections to known Lazarus C2 domains and IPs
+    (DeviceNetworkEvents
+    | where RemoteUrl has_any (lazarusDomains) or RemoteIP in (lazarusIPs)
+    | extend MatchedIndicator = iif(RemoteUrl has_any (lazarusDomains), RemoteUrl, RemoteIP), DetectionMethod = "Network IOC"
+    // Potential for FPs: some domains like azureglobalaccelerator.com might be used for legitimate purposes.
+    // Consider scoping this to specific processes or looking for other suspicious activity on the device.
+    ),
+    // Detects specific C2 patterns for PondRAT and ThemeForestRAT
+    (DeviceNetworkEvents
+    | where (RemoteUrl endswith "/cart.php" and InitiatingProcessUserAgent has "Mozilla_") // PondRAT pattern
+        or (RemoteUrl has "ThemeForest_" or RemoteUrl has "Thumb_") // ThemeForestRAT pattern
+    | extend MatchedIndicator = RemoteUrl, DetectionMethod = "C2 Pattern"
+    ),
+    // Detects process creations based on known Lazarus hashes
+    (DeviceProcessEvents
+    | where SHA256 in (lazarusHashes)
+    | extend MatchedIndicator = SHA256, DetectionMethod = "Process Hash IOC"
+    ),
+    // Detects process creations based on known Lazarus file names and suspicious command lines
+    (DeviceProcessEvents
+    | where FileName in (lazarusFileNames)
+        or (FileName =~ "sc.exe" and ProcessCommandLine has_all ("config", "sessionenv", "start=", "auto")) // PerfhLoader persistence
+    | extend MatchedIndicator = ProcessCommandLine, DetectionMethod = "Process Command Line/Name IOC"
+    ),
+    // Detects registry modification for SessionEnv persistence
+    (DeviceRegistryEvents
+    | where RegistryKey has @"SYSTEM\CurrentControlSet\Services\SessionEnv"
+        and RegistryValueName == "Start"
+        and RegistryValueData == "2" // 2 corresponds to "Automatic" start type
+    | extend MatchedIndicator = RegistryKey, DetectionMethod = "Persistence via Service Modification"
+    // This could be a legitimate administrative action. Correlate with other suspicious activity.
+    )
+)
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    DetectionMethods = make_set(DetectionMethod),
+    MatchedIndicators = make_set(MatchedIndicator),
+    Processes = make_set(ProcessCommandLine),
+    FileHashes = make_set(SHA256)
+    by DeviceId, DeviceName
+| extend timestamp = StartTime, HostCustomEntity = DeviceName

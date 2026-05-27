@@ -1,0 +1,73 @@
+// Name: MeetC2 Google Calendar C2 Activity
+// Author: RW
+// Date: 2025-09-06
+// Description: Detects potential Command and Control (C2) activity using Google Calendar, inspired by the MeetC2 framework.
+// This rule looks for several indicators across network and cloud audit logs, including suspicious event content, unusual sharing, and API beaconing patterns.
+// Tactic: Command and Control
+// Technique: T1071.001 (Web Protocols), T1102.002 (Web Service)
+
+let timeframe = 1h;
+
+// Part 1: Analyze Google Workspace logs for suspicious calendar activity.
+// This requires GWorkspaceActivity data to be ingested into the workspace.
+let GWorkspaceIndicators = GWorkspaceActivity
+| where TimeGenerated > ago(timeframe)
+| where AppName == "calendar"
+// Parse relevant event parameters for analysis.
+| extend EventParameters = todynamic(Event.parameters)
+| extend EventSummary = tostring(EventParameters.summary.value),
+         EventDescription = tostring(EventParameters.description.value),
+         AclRecipient = tostring(EventParameters.acl_entry.scope.value)
+| where
+    // Detects specific command/output patterns from the MeetC2 PoC.
+    (EventSummary has "Meeting from nobody:" and EventSummary has "[COMMAND]") or
+    (EventDescription has_all ("[OUTPUT]", "[/OUTPUT]")) or
+    // Detects a calendar being shared with a service account, which is required for setup.
+    (EventName has "ACL" and AclRecipient endswith "gserviceaccount.com")
+| extend
+    Activity = "Suspicious Google Calendar Activity",
+    DetectionMethod = case(
+        EventSummary has "Meeting from nobody:", "MeetC2 Command Pattern in Event Summary",
+        EventDescription has_all ("[OUTPUT]", "[/OUTPUT]"), "MeetC2 Output Pattern in Event Description",
+        EventName has "ACL", "Calendar Shared with Service Account",
+        "Unknown"
+    ),
+    ActorEmail = tostring(Actor.email),
+    Details = pack("EventName", EventName, "Summary", EventSummary, "Description", EventDescription, "Recipient", AclRecipient)
+| project
+    TimeGenerated,
+    Activity,
+    DetectionMethod,
+    ActorEmail,
+    DeviceName = tostring(Event.device_name),
+    SourceIP = tostring(IpAddress),
+    Details;
+
+// Part 2: Analyze network logs for beaconing patterns to the Google Calendar API.
+let NetworkIndicators = DeviceNetworkEvents
+| where TimeGenerated > ago(timeframe)
+// Filter for traffic to the specific Google Calendar API endpoint used for polling.
+| where RemoteUrl has "www.googleapis.com/calendar/v3/calendars/" and RemoteUrl has "/events"
+| extend UrlPath = tostring(split(RemoteUrl, "?")[0])
+// Summarize requests to detect potential beaconing. The PoC polls every 30 seconds.
+// A count over 15 in 10 minutes could indicate this behavior.
+| summarize StartTime = min(TimeGenerated), EndTime = max(TimeGenerated), RequestCount = count() by DeviceName, InitiatingProcessFileName, UrlPath, bin(TimeGenerated, 10m)
+// This threshold may need tuning based on legitimate application behavior in your environment.
+| where RequestCount > 15
+// FP Mitigation: Exclude common browsers and known good applications. This list should be customized.
+| where not(InitiatingProcessFileName in~ ('chrome.exe', 'msedge.exe', 'firefox.exe', 'outlook.exe', 'teams.exe'))
+| extend
+    Activity = "Potential C2 Beaconing to Google Calendar API",
+    DetectionMethod = strcat("High Frequency of Requests to Calendar API: ", RequestCount, " requests in 10 mins."),
+    Details = pack("Process", InitiatingProcessFileName, "RequestCount", RequestCount, "UrlPath", UrlPath)
+| project
+    TimeGenerated = StartTime,
+    Activity,
+    DetectionMethod,
+    ActorEmail = "",
+    DeviceName,
+    SourceIP = "",
+    Details;
+
+// Combine results from both data sources.
+union GWorkspaceIndicators, NetworkIndicators

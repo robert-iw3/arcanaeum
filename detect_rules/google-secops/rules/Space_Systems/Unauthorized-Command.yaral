@@ -1,0 +1,56 @@
+rule unauthorized_and_anomalous_command_execution_uace {
+
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects the execution of commands that may reconfigure system components or alter security settings, aligned with the SPARTA UACE threat pattern. Such activity could indicate unauthorized access or system compromise."
+    reference = "https://medium.com/the-aerospace-corporation/indicators-of-behavior-iobs-in-sparta-v3-0-c42ab0683100, https://sparta.aerospace.org/related-work/iob"
+    tags = "attack.defense_evasion, attack.persistence, attack.execution"
+    tactic = "TA0005, TA0003, TA0002"
+    technique = "T1562, T1543, T1059"
+    false_positives = "Legitimate administrative activity or system configuration changes performed by administrators or automated tools., Software installations or updates that legitimately use these commands., It is recommended to customize the filter sections to include legitimate tools and scripts specific to your environment."
+
+  events:
+    $process.metadata.event_type = "PROCESS_LAUNCH"
+    $process.principal.hostname = $hostname
+
+    // Selection: Detects common utilities or PowerShell cmdlets used for system configuration and defense evasion.
+    (
+      // Common Windows system utilities
+      re.regex($process.target.process.file.full_path, `\\(sc|netsh|reg|bcdedit|wevtutil|wmic|fsutil)\.exe$`) nocase or
+
+      // Common Linux system utilities
+      re.regex($process.target.process.file.full_path, `/(systemctl|service|iptables|ufw|sysctl|chmod|chown|setfacl|sestatus|setenforce)$`) or
+
+      // PowerShell commands for altering security settings
+      (
+        re.regex($process.target.process.file.full_path, `\\(powershell|pwsh)\.exe$`) nocase and
+        re.regex($process.target.process.command_line, `(Set-MpPreference|DisableRealtimeMonitoring|New-NetFirewallRule|Set-NetFirewallRule|Set-ItemProperty -Path 'HKLM:)`) nocase
+      )
+    )
+
+    // Filter: Excludes common legitimate parent processes and system accounts to reduce noise.
+    // This section may require tuning for your specific environment.
+    and not (
+      re.regex($process.principal.process.file.full_path, `\\(MsMpEng|services|svchost|TiWorker)\.exe$`) nocase or
+      $process.principal.process.file.full_path = "System" or
+      re.regex($process.principal.user.userid, `(SYSTEM|NETWORK SERVICE|LOCAL SERVICE|root)`) nocase
+    )
+
+  match:
+    $hostname over 10m
+
+  outcome:
+    $risk_score = 40
+    $principal_hostname = array_distinct($process.principal.hostname)
+    $principal_user_userid = array_distinct($process.principal.user.userid)
+    $principal_process_command_line = array_distinct($process.principal.process.command_line)
+    $principal_process_file_full_path = array_distinct($process.principal.process.file.full_path)
+    $target_process_command_line = array_distinct($process.target.process.command_line)
+    $target_process_file_full_path = array_distinct($process.target.process.file.full_path)
+    $target_process_file_sha256 = array_distinct($process.target.process.file.sha256)
+    $event_count = count_distinct($process.metadata.id)
+
+  condition:
+    $process
+}

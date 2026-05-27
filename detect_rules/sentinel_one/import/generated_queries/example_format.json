@@ -1,0 +1,80 @@
+[
+  {
+    "name": "Salty 2FA Exfiltration / Landing Page",
+    "filename": "salty_2fa_hunt.json",
+    "query": {
+      "queryText": "SELECT EventTime AS _time, UserName AS user, NetworkSrcIP AS src, NetworkDestDomain AS dest, NetworkUrlPath AS uri_path, NetworkHttpMethod AS http_method, NetworkHttpRequestBody AS form_data, IF(NetworkHttpMethod = 'POST' AND NetworkDestDomain LIKE '%.ru' AND NetworkUrlPath LIKE '%/[0-9]{5,6}.php' AND NetworkHttpRequestBody LIKE '%request=%%' AND NetworkHttpRequestBody LIKE '%session=%%', 'Salty 2FA Exfiltration', 'Salty 2FA Landing Page') AS detection_type FROM deep_visibility WHERE EventType = 'Network Connect' AND detection_type IS NOT NULL ORDER BY _time DESC LIMIT 1000",
+      "queryType": "events",
+      "isLive": true,
+      "scope": ["<SITE_ID_1>"],
+      "limit": 1000,
+      "fromTime": "2025-08-01T00:00:00.000Z",
+      "toTime": "2025-08-24T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "VSCode Suspicious Activity Hunt",
+    "filename": "vscode_threat_hunt.json",
+    "query": {
+      "queryText": "SELECT EventTime AS timestamp, EndpointName AS dest, UserName AS user, SrcProcParentCmdLine AS parent_process, SrcProcName AS actor_process_name, SrcProcCmdLine AS actor_process, CASE WHEN SrcProcName = 'Code.exe' AND SrcProcCmdLine LIKE '%--open-url%' AND SrcProcCmdLine LIKE '%vscode://%' THEN 'VSCode URI Handler Installation' WHEN SrcProcName = 'Code.exe' AND SrcProcCmdLine LIKE '%--install-extension%' AND SrcProcCmdLine LIKE '%.vsix%' THEN 'VSCode Extension CLI Installation' WHEN SrcProcName = 'Code.exe' AND NetworkUrl IS NOT NULL AND NetworkUrl NOT LIKE '%marketplace.visualstudio.com%' AND NetworkUrl NOT LIKE '%vscode.blob.core.windows.net%' AND NetworkUrl NOT LIKE '%update.code.visualstudio.com%' AND NetworkUrl NOT LIKE '%gallerycdn.vsassets.io%' THEN 'Suspicious Outbound Connection from VSCode' WHEN TgtFilePath LIKE '%\\.vscode\\extensions\\%' OR TgtFilePath LIKE '%\\Microsoft VS Code\\resources\\app\\extensions\\%' THEN 'File Write to VSCode Extension Directory' WHEN SrcProcName = 'Code.exe' AND LoadedModuleName LIKE '%.node' AND (LoadedModulePath LIKE '%\\AppData\\Local\\%' OR LoadedModulePath LIKE '%\\Temp\\%') AND LoadedModulePath NOT LIKE '%\\.vscode\\extensions\\%' AND LoadedModulePath NOT LIKE '%Microsoft VS Code%' THEN 'Suspicious Node Module Loaded by VSCode' END AS detection_method, CASE WHEN detection_method = 'VSCode URI Handler Installation' THEN 'URI Command: ' || SrcProcCmdLine WHEN detection_method = 'VSCode Extension CLI Installation' THEN 'Install Command: ' || SrcProcCmdLine WHEN detection_method = 'Suspicious Outbound Connection from VSCode' THEN 'Destination: ' || NetworkUrl WHEN detection_method = 'File Write to VSCode Extension Directory' THEN 'File: ' || TgtFilePath || TgtFileName WHEN detection_method = 'Suspicious Node Module Loaded by VSCode' THEN 'Module: ' || LoadedModulePath || LoadedModuleName END AS details FROM deep_visibility WHERE detection_method IS NOT NULL AND ((EventType = 'Process Start' AND SrcProcName = 'Code.exe') OR (EventType = 'Network Connect' AND SrcProcName = 'Code.exe') OR (EventType = 'File Creation' AND TgtFilePath LIKE '%extensions%') OR (EventType = 'Module Load' AND SrcProcName = 'Code.exe')) ORDER BY timestamp DESC LIMIT 1000",
+      "queryType": "events",
+      "isLive": true,
+      "scope": ["<SITE_ID_1>"],
+      "limit": 1000,
+      "fromTime": "2025-08-20T00:00:00.000Z",
+      "toTime": "2025-08-24T00:00:00.000Z"
+    }
+  },
+  {
+    "name": "MongoBleed High Connection Rate",
+    "filename": "CVE-2025-14847_mongobleed_leak.md",
+    "query": {
+      "queryText": "event.type = \"Network\" AND event.network.direction = \"inbound\" AND dst.port.number = 27017 AND tgt.process.name matches \"mongod(\\\\.exe)?\" | group connections=count(), total_bytes_in=sum(event.network.bytesIn) by src.ip.address, endpoint.name, tgt.process.name | filter connections > 50 AND (total_bytes_in / connections) < 1024",
+      "queryType": "events",
+      "isLive": true,
+      "scope": ["<SITE_ID_1>"],
+      "limit": 1000,
+      "fromTime": "2026-01-01T00:00:00.000Z",
+      "toTime": "2026-01-11T23:59:59.999Z"
+    }
+  },
+  {
+    "name": "MongoBleed Missing Client Metadata",
+    "filename": "CVE-2025-14847_mongobleed_leak.md",
+    "query": {
+      "queryText": "event.product = \"mongodb\" AND (event.log.message contains \"connection\" OR event.log.id = 51800) | let is_accepted = contains(event.log.message, \"connection accepted\"), is_ended = contains(event.log.message, \"end connection\"), is_metadata = event.log.id = 51800 | group accepted_flag = sum(is_accepted ? 1 : 0), ended_flag = sum(is_ended ? 1 : 0), metadata_flag = sum(is_metadata ? 1 : 0), remoteIp = first(event.mongodb.remoteIp) by connId = event.mongodb.connectionId | filter accepted_flag > 0 AND ended_flag > 0 AND metadata_flag = 0 | group suspicious_connections = count() by remoteIp | filter suspicious_connections > 10",
+      "queryType": "events",
+      "isLive": true,
+      "scope": ["<SITE_ID_1>"],
+      "limit": 1000,
+      "fromTime": "2026-01-01T00:00:00.000Z",
+      "toTime": "2026-01-11T23:59:59.999Z"
+    }
+  },
+  {
+    "name": "SERPENTINE#CLOUD Multi-Stage Activity",
+    "filename": "serpentine_cloudflare_tunnels.md",
+    "query": {
+      "queryText": "(\n    (EventType = \"Process Creation\" AND TgtProcName = \"python.exe\" AND TgtProcCmdline CONTAINS_ANYCASE (\"\\\\Contacts\\\\Extracted\\\\\", \"\\\\Contacts\\\\Print\\\\\"))\n    OR (EventType = \"Process Creation\" AND TgtProcName = \"notepad.exe\" AND SrcProcName = \"python.exe\")\n    OR (EventType = \"Process Creation\" AND TgtProcName = \"robocopy.exe\" AND TgtProcCmdline CONTAINS_ANYCASE (\"@SSL\\\\DavWWWRoot\", \"trycloudflare.com\"))\n    OR (EventType = \"File Creation\" AND TgtFilePath CONTAINS_ANYCASE \"\\\\Microsoft\\\\Windows\\\\Start Menu\\\\Programs\\\\Startup\\\\\" AND TgtFileName ENDS_WITH \".vbs\")\n)\nAND EndpointIP IN (\n    NetworkHistory RemoteIP = \"51.89.212.145\"\n    OR NetworkHistory DnsRequest CONTAINS_ANYCASE (\n        \"nhvncpure.shop\",\n        \"nhvncpure.sbs\",\n        \"nhvncpure.click\",\n        \"nhvncpurekfl.duckdns.org\",\n        \"ncmomenthv.duckdns.org\",\n        \"hvncmomentpure.duckdns.org\",\n        \"nhvncpure.duckdns.org\",\n        \"nhvncpure.twilightparadox.com\",\n        \"nhvncpure1.strangled.net\",\n        \"nhvncpure2.mooo.com\",\n        \"trycloudflare.com\"\n    )\n)",
+      "queryType": "events",
+      "isLive": true,
+      "scope": ["<SITE_ID_1>"],
+      "limit": 1000,
+      "fromTime": "2026-01-01T00:00:00.000Z",
+      "toTime": "2026-01-11T23:59:59.999Z"
+    }
+  },
+  {
+    "name": "UKC-1230 Comburglar Multi-Indicator Detection",
+    "filename": "UKC-1230_Comburglar.md",
+    "query": {
+      "queryText": "(\n  src.process.image.imphash = \"c4f69d93110080cc2432c9cc3d2c58ab\"\n  OR\n  tgt.file.image.imphash = \"c4f69d93110080cc2432c9cc3d2c58ab\"\n  OR\n  (event.type = \"DNS\" AND event.dns.request contains \"techdataservice.us\")\n  OR\n  (\n    event.type = \"File Creation\"\n    AND tgt.file.path matches \".*\\\\\\\\\\{[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}\\}\\\\.dll$\"\n    AND (\n      tgt.file.path matches \"^C:\\\\\\\\ProgramData\\\\\\\\Microsoft\\\\\\\\Windows\\\\\\\\.*\"\n      OR tgt.file.path matches \"^C:\\\\\\\\Users\\\\\\\\.*\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\Windows\\\\\\\\.*\"\n    )\n  )\n  OR\n  (\n    src.process.name = \"dllhost.exe\"\n    AND src.process.parent.name = \"svchost.exe\"\n    AND src.process.cmdline contains \"/Processid:{\"\n  )\n)",
+      "queryType": "events",
+      "isLive": true,
+      "scope": ["<SITE_ID_1>"],
+      "limit": 1000,
+      "fromTime": "2026-01-01T00:00:00.000Z",
+      "toTime": "2026-01-11T23:59:59.999Z"
+    }
+  }
+]

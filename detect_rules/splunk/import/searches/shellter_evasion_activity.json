@@ -1,0 +1,17 @@
+[
+  {
+    "name": "SHELLTER Malware Detection (Sysmon)",
+    "search": "`sysmon` EventCode=1 (sha256 IN (\"c865f24e4b9b0855b8b559fc3769239b0aa6e8d680406616a13d9a36fbbc2d30\", \"7d0c9855167e7c19a67f800892e974c4387e1004b40efb25a2a1d25a99b03a10\", \"b3e93bfef12678294d9944e61d90ca4aa03b7e3dae5e909c3b2166f122a14dad\", \"da59d67ced88beae618b9d6c805f40385d0301d412b787e9f9c9559d00d2c880\", \"70ec2e65f77a940fd0b2b5c0a78a83646dec17583611741521e0992c1bf974f1\", \"263ab8c9ec821ae573979ef2d5ad98cda5009a39e17398cd31b0fad98d862892\")) | eval DetectionMethod=\"Known SHELLTER-related hash\", Tactic=\"Execution\", Technique=\"T1204\" | rename Image as process_path, sha256 as process_hash, CommandLine as process_command_line | fields _time, host, User, process_path, process_command_line, process_hash, DetectionMethod, Tactic, Technique | append [ search `sysmon` EventCode=3 (DestinationIp IN (\"185.156.72.80\", \"94.141.12.182\") OR DestinationHostname=\"eaglekl.digital\") | eval DetectionMethod=\"Known SHELLTER-related C2\", Tactic=\"Command and Control\", Technique=\"T1071\" | rename Image as process_path, DestinationIp as dest_ip, DestinationHostname as dest_domain | fields _time, host, User, process_path, dest_ip, dest_domain, DetectionMethod, Tactic, Technique ] | append [ search `sysmon` EventCode=10 TargetImage=\"*\\\\ntdll.dll\" | eval DetectionMethod=\"Behavioral - NTDLL Remapping for Hook Evasion\", Tactic=\"Defense Evasion\", Technique=\"T1055\" | rename SourceImage as process_path, TargetImage as target_path | fields _time, host, User, process_path, target_path, DetectionMethod, Tactic, Technique ] | append [ search `sysmon` EventCode=7 (ImageLoaded IN (\"*\\\\wininet.dll\", \"*\\\\crypt32.dll\", \"*\\\\advapi32.dll\", \"*\\\\urlmon.dll\")) | stats dc(ImageLoaded) as module_count, values(ImageLoaded) as loaded_modules by _time, host, User, Image, ProcessId, CommandLine | where module_count >= 3 | eval DetectionMethod=\"Behavioral - Suspicious Module Preloading\", Tactic=\"Defense Evasion\", Technique=\"T1574.002\" | rename Image as process_path, ProcessId as process_id, CommandLine as process_command_line | fields _time, host, User, process_path, process_id, process_command_line, loaded_modules, module_count, DetectionMethod, Tactic, Technique ] | rex field=process_path \"(?<process_name>[^\\\\]+)$\" | fillnull value=\"N/A\" | table _time, host, User, process_name, process_path, process_command_line, process_hash, dest_ip, dest_domain, target_path, loaded_modules, module_count, DetectionMethod, Tactic, Technique",
+    "description": "Detects activity associated with SHELLTER malware using a combination of file hashes, C2 network indicators, and behavioral analysis based on Sysmon events, such as NTDLL unhooking and suspicious module preloading.",
+    "is_scheduled": 1,
+    "disabled": 0,
+    "cron_schedule": "*/30 * * * *",
+    "dispatch.earliest_time": "-24h",
+    "dispatch.latest_time": "now",
+    "sharing": "global",
+    "acl": {
+      "read": ["power", "admin"],
+      "write": ["admin"]
+    }
+  }
+]

@@ -1,0 +1,45 @@
+// Name: WebClient Service Started on Server
+// Author: RW
+// Date: 2025-08-07
+// Tactic: Execution
+// Technique: T1059.003
+// False Positive Sensitivity: Medium
+// - The WebClient service can be legitimately installed and started on Windows Server for accessing WebDAV shares.
+// - This detection is most effective when servers are not expected to use the WebClient service.
+// - To reduce false positives, populate the 'allowed_servers' list with the hostnames of any servers that legitimately run this service.
+//
+// Detection Comment Level: Medium
+
+let timeframe = 1d;
+
+// This list should be populated with server hostnames where the WebClient service is expected to run.
+let allowed_servers = dynamic([]);
+
+// Find events where the WebClient service has entered the 'running' state.
+EventLog
+| where TimeGenerated > ago(timeframe)
+| where EventID == 7036 // Service Control Manager: A service entered a state.
+| where Source == "Service Control Manager"
+| extend EventDataXml = parse_xml(EventData)
+| extend ServiceName = tostring(EventDataXml.EventData.Data[0]['#text'])
+| extend ServiceState = tostring(EventDataXml.EventData.Data[1]['#text'])
+| where ServiceName == "WebClient"
+| where ServiceState == "running"
+// Join with device information to isolate server operating systems.
+| join kind=inner (
+    DeviceInfo
+    | summarize arg_max(TimeGenerated, *) by DeviceId // Get the latest info for each device
+    | where DeviceType == "Server"
+) on $left.Computer == $right.DeviceName
+// Exclude servers that are known to run this service legitimately.
+| where Computer !in (allowed_servers)
+| project
+    timestamp = TimeGenerated,
+    DeviceName = Computer,
+    DeviceType,
+    OSPlatform,
+    ServiceName,
+    ServiceState
+| extend
+    Description = strcat("The '", ServiceName, "' service (WebDAV Redirector) was started on the server '", DeviceName, "'. This service is not typically active on servers and its activation can be a precursor to an HTTP-based authentication coercion attack."),
+    HostCustomEntity = DeviceName

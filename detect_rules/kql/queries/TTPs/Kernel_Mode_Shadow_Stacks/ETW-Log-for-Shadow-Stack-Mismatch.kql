@@ -1,0 +1,61 @@
+//
+// Name: ETW Log for Shadow Stack Mismatch
+//
+// Description:
+// Detects Control-flow Enforcement Technology (CET) Shadow Stack violation events logged via ETW.
+// This event is generated when Kernel-mode Hardware-enforced Stack Protection is in audit mode and a
+// return address mismatch occurs. This is a strong indicator of a potential control-flow hijack attempt,
+// such as Return-Oriented Programming (ROP), being audited instead of blocked. This behavior is associated
+// with the nt!KiFixupControlProtectionKernelModeReturnMismatch function.
+//
+// Author: RW
+// Date: 2025-08-04
+//
+// False Positives:
+// Legitimate but buggy applications or drivers could potentially cause these violations.
+// Investigation of the triggering process is necessary to determine if it is malicious or benign.
+// This is generally a high-fidelity indicator of anomalous behavior that warrants investigation.
+// Consider excluding known-good processes if they are found to cause benign alerts.
+//
+// Tactic: Defense Evasion
+// Technique: T1562.001, Impair Defenses: Disable or Modify Tools
+//
+
+DeviceEvents
+// Filter for ETW events from the Threat Intelligence provider, which surfaces CET violations.
+| where ActionType == "AsrEtwThreatIntelReport"
+| extend AdditionalFieldsParsed = todynamic(AdditionalFields)
+// Event ID 5 from this provider corresponds to a CET Shadow Stack violation.
+| where AdditionalFieldsParsed.ProviderName == "Microsoft-Windows-Threat-Intelligence" and AdditionalFieldsParsed.EventId == 5
+// Parse relevant details from the ETW event payload for analysis.
+| extend
+    ReturnAddress = tostring(AdditionalFieldsParsed.Payload.ReturnAddress),
+    TargetAddress = tostring(AdditionalFieldsParsed.Payload.TargetAddress)
+// Aggregate alerts to summarize the activity and reduce noise.
+| summarize
+    count(),
+    FirstSeen = min(Timestamp),
+    LastSeen = max(Timestamp),
+    MismatchedReturnAddresses = make_set(ReturnAddress),
+    MismatchedTargetAddresses = make_set(TargetAddress)
+    by
+    DeviceName,
+    DeviceId,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessId,
+    InitiatingProcessAccountName,
+    ReportId
+// Project and rename fields for a clear and actionable alert.
+| project
+    FirstSeen,
+    LastSeen,
+    Endpoint = DeviceName,
+    DeviceId,
+    Process = InitiatingProcessFileName,
+    CommandLine = InitiatingProcessCommandLine,
+    User = InitiatingProcessAccountName,
+    MismatchedReturnAddresses,
+    MismatchedTargetAddresses,
+    AlertCount = count_,
+    ReportId

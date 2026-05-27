@@ -1,0 +1,37 @@
+// Name: ADFS Phishing Redirect
+// Author: RW
+// Date: 2025-08-20
+// Mitre TTPs: T1566.002, T1598.003
+// Description: Detects potential phishing attacks where a user is redirected from a legitimate Microsoft login page to a
+// potentially malicious external ADFS instance. This technique is used by attackers to add legitimacy to their phishing links.
+
+// Define a list of legitimate ADFS domains for your organization.
+// This is the most critical part for tuning and reducing false positives.
+// Add your company's legitimate ADFS FQDNs to this list.
+let legitimate_adfs_domains = dynamic([
+    "adfs.mycompany.com",
+    "sso.mycompany.com",
+    "sts.mycompany.com"
+]);
+
+// This rule assumes network events are in a table like DeviceNetworkEvents (from MDE) or CommonSecurityLog (from proxies).
+// Adjust the table name and field names as per your environment.
+DeviceNetworkEvents
+// Look for network connections where the referrer is the Microsoft online login page.
+| where ReferrerUrl has "login.microsoftonline.com"
+// The destination URL must contain the ADFS logon path string.
+| where RemoteUrl has "/adfs/ls/"
+// Extract the destination domain from the URL for easier filtering.
+| extend DestinationDomain = tostring(parse_url(RemoteUrl).Host)
+// Exclude redirects to known, legitimate ADFS servers to avoid false positives.
+// If your organization does not use ADFS, this condition can be removed, and any hit would be highly suspicious.
+| where not(DestinationDomain in~ (legitimate_adfs_domains))
+// Further reduce FPs by ensuring the destination is not another legitimate Microsoft domain.
+| where DestinationDomain !endswith ".microsoft.com" and DestinationDomain !endswith ".windows.net"
+| project
+    TimeGenerated,
+    DeviceName,
+    InitiatingProcessAccountName,
+    RemoteUrl,
+    ReferrerUrl,
+    DestinationDomain

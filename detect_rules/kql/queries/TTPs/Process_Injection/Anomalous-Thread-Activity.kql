@@ -1,0 +1,44 @@
+// Name: Anomalous Thread Hijacking Activity
+// Author: RW
+// Date: 2025-08-07
+// Description: This rule detects a sequence of API calls (SuspendThread, SetThreadContext, ResumeThread)
+//              commonly used for thread execution hijacking. This technique allows an adversary to take
+//              control of a thread in a legitimate process to execute malicious code, evading defenses.
+// Tactics: Defense Evasion, Privilege Escalation
+// Techniques: T1055.003
+
+let timeframe = 2m;
+// FP Mitigation: Add legitimate processes that are known to perform this behavior, such as debuggers, anti-cheat software, or security tools.
+let allowlist = dynamic([
+    "procexp.exe",
+    "procmon.exe",
+    "windbg.exe",
+    "x64dbg.exe"
+]);
+DeviceEvents
+| where Timestamp > ago(timeframe)
+// Filter for the specific API calls used in thread hijacking.
+| where ActionType in ("SuspendThread", "SetThreadContext", "ResumeThread")
+// Exclude known good processes that perform this behavior.
+| where InitiatingProcessFileName !in (allowlist)
+// Consider filtering for cross-process activity, as self-manipulation can be normal for some applications.
+| where InitiatingProcessId != TargetProcessId
+// Sequence the events by the initiating process and the target thread.
+| sequence by InitiatingProcessId, TargetThreadId, DeviceId
+    // Step 1: A thread in the target process is suspended.
+    step1 = (ActionType == "SuspendThread")
+    // Step 2: The context of the suspended thread is modified to point to malicious code.
+    step2 = (ActionType == "SetThreadContext")
+    // Step 3: The modified thread is resumed, executing the new code.
+    step3 = (ActionType == "ResumeThread")
+| project
+    Timestamp,
+    SequenceSource,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessId,
+    TargetProcessFileName,
+    TargetProcessCommandLine,
+    TargetProcessId,
+    TargetThreadId

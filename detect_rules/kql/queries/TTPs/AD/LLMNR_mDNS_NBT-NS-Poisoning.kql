@@ -1,0 +1,36 @@
+// Name: LLMNR/mDNS/NBT-NS Poisoning Activity
+// Author: RW
+// Date: 2025-08-07
+// Tactic: Credential Access, Man-in-the-Middle
+// Technique: T1557.001, T1557.002
+// Description: Detects a single host sending a high number of responses over LLMNR, mDNS, or NBT-NS protocols to multiple distinct clients.
+//              This behavior is a strong indicator of a poisoning tool like Responder attempting to intercept credentials or relay authentication.
+
+let timeframe = 1h;
+let portList = dynamic([137, 5353, 5355]); // NBT-NS, mDNS, LLMNR ports
+let responseThreshold = 10; // The number of unique clients a single host responds to before it's considered suspicious.
+
+DeviceNetworkEvents
+| where Timestamp > ago(timeframe)
+// An attacker sends a unicast response from the protocol's standard port to the client's ephemeral port.
+| where LocalPort in (portList) and isnotempty(RemoteIP)
+// Summarize by the potential attacker's device to count how many unique clients it has responded to.
+| summarize
+    DistinctClientsRespondedTo = dcount(RemoteIP),
+    FirstResponseTime = min(Timestamp),
+    LastResponseTime = max(Timestamp),
+    ClientIPs = make_set(RemoteIP, 20)
+    by DeviceName, LocalIP, InitiatingProcessFileName
+// A single device responding to many clients is a strong signal of a poisoner.
+| where DistinctClientsRespondedTo > responseThreshold
+// FP Tuning: Legitimate network services or servers might exhibit this behavior in some environments.
+// Exclude known good servers by IP or process name if false positives occur.
+// For example: | where LocalIP != "10.0.0.5"
+| project
+    Timestamp = FirstResponseTime,
+    LastResponseTime,
+    AttackerDeviceName = DeviceName,
+    AttackerIP = LocalIP,
+    RespondingProcess = InitiatingProcessFileName,
+    DistinctClientsRespondedTo,
+    ClientIPs

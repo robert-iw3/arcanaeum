@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      securityContext:
+        runAsUser: 472
+        fsGroup: 472
+      containers:
+      - name: grafana
+        image: grafana/grafana:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          value: admin  # Change in prod; use Secret
+        volumeMounts:
+        - name: provisioning-datasources
+          mountPath: /etc/grafana/provisioning/datasources
+        - name: provisioning-dashboards
+          mountPath: /etc/grafana/provisioning/dashboards
+        - name: dashboards-redis
+          mountPath: /var/lib/grafana/dashboards/redis.json
+          subPath: redis.json
+        - name: dashboards-minio
+          mountPath: /var/lib/grafana/dashboards/minio.json
+          subPath: minio.json
+        - name: dashboards-suricata
+          mountPath: /var/lib/grafana/dashboards/suricata.json
+          subPath: suricata.json
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: provisioning-datasources
+        configMap:
+          name: grafana-datasources
+      - name: provisioning-dashboards
+        configMap:
+          name: grafana-dashboard-providers
+      - name: dashboards-redis
+        configMap:
+          name: grafana-dashboard-redis
+      - name: dashboards-minio
+        configMap:
+          name: grafana-dashboard-minio
+      - name: dashboards-suricata
+        configMap:
+          name: grafana-dashboard-suricata
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+spec:
+  type: LoadBalancer
+  selector:
+    app: grafana
+  ports:
+  - port: 3000
+    targetPort: 3000

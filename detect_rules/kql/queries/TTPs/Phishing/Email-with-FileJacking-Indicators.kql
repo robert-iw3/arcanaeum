@@ -1,0 +1,54 @@
+// Name: Email with FileJacking Indicators
+// Author: RW
+// Date: 2025-08-13
+// Description: Detects unsolicited inbound emails with HTML or SVG attachments containing JavaScript that interacts with the
+// File System Access API. This is indicative of the FileJacking technique used to trick users into granting file system access for data exfiltration.
+// MITRE ATT&CK: T1566.001, T1204.001
+// False Positives: Medium. Complex legitimate HTML emails or web applications sent as attachments might use some of these APIs.
+// The combination of multiple specific indicators helps to reduce false positives.
+
+// This query assumes a data source that contains information about email attachments, including the file type and, crucially,
+// text extracted from the file's content (e.g., from a sandbox or content filter).
+// The field 'AdditionalFields' is used as a placeholder for this extracted text. You may need to adapt field names for your environment.
+
+let timeframe = 1d;
+// List of suspicious API functions related to the File System Access API.
+let file_system_api_functions = dynamic([
+    "getAsFileSystemHandle",
+    "showDirectoryPicker",
+    "requestPermission",
+    "getFile"
+]);
+// List of strings related to event handling (drag/drop) and permissions, often used with the APIs above.
+let trigger_and_permission_strings = dynamic([
+    "addEventListener",
+    "'drop'",
+    "'read'",
+    "'readwrite'"
+]);
+
+EmailEvents
+| where Timestamp > ago(timeframe)
+| where EmailDirection == "Inbound"
+// Join with attachment data. This assumes a common schema like in Microsoft Sentinel.
+| join kind=inner (
+    EmailAttachmentInfo
+) on NetworkMessageId
+// Filter for HTML or SVG attachments which can contain malicious JavaScript.
+| where FileType has_any ("html", "svg", "svgz", "htm")
+// The 'AdditionalFields' or a similar field might contain sandboxed file content or extracted strings. This is a placeholder.
+| where isnotempty(AdditionalFields)
+// Core detection logic: Find attachments containing at least one suspicious API call AND one related trigger/permission string.
+| where AdditionalFields has_any (file_system_api_functions) and AdditionalFields has_any (trigger_and_permission_strings)
+| project
+    Timestamp,
+    NetworkMessageId,
+    Subject,
+    SenderFromAddress,
+    RecipientEmailAddress,
+    FileName,
+    FileType,
+    SHA256,
+    DeliveryAction,
+    Threats,
+    AdditionalFields

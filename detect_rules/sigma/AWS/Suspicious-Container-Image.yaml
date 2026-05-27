@@ -1,0 +1,66 @@
+title: AWS ECS Task Definition with Known Malicious Container Image
+id: 5c617125-96a3-4825-92a7-9d7992fad68a
+status: experimental
+description: Detects the registration of an ECS task definition that uses a known malicious container image associated with cryptomining campaigns. Attackers often use public repositories like Docker Hub to host these images.
+references:
+  - https://securitylabs.datadoghq.com/articles/tales-from-the-cloud-trenches-ecs-crypto-mining/#hands-on-keyboard-activity-begins
+author: RW
+date: 2025-08-19
+tags:
+  - attack.execution
+  - attack.t1609
+logsource:
+  service: cloudtrail
+detection:
+  selection:
+    # Detects the registration of a new task definition in ECS
+    aws.cloudtrail.event_source: 'ecs.amazonaws.com'
+    aws.cloudtrail.event_name: 'RegisterTaskDefinition'
+    aws.cloudtrail.error_code:
+    # Checks for known malicious container images used in cryptomining campaigns
+    aws.cloudtrail.request_parameters.container_definitions.image|contains:
+      - 'ahnoyp/ak:ma'
+      - 'ahnoyp/ku:mi'
+      - 'cxgdyr/ca:da'
+      - 'cxgdyr/ku:en'
+      - 'dilgrw/ca:za'
+      - 'dilgrw/ku:lo'
+      - 'enicfc/ca:mu'
+      - 'enicfc/mu:ja'
+      - 'etiuaz/ac:an'
+      - 'etiuaz/uj:ku'
+      - 'flmmov/ad:ai'
+      - 'flmmov/ol:ak'
+      - 'fmrfyl/yu:da'
+      - 'fmrfyl/ba:ki'
+      - 'gqjbmv/mu:sa'
+      - 'gqjbmv/sa:ba'
+      - 'itzwsl/gi:lq'
+      - 'itzwsl/kl:al'
+      - 'lhnxzb/ak:am'
+      - 'lhnxzb/ik:mu'
+      - 'lktbai/ti:ab'
+      - 'lktbai/ki:bu'
+      - 'oaersw/do:ra'
+      - 'oaersw/bu:sa'
+      - 'pecxnp/pu:pi'
+      - 'pecxnp/bo:bi'
+      - 'uroicm/ri:do'
+      - 'uroicm/ku:do'
+      - 'vxfegj/ja:an'
+      - 'vxfegj/ka:je'
+      - 'vykixv/ad:nu'
+      - 'vykixv/ka:mj'
+      - 'xpgsmf/fa:an'
+      - 'xpgsmf/lu:an'
+      - 'yzsqbe/se:ab'
+      - 'yzsqbe/ka:si'
+      - 'zopklw/wi:ab'
+      - 'zopklw/ko:sy'
+      - 'zsztqa/yi:an'
+      - 'zsztqa/ak:ha'
+  condition: selection
+falsepositives:
+  - This detection is based on a list of known malicious images and is expected to have a very low false positive rate.
+  - The list of malicious images should be periodically updated as new campaigns emerge.
+level: high

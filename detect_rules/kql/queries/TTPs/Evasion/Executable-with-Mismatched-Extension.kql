@@ -1,0 +1,30 @@
+// Name: Executable with Mismatched Extension Downloaded by Browser
+// Author: RW
+// Date: 2025-08-13
+// Description: Detects a file with a double extension, where a common document or archive extension is used to mask an executable extension.
+// This file is created by a browser process, which is a common pattern for the FileJacking technique and other malware delivery methods.
+// MITRE ATT&CK: T1036.003, T1204.001
+// False Positives: Medium. Some legitimate software installers or updaters downloaded via a browser might use naming conventions that could
+// trigger this rule. Review the file name and source to determine legitimacy.
+
+let timeframe = 1d;
+let browser_processes = dynamic(['msedge.exe', 'chrome.exe', 'firefox.exe', 'brave.exe', 'opera.exe']);
+// Regex to detect a spoofed document/archive extension followed by an executable extension.
+let double_extension_regex = @'\.(pdf|docx?|xlsx?|pptx?|txt|rtf|jpg|jpeg|png|gif|zip|rar)\.(exe|scr|com|pif|bat|cmd|vbs|js|ps1|msi)$';
+
+DeviceFileEvents
+| where Timestamp > ago(timeframe)
+| where ActionType == "FileCreated"
+// Filter for files created by a browser process.
+| where InitiatingProcessFileName in~ (browser_processes)
+// Core logic: Match filenames with a deceptive double extension. This is a form of masquerading.
+| where FileName matches regex double_extension_regex
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    FileName,
+    FolderPath,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    SHA256

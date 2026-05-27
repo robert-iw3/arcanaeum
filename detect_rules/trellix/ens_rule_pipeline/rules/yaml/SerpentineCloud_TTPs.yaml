@@ -1,0 +1,77 @@
+- type: expert
+  name: Detect Robocopy WebDAV Download from Temporary Tunnels (Stage 1 Initial Access)
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "robocopy.exe" }
+       }
+       Target {
+          Match PROCESS {
+             Include OBJECT_NAME { -v "**" }
+             Include -access "CREATE"
+             Include -command_line "*\\SSL\\DavWWWRoot*"
+             Include -command_line "*WebDAV*"
+             Include -command_line "*trycloudflare.com*"
+             Include -command_line "*ngrok.io*"
+             Include -command_line "*ngrok-free.app*"
+          }
+       }
+    }
+  action: Report
+  severity: Critical
+  enabled: true
+  description: "Detects robocopy.exe with WebDAV source paths (@SSL\\DavWWWRoot or WebDAV) and temporary tunnel domains (trycloudflare.com, ngrok.io, ngrok-free.app) — high-confidence initial access vector in SERPENTINE#CLOUD and similar 2025-2026 phishing-to-RAT campaigns. Extremely specific; very low false positives. Tune only for rare legitimate WebDAV robocopy usage."
+- type: expert
+  name: Detect Suspicious LNK Execution from Office/Explorer (Stage 1b Initial Access)
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "explorer.exe" -v "winword.exe" -v "excel.exe" -v "powerpnt.exe" }
+       }
+       Target {
+          Match PROCESS {
+             Include OBJECT_NAME { -v "**" }
+             Include -access "CREATE"
+             Include -command_line "*cmd.exe /c start /min *"
+             Include -command_line "*robocopy.exe*"
+             Include -command_line "*ngrok-free.app*"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects explorer/office apps spawning minimized cmd/robocopy with ngrok tunnels — phishing lure execution chain in SERPENTINE#CLOUD (2025). Tune for legitimate minimized cmd usage."
+- type: expert
+  name: Detect VBS Persistence in Startup/AppData Folders (Stage 2 Persistence)
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "wscript.exe" -v "cscript.exe" }
+       }
+       Target {
+          Match PROCESS {
+             Include OBJECT_NAME { -v "**" }
+             Include -access "CREATE"
+             Include -command_line "*\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\*.vbs*"
+             Include -command_line "*\\AppData\\Roaming\\*\\*.vbs*"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects wscript/cscript executing VBS scripts from Startup folder or AppData\\Roaming — classic persistence method in many 2025–2026 RAT/phishing campaigns. High-fidelity; tune for rare legitimate startup scripts."
+- type: firewall
+  name: Detect Outbound C2 to Known Malicious Domains/IPs (Stage 4)
+  application: "**"
+  direction: out
+  protocol: "TCP,UDP"
+  port: "80,443,53"
+  action: Report
+  severity: Critical
+  enabled: true
+  description: "Detects outbound traffic on C2 ports (HTTP/HTTPS 80/443, DNS 53) to known 2025–2026 malicious infrastructure (nhvncpure.shop/sbs/click, *.duckdns.org, *.trycloudflare.com/*.ngrok.io/*.ngrok-free.app, IP 51.89.212.145). High-confidence C2 indicator. Domain/IP filtering not native in ENS Firewall; use Web Control for blocking. Tune with baseline exclusions."

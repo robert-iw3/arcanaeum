@@ -1,0 +1,47 @@
+// Name: Unencrypted SLE PDU Traffic Detected
+// Author: RW
+// Date: 2025-08-19
+// Description: Detects unencrypted, sensitive Space Link Extension (SLE) operations like CLTU-BIND.
+// The SLE protocol lacks inherent encryption, making this traffic vulnerable to eavesdropping, credential theft, and session hijacking
+// This alert flags the presence of these operations for security review.
+// Tactic: Credential Access
+// Technique: T1040, Network Sniffing
+// False Positive Sensitivity: Medium. This rule will trigger on legitimate SLE BIND operations.
+// It is intended to highlight the risk of unencrypted sensitive data transfer.
+// To reduce noise, scope the rule to traffic involving critical assets (Mission Control Systems, Ground Stations) and consider suppressing alerts during known operational windows.
+
+// IMPORTANT: This query requires a data source with Deep Packet Inspection (DPI) capabilities, such as Zeek, Corelight, or other Network Security Monitoring (NSM) tools.
+// You must replace 'NetworkTrafficPayloads' with your table name.
+// The query assumes the network payload is available as a hex string in a field named 'Payload'.
+let DpiLogs = view () {
+    NetworkTrafficPayloads // Replace with your table
+};
+
+// Define the hex signatures for sensitive SLE operations based on the intelligence report.
+// 'bf64' is the ASN.1 signature for a CLTU-BIND message.
+// The signature for CLTU-TRANSFER_DATA is not in the provided text, but should be added if known.
+let SensitiveSleSignatures = dynamic(["bf64"]);
+
+DpiLogs
+// Ensure payload data exists for analysis.
+| where isnotempty(Payload)
+// The intelligence mentions focusing on Mission Control Systems (MCS) and Ground Stations (GS).
+// To increase fidelity, filter for traffic to/from these critical assets.
+// Example: | where SourceIp in (critical_assets_watchlist) or DestinationIp in (critical_assets_watchlist)
+| where Payload has_any (SensitiveSleSignatures)
+// Extract a snippet of the payload for initial analysis in the alert.
+| extend PayloadSnippet = substring(Payload, 0, 128)
+| project
+    TimeGenerated,
+    SourceIP,
+    DestinationIP,
+    DestinationPort,
+    PayloadSnippet,
+    // Add other relevant fields from your data source e.g., DeviceName, GeoLocation etc.
+    SessionId
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    DestinationPorts = make_set(DestinationPort),
+    PayloadSnippets = make_set(PayloadSnippet)
+  by SourceIP, DestinationIP, SessionId

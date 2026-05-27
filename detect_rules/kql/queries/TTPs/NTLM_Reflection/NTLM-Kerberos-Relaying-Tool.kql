@@ -1,0 +1,20 @@
+// Name: NTLM or Kerberos Relaying Tool Execution
+// Author: RW
+// Date: 2025-07-31
+// Description: Detects the execution of common NTLM or Kerberos relaying tools, such as ntlmrelayx.py and krbrelayx.py. The presence of these tools is a strong indicator of an attacker attempting to perform authentication relay attacks, such as those described in CVE-2025-33073.
+// Mitre TTPs: T1557.001, T1190
+// References:
+DeviceProcessEvents
+// Look for command-line execution of common relaying tools
+| where ProcessCommandLine has_any ("ntlmrelayx.py", "krbrelayx.py")
+// FP Tuning: These tools are commonly used by penetration testers and red teams.
+// Exclude known security research hosts or user accounts if this activity is expected.
+// For example: | where DeviceName != "REDTEAM-VM" and InitiatingProcessAccountName != "pentester_acct"
+| project
+    Timestamp,
+    DeviceName,
+    InitiatingProcessAccountName,
+    FileName,
+    ProcessCommandLine,
+    ParentProcessFileName,
+    ParentProcessCommandLine

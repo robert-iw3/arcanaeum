@@ -1,0 +1,68 @@
+// title: Data Exfiltration via Clipboard
+// description: Detects a suspicious process, such as a scripting engine, accessing clipboard content and subsequently initiating an outbound network connection. This pattern is a known technique used by malware like the Lazarus Group's clipboard stealer to exfiltrate sensitive data copied by the user, such as passwords or cryptocurrency keys.
+// author: RW
+// date: 2025-07-31
+// references:
+// mitre_attack_id: T1115, T1041
+// mitre_attack_technique: Clipboard Data, Exfiltration Over C2 Channel
+// mitre_attack_phase: Collection, Exfiltration
+// security_domain: endpoint
+// datamodel: Process, Network
+// risk_score: 75
+// severity: High
+
+let timeWindow = 5m;
+// Define suspicious parent processes that might orchestrate this behavior, as seen with Lazarus using Node.js.
+let suspiciousParents = dynamic(["node.exe", "python.exe", "python3.exe", "pwsh.exe", "powershell.exe", "wscript.exe", "cscript.exe", "sh", "bash", "zsh"]);
+
+// Find instances where a suspicious parent process spawns a command to read clipboard data.
+let clipboard_access_events =
+    DeviceProcessEvents
+    | where InitiatingProcessFileName in~ (suspiciousParents)
+    | where
+        // Windows clipboard access command from the report
+        (FileName =~ "powershell.exe" and ProcessCommandLine has "Get-Clipboard") or
+        // macOS clipboard access command from the report
+        (FileName =~ "pbpaste")
+    | project
+        ClipboardAccessTime = Timestamp,
+        DeviceId,
+        DeviceName,
+        AccountName,
+        ParentProcessId = InitiatingProcessId,
+        ParentProcessCommandLine = InitiatingProcessCommandLine,
+        ClipboardCommand = ProcessCommandLine;
+
+// Correlate the parent process of the clipboard access with subsequent outbound network activity.
+clipboard_access_events
+| join kind=inner (
+    DeviceNetworkEvents
+    | where InitiatingProcessFileName in~ (suspiciousParents)
+    // Filter for external network connections, excluding private IP space.
+    | where isnotempty(RemoteIP) and not(ipv4_is_private(RemoteIP))
+    | project
+        NetworkTime = Timestamp,
+        DeviceId,
+        ParentProcessId = InitiatingProcessId,
+        RemoteIP,
+        RemoteUrl
+) on DeviceId, ParentProcessId
+// The core of the correlation: ensure the network event happens shortly AFTER the clipboard access.
+| where NetworkTime between (ClipboardAccessTime .. (ClipboardAccessTime + timeWindow))
+// Summarize to create a single alert for a sequence of events from the same parent process.
+| summarize
+    StartTime = min(ClipboardAccessTime),
+    EndTime = max(NetworkTime),
+    ClipboardCommands = make_set(ClipboardCommand),
+    RemoteIPs = make_set(RemoteIP),
+    RemoteUrls = make_set(RemoteUrl)
+    by DeviceName, AccountName, ParentProcessCommandLine, ParentProcessId
+// comment: This detection correlates clipboard access with network exfiltration from the same parent process. False positives may occur with legitimate developer tools or automation scripts that interact with the clipboard and network. Review the ParentProcessCommandLine and network destinations to assess legitimacy.
+| project
+    Timestamp = StartTime,
+    DeviceName,
+    AccountName,
+    ParentProcessCommandLine,
+    ClipboardCommands,
+    RemoteIPs,
+    RemoteUrls

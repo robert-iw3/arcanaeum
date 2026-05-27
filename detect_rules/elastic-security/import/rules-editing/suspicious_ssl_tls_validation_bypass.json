@@ -1,0 +1,76 @@
+{
+  "rule_id": "suspicious_ssl_tls_validation_bypass",
+  "name": "Suspicious SSL/TLS Validation Bypass",
+  "description": "Detects API calls that bypass SSL/TLS certificate validation, which can be used by malicious software to facilitate command and control (C2) communication or avoid detection.",
+  "severity": "high",
+  "enabled": true,
+  "language": "esql",
+  "query": "FROM logs-endpoint.events.* | WHERE (process.api.parameters MATCHES '(?i)SECURITY_FLAG_IGNORE_CERT_CN_INVALID|SECURITY_FLAG_IGNORE_CERT_DATE_INVALID|SECURITY_FLAG_IGNORE_UNKNOWN_CA|SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE' OR process.api.parameters MATCHES '(?i)0x1000|0x2000|0x100|0x200') | STATS count = COUNT(*), evidence = ARRAY_AGG(process.api.parameters) BY host.name, user.name, process.parent.name, process.name, process.executable, process.command_line | KEEP host.name, user.name, process.parent.name, process.name, process.executable, process.command_line, evidence, count",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0005",
+        "name": "Defense Evasion",
+        "reference": "https://attack.mitre.org/tactics/TA0005/"
+      },
+      "technique": [
+        {
+          "id": "T1562",
+          "name": "Impair Defenses",
+          "reference": "https://attack.mitre.org/techniques/T1562/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0011",
+        "name": "Command and Control",
+        "reference": "https://attack.mitre.org/tactics/TA0011/"
+      },
+      "technique": [
+        {
+          "id": "T1090",
+          "name": "Proxy",
+          "reference": "https://attack.mitre.org/techniques/T1090/"
+        }
+      ]
+    }
+  ],
+  "interval": "10m",
+  "from": "now-10m",
+  "max_signals": 100,
+  "risk_score": 85,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://www.elastic.co/guide/en/security/current/ssl-tls-validation-bypass.html"
+  ],
+  "tags": [
+    "SSL/TLS",
+    "Defense Evasion",
+    "Command and Control"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "exemptions": [
+    {
+      "name": "trusted_ssl_processes_exemption",
+      "description": "Exempts known, legitimate processes from SSL validation bypass detection.",
+      "conditions": [
+        {
+          "field": "process.name",
+          "operator": "included",
+          "type": "list",
+          "list_id": "trusted_ssl_processes"
+        }
+      ],
+      "enabled": true
+    }
+  ],
+  "custom_query_fields": [],
+  "event_group": "host.name, user.name, process.name, process.executable"
+}

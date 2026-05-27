@@ -1,0 +1,48 @@
+// Name: Exchange S2S Impersonation Activity
+// Author: RW
+// Date: 2025-08-09
+// Description: Detects administrative actions initiated by a user account whose display name is that of a Microsoft
+//              first-party service principal, such as 'Office 365 Exchange Online'. This is a strong indicator of a
+//              Service-to-Service (S2S) token-based impersonation attack, where an attacker uses a compromised certificate
+//              (e.g., from Exchange Hybrid) to perform actions on behalf of other users. These actions are logged with the
+//              service's name but attributed as a 'user' type action.
+// False Positives:
+// - Some legitimate backend Microsoft service operations may exhibit this behavior.
+// - The rule attempts to filter common noisy operations, but further tuning might be necessary.
+
+let timeframe = 1d;
+// List of Microsoft 1st party service principal display names that should not be initiating actions as a 'user'.
+let ServicePrincipalDisplayNames = dynamic([
+    "Office 365 Exchange Online",
+    "Office 365 SharePoint Online"
+]);
+// Tuning: Exclude noisy operations that are known to be performed by these services legitimately.
+let ExcludedOperations = dynamic([
+    "Set directory feature on tenant",
+    "Update group.", // Catches group lifecycle activities
+    "Add member to group.",
+    "Remove member from group."
+]);
+AuditLogs
+| where TimeGenerated > ago(timeframe)
+// Filter for actions initiated by a user, where the user's display name matches a known service principal. This is the core anomaly.
+| where InitiatedBy.user.displayName in (ServicePrincipalDisplayNames)
+// The 'user' object in InitiatedBy should contain an IP address, which is characteristic of this attack.
+| where isnotempty(InitiatedBy.user.ipAddress)
+// Exclude known noisy operations to reduce false positives.
+| where not(OperationName in (ExcludedOperations) or OperationName has "group")
+| mv-expand TargetResources
+| where isnotempty(TargetResources)
+| project
+    TimeGenerated,
+    OperationName,
+    ResultType,
+    ResultDescription,
+    ActorDisplayName = tostring(InitiatedBy.user.displayName),
+    ImpersonatedUserUPN = tostring(InitiatedBy.user.userPrincipalName),
+    ActorIPAddress = tostring(InitiatedBy.user.ipAddress),
+    TargetResource = tostring(TargetResources.displayName),
+    TargetResourceType = tostring(TargetResources.type),
+    CorrelationId,
+    UserAgent = tostring(AdditionalDetails.User-Agent)
+| extend timestamp = TimeGenerated, AccountCustomEntity = ImpersonatedUserUPN, IPCustomEntity = ActorIPAddress

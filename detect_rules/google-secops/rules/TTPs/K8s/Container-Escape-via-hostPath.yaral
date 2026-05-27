@@ -1,0 +1,49 @@
+rule kubernetes_container_escape_via_hostpath {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects the creation or update of a Kubernetes Pod that combines a sensitive hostPath volume mount (e.g., mounting the root directory '/') with other privileged settings. This configuration is a common container escape technique used to gain access to the underlying host's filesystem and processes."
+    tactic = "TA0004"
+    technique = "T1611"
+    false_positives = "Legitimate infrastructure pods, such as storage drivers or monitoring agents, may require access to the host filesystem. These should be explicitly excluded by service account, namespace, or image name to reduce noise."
+    tags = "KUBERNETES, CONTAINER_ESCAPE, PRIVILEGE_ESCALATION, HOSTPATH"
+
+  events:
+    // Filter for Pod creation or update events.
+    $pod.metadata.event_type = "KUBERNETES_AUDIT"
+    $pod.additional.verb in ("create", "update")
+    $pod.target.resource.resource_subtype = "pods"
+
+    // Detects a pod mounting a highly sensitive host directory, like the root filesystem.
+    // Consider adding other sensitive paths like '/var/run/docker.sock' or '/etc'.
+    $pod.additional.request.spec.volumes.hostPath.path = "/"
+
+    // The pod must also have at least one high-privilege setting enabled to be a high-fidelity signal.
+    (
+      $pod.additional.request.spec.hostPID = true or
+      $pod.additional.request.spec.hostNetwork = true or
+      $pod.additional.request.spec.containers.securityContext.privileged = true or
+      // Check the pod-level security context as well.
+      $pod.additional.request.spec.securityContext.privileged = true
+    )
+
+  condition:
+    $pod
+
+  outcome:
+    // This is a high-severity event indicating a likely container escape attempt.
+    $risk_score = 75
+    $principal_user = $pod.principal.user.userid
+    $principal_ip = array_distinct($pod.principal.ip)
+    $target_pod_name = $pod.target.resource.name
+    $target_pod_namespace = $pod.target.namespace
+    $verb = $pod.additional.verb
+    $image = array_distinct($pod.additional.request.spec.containers.image)
+
+    // Provide context on which settings were enabled for easier investigation.
+    $privileged_setting_enabled = $pod.additional.request.spec.containers.securityContext.privileged = true or $pod.additional.request.spec.securityContext.privileged = true
+    $hostpid_enabled = $pod.additional.request.spec.hostPID = true
+    $hostnetwork_enabled = $pod.additional.request.spec.hostNetwork = true
+    $hostpath_path = array_distinct($pod.additional.request.spec.volumes.hostPath.path)
+    $request_object = $pod.additional.request
+}

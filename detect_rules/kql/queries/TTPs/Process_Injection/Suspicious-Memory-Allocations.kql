@@ -1,0 +1,46 @@
+// Name: Process Hollowing via Anomalous MEM_IMAGE Allocation
+// Author: RW
+// Date: 2025-08-07
+// Description: Detects a process allocating executable memory of type MEM_IMAGE in a remote process.
+//              This is a strong indicator of Process Hollowing, where an attacker replaces the memory
+//              of a legitimate process with malicious code. Legitimate dynamic allocations typically
+//              use MEM_PRIVATE, while MEM_IMAGE is reserved for mapping executable files from disk.
+// Tactics: Defense Evasion, Privilege Escalation
+// Techniques: T1055.012
+
+let timeframe = 1h;
+// FP Mitigation: Some legitimate software, like installers, updaters, or security products, may perform unusual memory operations.
+// Add known safe processes to this list.
+let allowlist = dynamic([
+    "updater.exe",
+    "installer.exe",
+    "msmpeng.exe"
+]);
+DeviceEvents
+| where Timestamp > ago(timeframe)
+// Focus on remote memory allocation API calls, a core component of process injection.
+| where ActionType == "RemoteVirtualAllocApiCall"
+// Parse the additional fields which contain the memory allocation details.
+| extend ParsedFields = todynamic(AdditionalFields)
+// The key anomaly is the allocation type being MEM_IMAGE (0x1000000) for a dynamic allocation.
+| where ParsedFields.MemAllocationType has "MEM_IMAGE"
+// Malicious code requires executable memory. We look for any execute permissions.
+// Common values: PAGE_EXECUTE_READWRITE (0x40), PAGE_EXECUTE_READ (0x20), PAGE_EXECUTE (0x10).
+| where ParsedFields.MemProtect has_any ("PAGE_EXECUTE_READWRITE", "PAGE_EXECUTE_READ", "PAGE_EXECUTE")
+// Exclude known legitimate processes.
+| where InitiatingProcessFileName !in (allowlist)
+// Further tuning: Consider focusing on common hollowing targets like svchost.exe, explorer.exe, etc., to increase fidelity, though this may reduce coverage.
+// | where TargetProcessFileName in ("svchost.exe", "explorer.exe", "runtimebroker.exe", "notepad.exe")
+| project
+    Timestamp,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessId,
+    TargetProcessFileName,
+    TargetProcessCommandLine,
+    TargetProcessId,
+    MemAllocationType = ParsedFields.MemAllocationType,
+    MemProtect = ParsedFields.MemProtect,
+    AllocatedAddress = ParsedFields.AllocatedAddress,
+    AllocationSize = ParsedFields.AllocationSize

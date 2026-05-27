@@ -1,0 +1,25 @@
+---
+services:
+  sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: malware-sandbox:latest
+    container_name: malware-sandbox
+    privileged: true
+    isolation: hyperv
+    volumes:
+      - ./Malware:/Malware
+      - ./Collections:/Collections
+      - ./Logs:/Logs
+    environment:
+      - MALWARE_DIR=/Malware
+      - COLLECTION_DIR=/Collections
+    command: ["python", "malware_sandbox.py", "--malws-path", "/Malware", "--collection-dir", "/Collections", "--filetypes", ".exe,.dll,.bin", "--parallel", "4", "--volatility-plugins", "windows.pslist,windows.netscan", "--simulate-network"]
+    networks:
+      - isolated-net
+
+networks:
+  isolated-net:
+    driver: bridge
+    internal: true

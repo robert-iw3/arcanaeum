@@ -1,0 +1,53 @@
+rule spearphishing_targeting_ot_ics_personnel {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects potential spear-phishing emails with malicious links or attachments sent to personnel associated with Operational Technology (OT) or Industrial Control Systems (ICS). This activity is often a precursor to attacks on critical infrastructure."
+    tactic = "TA0001"
+    technique = "T1566.001, T1566.002"
+    false_positives = "The accuracy of this rule depends on the 'ot_ics_personnel_list'. Benign emails containing file types like .zip or .html from legitimate business partners may trigger alerts. Consider adding sender domain exclusions."
+
+  events:
+    // Match email receipt events.
+    $e.metadata.event_type = "EMAIL_RECEIPT"
+
+    // Correlate on the recipient's user ID.
+    $user_id = $e.principal.user.userid
+
+    // Filter for emails sent to high-value targets in OT/ICS environments.
+    // Tuning: This reference list must be populated with the user IDs of relevant personnel.
+    $e.principal.user.userid in %ot_ics_personnel_list
+
+    // The email must contain either a malicious link or a suspicious/malicious attachment.
+    (
+      // Condition 1: A URL in the email is flagged as malicious.
+      any $url in $e.additional.urls {
+        $url.security_result.threat_verdict = "MALICIOUS"
+      }
+      or
+      // Condition 2: An attachment is flagged as malicious or has a suspicious file type.
+      any $attachment in $e.additional.attachments {
+        $attachment.file.security_result.threat_verdict = "MALICIOUS"
+        or re.regex($attachment.file.full_path, `\.(html|htm|iso|img|lnk|zip|rar|js|vbs|hta)$`) nocase
+      }
+    )
+
+  match:
+    // Group alerts by the targeted user over a 1-hour window.
+    $user_id over 1h
+
+  outcome:
+    // Set a risk score reflecting a targeted attack.
+    $risk_score = 70
+    $principal_user_userid = $user_id
+    $sender = array_distinct($e.network.email.from)
+    $subject = array_distinct($e.network.email.subject)
+    $recipients = array_distinct($e.network.email.to)
+    // Extract malicious URLs and attachments for investigation.
+    $malicious_urls = array_distinct($e.additional.urls.url)
+    $malicious_attachments = array_distinct($e.additional.attachments.file.full_path)
+    $event_count = count_distinct($e.metadata.id)
+
+  condition:
+    $e
+}

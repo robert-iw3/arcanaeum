@@ -1,0 +1,39 @@
+rule social_engineering_initial_access_via_user_application {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects when a common user-facing application (e.g., email client, web browser, office suite) spawns a command shell or scripting interpreter. This behavior is a strong indicator of a successful social engineering or phishing attempt, where a user has been tricked into opening a malicious link or document, leading to initial access. This is a critical initial access vector to monitor in sensitive environments like maritime mission systems."
+    reference = "https://attack.mitre.org/techniques/T1566/, https://attack.mitre.org/techniques/T1204/002/"
+    false_positives = "Legitimate software installers or updaters launched from a web browser., Legitimate macros or add-ins in office applications that spawn shell commands., Custom 'open with' actions configured by a user. It may be necessary to tune this rule by adding more filters for known benign parent-child process relationships or command lines specific to your environment."
+    tags = "attack.initial_access, industry.maritime, phishing"
+    tactic = "TA0001"
+    technique = "T1566, T1204.002"
+
+  events:
+    $process.metadata.event_type = "PROCESS_LAUNCH"
+
+    // Parent process is a common user-facing application often targeted in phishing campaigns.
+    re.regex($process.principal.process.file.full_path, `(?i)\\(outlook|winword|excel|powerpnt|acrord32|acrordr32|chrome|msedge|firefox|iexplore)\.exe$`)
+
+    // Child process is a common shell or scripting engine used for initial payloads.
+    re.regex($process.target.process.file.full_path, `(?i)\\(powershell|pwsh|cmd|wscript|cscript|mshta|rundll32)\.exe$`)
+
+    // Filter out common benign behavior where browsers/email clients use rundll32 to open URLs.
+    // This helps reduce noise from legitimate system functions.
+    not re.regex($process.target.process.command_line, `(?i)rundll32\.exe\s.*url\.dll,FileProtocolHandler`)
+
+  outcome:
+    // High risk score as this is a strong indicator of initial compromise.
+    $risk_score = 75
+    $principal_hostname = array_distinct($process.principal.hostname)
+    $principal_user = array_distinct($process.principal.user.userid)
+    $parent_process_path = array_distinct($process.principal.process.file.full_path)
+    $parent_process_cmd = array_distinct($process.principal.process.command_line)
+    $parent_process_hash = array_distinct($process.principal.process.file.sha256)
+    $child_process_path = array_distinct($process.target.process.file.full_path)
+    $child_process_cmd = array_distinct($process.target.process.command_line)
+    $child_process_hash = array_distinct($process.target.process.file.sha256)
+
+  condition:
+    $process
+}

@@ -1,0 +1,37 @@
+rule gcp_overly_permissive_cloud_build_sa_role_granted {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects when a Google Cloud Platform (GCP) service account is granted overly permissive roles, such as 'Cloud Build Editor' (`roles/cloudbuild.builds.builder`), 'Editor', or 'Owner'. Threat actors can abuse service accounts with these permissions assigned to cloud functions to escalate privileges or execute malicious commands during the build process."
+    false_positives = "Legitimate administrative activity where developers or administrators are setting up build pipelines. This rule is best used to audit for misconfigurations or unexpected permission changes. It may need to be tuned to exclude specific administrative users or expected service account configurations."
+    tags = "GCP, CLOUD, IAM, PRIVILEGE_ESCALATION"
+    tactic = "TA0004"
+    technique = "T1078.004"
+
+  events:
+    // Catches events where a GCP IAM policy is modified.
+    $iam.metadata.event_type = "GCP_IAM_POLICY_CHANGE"
+    $iam.metadata.product_event_type = "google.iam.v1.IAMPolicy.SetIamPolicy"
+
+    // Filters for events where the principal being granted permissions is a service account.
+    any $iam.addition.iam_policy_delta.add.member matches /serviceAccount:/ nocase
+
+    // Looks for the assignment of specific high-privilege roles.
+    $iam.addition.iam_policy_delta.add.role in (
+      "roles/cloudbuild.builds.builder",
+      "roles/editor",
+      "roles/owner"
+    )
+
+  outcome:
+    // A medium risk score is assigned as this could be legitimate admin activity.
+    $risk_score = 60
+    $principal_user = array_distinct($iam.principal.user.userid)
+    $principal_ip = array_distinct($iam.principal.ip)
+    $target_resource = array_distinct($iam.target.resource.name)
+    $granted_role = array_distinct($iam.addition.iam_policy_delta.add.role)
+    $target_service_account = array_distinct($iam.addition.iam_policy_delta.add.member)
+
+  condition:
+    $iam
+}

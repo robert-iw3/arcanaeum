@@ -1,0 +1,85 @@
+// Name: Satellite C2 Traffic Deviations
+// Description: Detects deviations from normal satellite command and control (C2) traffic baselines.
+// Such deviations, like anomalous command volumes, high failure rates, or commands from new sources, can indicate a cyberattack
+// where an adversary attempts to corrupt data, seize control, and potentially clear logs (T1070.006, T1070.007) to hide their actions.
+// This rule requires a custom log source ('SatelliteC2Logs') containing C2 command data.
+// Tactic: Defense Evasion
+// Technique: T1070.006, T1070.007
+// Author: RW
+// Date: 2025-08-19
+
+let baseline_window = 7d;
+let recent_window = 1h;
+// FP Risk: Thresholds must be tuned based on operational baselines for each satellite system.
+// Threshold for command volume spikes, in standard deviations from the hourly average.
+let volume_stdev_threshold = 3.5;
+// Threshold for an anomalous rate of failed commands.
+let failure_rate_threshold = 0.50; // 50%
+// Minimum number of failed commands in the recent window to consider the failure rate significant.
+let min_failed_commands_threshold = 5;
+
+// This rule requires a custom table, 'SatelliteC2Logs', with fields like SatelliteID, CommandStatus, and SourceIP.
+let RecentCommands =
+    SatelliteC2Logs
+    | where TimeGenerated > ago(recent_window);
+
+// Anomaly 1: Commands from a new source IP not seen in the baseline period.
+let KnownSources =
+    SatelliteC2Logs
+    | where TimeGenerated between (ago(baseline_window) .. ago(recent_window))
+    | summarize KnownIPs = make_set(SourceIP) by SatelliteID;
+let NewSourceAnomalies =
+    RecentCommands
+    | join kind=leftouter KnownSources on SatelliteID
+    | where not(SourceIP in (KnownIPs))
+    | summarize
+        StartTime = min(TimeGenerated),
+        EndTime = max(TimeGenerated),
+        NewSourceIPs = make_set(SourceIP),
+        CommandCountFromNewIPs = count()
+        by SatelliteID
+    | project
+        StartTime,
+        SatelliteID,
+        DetectionMethod = "New C2 Source IP",
+        Description = strcat("Commands detected from new source IPs: ", NewSourceIPs);
+
+// Anomaly 2: Significant spike in command volume compared to the baseline.
+let VolumeBaseline =
+    SatelliteC2Logs
+    | where TimeGenerated between (ago(baseline_window) .. ago(recent_window))
+    | summarize CommandCount = count() by SatelliteID, bin(TimeGenerated, 1h)
+    | summarize AvgCommandsPerHour = avg(CommandCount), StdevCommandsPerHour = stdev(CommandCount) by SatelliteID
+    | where StdevCommandsPerHour > 0;
+let VolumeAnomalies =
+    RecentCommands
+    | summarize RecentCommandCount = count() by SatelliteID
+    | join kind=inner VolumeBaseline on SatelliteID
+    | where RecentCommandCount > (AvgCommandsPerHour + (volume_stdev_threshold * StdevCommandsPerHour))
+    | project
+        StartTime = now(-recent_window),
+        SatelliteID,
+        DetectionMethod = "Anomalous C2 Command Volume",
+        Description = strcat("Observed ", RecentCommandCount, " commands in the last hour. Baseline is ~", round(AvgCommandsPerHour,1), " commands per hour.");
+
+// Anomaly 3: Unusually high rate of failed C2 commands.
+let FailureAnomalies =
+    RecentCommands
+    | summarize
+        TotalCommands = count(),
+        FailedCommands = countif(CommandStatus == "Failure")
+        by SatelliteID
+    | where TotalCommands > 0 and FailedCommands >= min_failed_commands_threshold
+    | extend FailureRate = toreal(FailedCommands) / TotalCommands
+    | where FailureRate >= failure_rate_threshold
+    | project
+        StartTime = now(-recent_window),
+        SatelliteID,
+        DetectionMethod = "High C2 Command Failure Rate",
+        Description = strcat(round(FailureRate * 100, 2), "% failure rate observed (", FailedCommands, " failures out of ", TotalCommands, " commands).");
+
+// Combine all detected anomalies into a single result set.
+union NewSourceAnomalies, VolumeAnomalies, FailureAnomalies
+| extend
+    timestamp = StartTime,
+    customEntity = SatelliteID

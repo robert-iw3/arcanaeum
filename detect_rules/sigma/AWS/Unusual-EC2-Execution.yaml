@@ -1,0 +1,45 @@
+title: AWS EC2 Execution via UserData or SSM
+id: 51c67b1f-e3d7-4877-9196-780a848c0cbb
+status: experimental
+description: Detects potential malicious code execution on EC2 instances using either the UserData field during instance launch (`RunInstances`) or via AWS Systems Manager (SSM) commands (`SendCommand`, `StartSession`). These methods can be used for initial execution, persistence, or lateral movement.
+references:
+  - https://stratus-red-team.cloud/attack-techniques/AWS/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.t1059
+  - attack.t1219
+  - attack.execution
+  - attack.lateral_movement
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection_userdata_event:
+        # Detects the launch of an EC2 instance
+    eventName: RunInstances
+    eventSource: ec2.amazonaws.com
+  selection_userdata_keywords:
+        # UserData is Base64 encoded in the raw log. This detection assumes the field is decoded before matching.
+        # Looks for common script interpreters or downloaders used to bootstrap malicious code.
+    requestParameters.userData|contains:
+      - 'curl '
+      - 'wget '
+      - 'powershell'
+      - 'Invoke-Expression'
+      - 'IEX'
+      - '/bin/bash'
+      - '/bin/sh'
+      - 'python'
+  selection_ssm:
+        # Detects remote command execution or session start via AWS Systems Manager
+    eventName:
+      - SendCommand
+      - StartSession
+    eventSource: ssm.amazonaws.com
+  condition: (selection_userdata_event and selection_userdata_keywords) or selection_ssm
+falsepositives:
+  - Legitimate automation and configuration management tools (e.g., Ansible, Terraform, CloudFormation) heavily use UserData to bootstrap instances.
+  - Administrators and automated systems frequently use SSM to manage instances for patching, configuration, and remote access.
+  - This rule is a starting point. It's recommended to tune it by filtering for non-standard user agents, specific IAM roles, or by correlating SSM events to detect execution against an unusually high number of instances, which is a stronger indicator of malicious activity.
+level: medium

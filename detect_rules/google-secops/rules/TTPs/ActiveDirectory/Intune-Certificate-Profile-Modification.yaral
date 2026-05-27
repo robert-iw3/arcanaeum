@@ -1,0 +1,39 @@
+rule Intune_ADCS_PrivEsc_CertProfile_Modification {
+  meta:
+    author = "RW"
+    description = "Detects suspicious modifications or additions to Intune device configurations related to certificate profiles, specifically targeting well-known high-privilege SIDs. This may indicate attempts at ADCS privilege escalation via Intune Certificate Connector."
+    severity = "CRITICAL"
+
+  events:
+    $e.metadata.event_type = "CONFIGURATION_CHANGE" // UDM event type for configuration changes
+    $e.metadata.action = "MODIFY" or $e.metadata.action = "CREATE" // Match "Patch" or "Add" commands
+    $e.metadata.product_event_type = "Patch deviceConfiguration" or $e.metadata.product_event_type = "Add deviceConfiguration"
+
+    // Extract the SID from the 'fields' or 'metadata.product_specific_id' field.
+    // Assuming 'fields' maps to a UDM field like metadata.extensions.intune.fields
+    // or the SID is directly in metadata.product_specific_id.
+    // We'll search across a common field likely to contain the `tag:microsoft.com` string.
+    $e.metadata.product_specific_id = /tag:microsoft\.com,2022-09-14:sid:S-1-5-21-[0-9-]+-(500|512|516|518|519)/ nocase or
+    $e.extensions.intune.attribute_value_fields = /tag:microsoft\.com,2022-09-14:sid:S-1-5-21-[0-9-]+-(500|512|516|518|519)/ nocase
+
+    // Ensure the SID was found (implicitly handled by the regex if matched)
+
+    // Implement the logic from `susp_intune_adcs_privesc_cert_profile_mod_v1_filter` here.
+    // This typically involves excluding known benign users, devices, or specific configurations.
+    // Example: AND not $e.principal.user.userid in %intune_adcs_whitelist_users
+    // Example: AND not $e.target.hostname in %intune_adcs_whitelist_devices
+
+  outcome:
+    $firstTime = $e.metadata.event_timestamp.epoch_seconds
+    $lastTime = $e.metadata.event_timestamp.epoch_seconds
+    $user = $e.principal.user.userid // Corresponds to All_Changes.user
+    $dest = $e.target.hostname // Corresponds to All_Changes.dest
+    $command = $e.metadata.product_event_type // Corresponds to All_Changes.command
+    // Extract the SID into the outcome for analysis
+    $sid = re.capture($e.metadata.product_specific_id, `tag:microsoft\.com,2022-09-14:sid:(?<sid>S-1-5-21-[0-9-]+-(500|512|516|518|519))`, nocase).sid or
+           re.capture($e.extensions.intune.attribute_value_fields, `tag:microsoft\.com,2022-09-14:sid:(?<sid>S-1-5-21-[0-9-]+-(500|512|516|518|519))`, nocase).sid
+
+
+  condition:
+    $e
+}

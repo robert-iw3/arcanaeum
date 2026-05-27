@@ -1,0 +1,65 @@
+//    Suspicious Open Ports on Tunneling Host
+//    Vulnerable tunneling hosts often expose common ports (HTTP, HTTPS, BGP, NTP, SNMP), which can indicate their role and
+//    potential for abuse. Monitoring these ports for unusual activity or configurations is important for identifying
+//    compromised or misconfigured systems.
+//    Tactics = "Resource Development, Reconnaissance"
+//    Techniques = "T1583, T1595"
+//    Author = "RW"
+//    Date = "2025-08-14"
+
+let timeframe = 1d;
+
+// Define the list of suspicious ports identified in the research.
+// These ports (HTTP, HTTPS, BGP, NTP, SNMP) often correlate with the function of a vulnerable host (e.g., server, router).
+let suspicious_ports = dynamic([80, 443, 179, 123, 161, 162]);
+
+// Define the tunneling protocols by name and IANA protocol numbers.
+// IPIP = 4, 6in4/4in6 = 41, GRE = 47
+let tunnel_protocol_names = dynamic(["ipip", "gre", "ipv6-in-ipv4", "4", "41", "47"]);
+let gue_port = 6080; // Default port for Generic UDP Encapsulation (GUE)
+
+// Allowlist for hosts that are known to legitimately receive tunneling traffic and have these ports open.
+// This is a key tuning parameter to reduce false positives in environments with legitimate use cases.
+let host_allowlist = dynamic([]); // e.g., dynamic(["10.0.0.5", "10.0.0.10"])
+
+// Part 1: Identify internal hosts receiving tunneling traffic from the internet.
+let TunnelingHosts = CommonSecurityLog
+| where TimeGenerated > ago(timeframe)
+| where CommunicationDirection == "Inbound"
+| where isnotempty(DestinationIP) and ipv4_is_private(DestinationIP) and not(ipv4_is_private(SourceIP))
+| where (isnotempty(Protocol) and tolower(Protocol) in (tunnel_protocol_names)) or (tolower(Protocol) == "udp" and DestinationPort == gue_port)
+| summarize
+    StartTime_Tunnel = min(TimeGenerated),
+    EndTime_Tunnel = max(TimeGenerated),
+    TunnelProtocols = make_set(iif(tolower(Protocol) == "udp", "GUE", Protocol)),
+    TunnelSources = make_set(SourceIP)
+    by InternalHost = DestinationIP;
+
+// Part 2: Identify internal hosts with successful inbound connections on the suspicious ports.
+let HostsWithOpenPorts = CommonSecurityLog
+| where TimeGenerated > ago(timeframe)
+| where CommunicationDirection == "Inbound"
+| where DeviceAction in ("Allow", "Accept") // Filter for successful connections, indicating an open port.
+| where isnotempty(DestinationIP) and ipv4_is_private(DestinationIP)
+| where DestinationPort in (suspicious_ports)
+| summarize
+    StartTime_Ports = min(TimeGenerated),
+    EndTime_Ports = max(TimeGenerated),
+    OpenPorts = make_set(DestinationPort),
+    OpenPortSources = make_set(SourceIP)
+    by InternalHost = DestinationIP;
+
+// Part 3: Correlate the two behaviors to find hosts that are both tunneling targets and have suspicious ports open.
+TunnelingHosts
+| join kind=inner (
+    HostsWithOpenPorts
+  ) on InternalHost
+| where InternalHost !in (host_allowlist)
+| project
+    StartTime = min_of(StartTime_Tunnel, StartTime_Ports),
+    EndTime = max_of(EndTime_Tunnel, EndTime_Ports),
+    InternalHost,
+    OpenPorts,
+    TunnelProtocols,
+    TunnelSources,
+    OpenPortSources

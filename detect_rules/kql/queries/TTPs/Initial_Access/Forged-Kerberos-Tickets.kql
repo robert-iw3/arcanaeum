@@ -1,0 +1,42 @@
+// Name: Seamless SSO Key Manipulation
+// Author: RW
+// Date: 2025-08-09
+// Description: Detects modifications to the 'keyCredentials' of the On-Premise Authentication Flow Policy.
+//              An attacker with sufficient on-premises privileges can add their own keys to this policy,
+//              allowing them to forge Kerberos tickets for any user and bypass MFA during Seamless Single
+//              Sign-On (SSSO). This technique is associated with tools like ROADtools.
+// False Positives:
+// - Legitimate changes to the Seamless SSO configuration by an administrator will trigger this alert.
+// - The Entra Connect Sync account may make legitimate changes. It's recommended to baseline normal activity and investigate any unexpected modifications.
+
+let timeframe = 1d;
+// Tuning: The 'On-Premises Directory Synchronization Service Account' is expected to modify this policy.
+// Add any other legitimate administrator UPNs or application display names to this list to reduce noise.
+let KnownSSOAdmins = dynamic(["On-Premises Directory Synchronization Service Account"]);
+AuditLogs
+| where TimeGenerated > ago(timeframe)
+// Look for policy update events.
+| where Category == "Policy" and OperationName has "Update policy"
+// Unpack the TargetResources to inspect policy details.
+| mv-expand TargetResources
+// Filter for the specific policy related to Seamless SSO.
+| where TargetResources.displayName == "On-Premise Authentication Flow Policy"
+// Unpack the modified properties to find the exact change.
+| mv-expand TargetResources.modifiedProperties
+// The core logic: Detect when the symmetric keys for SSSO are changed.
+| where TargetResources_modifiedProperties.displayName == "keyCredentials"
+// Exclude known administrators and the sync account to reduce noise.
+| where not(InitiatedBy.user.userPrincipalName in (KnownSSOAdmins)) and not(InitiatedBy.app.displayName in (KnownSSOAdmins))
+| project
+    TimeGenerated,
+    OperationName,
+    PolicyName = TargetResources.displayName,
+    ModifiedProperty = TargetResources_modifiedProperties.displayName,
+    OldValue = TargetResources_modifiedProperties.oldValue,
+    NewValue = TargetResources_modifiedProperties.newValue,
+    InitiatedBy,
+    InitiatorUPN = tostring(InitiatedBy.user.userPrincipalName),
+    InitiatorAppName = tostring(InitiatedBy.app.displayName),
+    InitiatorIP = tostring(InitiatedBy.user.ipAddress),
+    CorrelationId
+| extend timestamp = TimeGenerated, AccountCustomEntity = iif(isnotempty(InitiatorUPN), InitiatorUPN, InitiatorAppName), IPCustomEntity = InitiatorIP

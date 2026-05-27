@@ -1,0 +1,34 @@
+// Name: ROP Chain Execution leading to VirtualProtect
+// Author: RW
+// Date: 2025-08-03
+// Description: Detects a potential Return-Oriented Programming (ROP) chain executing a suspicious VirtualProtect call.
+//              ROP chains often culminate in a call to an API like VirtualProtect to bypass DEP. A key indicator is that
+//              the API call originates from an unusual code path (e.g., a ROP gadget) rather than a legitimate function,
+//              resulting in an anomalous call stack.
+// False Positive Sensitivity: Medium
+// MITRE TTPs: T1055, T1068, T1093
+
+DeviceEvents
+// Find VirtualProtect calls, the common goal of a DEP-bypass ROP chain.
+| where ActionType == "VirtualProtectApiCall"
+// The core of the bypass: making a non-executable memory region executable.
+| where ProtectionWasExecutable == false and NewProtection has_any ("PAGE_EXECUTE", "PAGE_EXECUTE_READ", "PAGE_EXECUTE_READWRITE", "PAGE_EXECUTE_WRITECOPY")
+// Focus on memory regions commonly targeted by exploits.
+| where MemoryRegionType in ("Stack", "Heap", "Private")
+// ROP chains result in an indirect call to the target API, creating an abnormal call stack.
+// A legitimate call stack for VirtualProtect typically includes modules like kernelbase.dll or ntdll.dll.
+// The absence of these modules in the call stack is a strong indicator of an illegitimate caller, such as a ROP gadget.
+// Note: The 'CallStack' field's availability and content can vary. This query assumes it contains module paths.
+| where isnotempty(CallStack) and CallStack !has "kernelbase.dll" and CallStack !has "ntdll.dll"
+// FP Tuning: Some legitimate software (packers, DRM, JIT compilers) might exhibit similar behavior.
+// Exclude known legitimate processes if they cause false positives.
+// | where InitiatingProcessFileName !in~ ("chrome.exe", "msedge.exe", "dotnet.exe")
+| project
+    Timestamp,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessId,
+    MemoryRegionType,
+    NewProtection,
+    CallStack

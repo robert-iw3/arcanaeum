@@ -1,0 +1,32 @@
+// Name: Reg.exe Accessing Sensitive Registry Hives
+// Author: RW
+// Date: 2025-08-08
+// Description: Detects the use of reg.exe to save critical registry hives (SAM, SYSTEM, SECURITY) or query for credentials stored in the
+//              registry (e.g., for PuTTY, VNC, OpenSSH). This is a common technique for credential access used by APTs.
+// False Positive Sensitivity: Medium
+// Tactics: Credential Access
+// Techniques: T1003, T1555
+
+DeviceProcessEvents
+// Identifies the execution of the Registry Console Tool
+| where FileName =~ "reg.exe" or ProcessVersionInfoOriginalFileName =~ "reg.exe"
+// Looks for either saving critical hives or querying sensitive locations
+| where
+    // Detects saving of SAM, SYSTEM, or SECURITY hives, which contain credential data
+    (ProcessCommandLine has "save" and ProcessCommandLine has_any ("hklm\\sam", "hklm\\system", "hklm\\security", "hkey_local_machine\\sam", "hkey_local_machine\\system", "hkey_local_machine\\security"))
+    or
+    // Detects querying of registry locations known to store credentials for tools like PuTTY, VNC, or OpenSSH
+    (ProcessCommandLine has "query" and ProcessCommandLine has_any ("OpenSSH", "realvnc", "putty\\sessions"))
+// FP Tuning: Legitimate backup software or administrative scripts may save registry hives.
+// Queries for software configuration are also common. If noisy, filter by parent process or exclude known legitimate scripts.
+// For example: where InitiatingProcessFileName !in ("backup_tool.exe", "config_script.ps1")
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    ProcessCommandLine,
+    InitiatingProcessCommandLine,
+    InitiatingProcessFileName,
+    ReportId,
+    ProcessId,
+    InitiatingProcessId

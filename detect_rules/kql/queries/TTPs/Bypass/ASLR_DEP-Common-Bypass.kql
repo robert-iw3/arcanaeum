@@ -1,0 +1,130 @@
+// Title: Memory Exploitation Techniques
+// Author: RW
+// Date: 2025-08-10
+//
+// Description: This is a unified KQL query that combines multiple detection strategies for advanced memory exploitation techniques,
+//              such as those used to bypass ASLR and DEP. It correlates various suspicious events including anomalous memory protection
+//              changes, direct writes to executable memory, ROP-like sequences, and precursor attacks like format string exploits.
+//              Each detection is implemented as a separate logical block and combined at the end.
+//
+// MITRE ATT&CK:
+// - T1055: Process Injection
+// - T1068: Exploitation for Privilege Escalation
+//
+// False Positive Sensitivity: Medium
+//
+// Note: This query unions results from multiple data sources (DeviceEvents, DeviceNetworkEvents, CommonSecurityLog, etc.).
+// Ensure all required data sources are available. The logic for each detection can also be run individually for more targeted threat hunting.
+
+let timeframe = 1h;
+let lookback = 5m; // General lookback window for correlations.
+
+// FP Mitigation: Consolidate allowlists for processes and IPs.
+let process_allowlist = pack_array(
+    "chrome.exe", "firefox.exe", "msedge.exe", "devenv.exe", "windbg.exe",
+    "dotnet.exe", "powershell.exe", "svchost.exe", "csc.exe"
+);
+let ip_allowlist = pack_array("127.0.0.1");
+
+// Detection 1: Anomalous Memory Protection Change (Non-Executable to Executable)
+let MemProtectChange =
+    DeviceEvents
+    | where TimeGenerated > ago(timeframe)
+    | where ActionType has "VirtualProtect"
+    | where InitiatingProcessFileName !in (process_allowlist)
+    | extend EventInfo = parse_json(AdditionalFields)
+    | extend OldProtection = tostring(EventInfo.MemProtectOld), NewProtection = tostring(EventInfo.MemProtectNew)
+    // Look for transitions from non-executable to executable memory.
+    | where NewProtection has_any ("PAGE_EXECUTE", "PAGE_EXECUTE_READ", "PAGE_EXECUTE_READWRITE")
+        and not(OldProtection has_any ("PAGE_EXECUTE", "PAGE_EXECUTE_READ", "PAGE_EXECUTE_READWRITE"))
+    | project
+        TimeGenerated,
+        DetectionTitle = "Anomalous Memory Protection Change",
+        DeviceName,
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        SourceIP = "",
+        DestinationIP = "",
+        Description = strcat("Process '", InitiatingProcessFileName, "' changed a memory region from non-executable (", OldProtection, ") to executable (", NewProtection, ")."),
+        AdditionalDetails = bag_pack("OldProtection", OldProtection, "NewProtection", NewProtection, "ProcessId", InitiatingProcessId);
+
+// Detection 2: WriteProcessMemory to Executable Region in Self
+// Note: This may require a specific log source like 'ApiCallEvents' or parsing 'DeviceEvents'. We assume parsing 'DeviceEvents' for this combined rule.
+let WriteMemToRX =
+    DeviceEvents
+    | where TimeGenerated > ago(timeframe)
+    | where ActionType == "WriteProcessMemory"
+    | where InitiatingProcessFileName !in (process_allowlist)
+    | extend EventInfo = parse_json(AdditionalFields)
+    | extend TargetProcessId = tostring(EventInfo.TargetProcessId), TargetMemoryProtection = tostring(EventInfo.TargetMemoryProtection)
+    // The technique often involves a process modifying its own memory space.
+    | where TargetProcessId == tostring(InitiatingProcessId)
+    // The key is writing to memory pages with execute permissions.
+    | where TargetMemoryProtection has_any ("PAGE_EXECUTE", "PAGE_EXECUTE_READ", "PAGE_EXECUTE_READWRITE")
+    | project
+        TimeGenerated,
+        DetectionTitle = "WriteProcessMemory to Executable Region",
+        DeviceName,
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        SourceIP = "",
+        DestinationIP = "",
+        Description = strcat("Process '", InitiatingProcessFileName, "' wrote to an executable memory region within itself."),
+        AdditionalDetails = bag_pack("TargetMemoryProtection", TargetMemoryProtection, "ProcessId", InitiatingProcessId);
+
+// Detection 3: Executable Memory Allocation Spike Followed by Network Activity
+let ExecAllocAndNetwork =
+    let LargeExecutableAllocations =
+        DeviceEvents
+        | where TimeGenerated > ago(timeframe)
+        | where ActionType == "VirtualAlloc"
+        | where InitiatingProcessFileName !in (process_allowlist)
+        | extend EventInfo = parse_json(AdditionalFields)
+        | extend MemProtection = tostring(EventInfo.MemProtect), AllocationSize = tolong(EventInfo.AllocationSize)
+        | where MemProtection has_any ("PAGE_EXECUTE", "PAGE_EXECUTE_READ", "PAGE_EXECUTE_READWRITE") and AllocationSize > 1000000 // 1MB threshold
+        | project AllocationTime = TimeGenerated, DeviceId, DeviceName, InitiatingProcessId, InitiatingProcessFileName, InitiatingProcessCommandLine, MemProtection, AllocationSize;
+    LargeExecutableAllocations
+    | join kind=inner (
+        DeviceNetworkEvents
+        | where TimeGenerated > ago(timeframe)
+        | where isnotempty(RemoteIP) and InitiatingProcessFileName !in (process_allowlist)
+        | project NetworkEventTime = TimeGenerated, DeviceId, InitiatingProcessId, RemoteIP, RemotePort, RemoteUrl
+    ) on DeviceId, InitiatingProcessId
+    | where NetworkEventTime between (AllocationTime .. (AllocationTime + lookback))
+    | project
+        TimeGenerated = AllocationTime,
+        DetectionTitle = "Executable Memory Allocation Followed by Network Activity",
+        DeviceName,
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        SourceIP = "",
+        DestinationIP = RemoteIP,
+        Description = strcat("Process '", InitiatingProcessFileName, "' allocated a large executable memory region (", AllocationSize, " bytes) and then connected to ", RemoteIP, "."),
+        AdditionalDetails = bag_pack("AllocationSize", AllocationSize, "MemProtection", MemProtection, "RemotePort", RemotePort, "RemoteUrl", RemoteUrl, "NetworkEventTime", NetworkEventTime);
+
+// Detection 4: Format String Exploit Attempt in Web Logs
+let FormatStringExploit =
+    CommonSecurityLog
+    | where TimeGenerated > ago(timeframe)
+    | where isnotempty(RequestURL) and SourceIP !in (ip_allowlist)
+    | extend FullRequest = strcat(RequestURL, coalesce(AdditionalExtensions, ""))
+    // Count occurrences of common format string specifiers.
+    | extend FormatSpecifierCount = countof(FullRequest, "%x") + countof(FullRequest, "%s") + countof(FullRequest, "%n") + countof(FullRequest, "%p")
+    | where FormatSpecifierCount > 5 // Threshold for multiple specifiers
+    | project
+        TimeGenerated,
+        DetectionTitle = "Format String Exploit Attempt",
+        DeviceName = DeviceProduct,
+        InitiatingProcessFileName = "",
+        InitiatingProcessCommandLine = "",
+        SourceIP,
+        DestinationIP,
+        Description = strcat("Potential format string exploit attempt detected from ", SourceIP, " with ", FormatSpecifierCount, " specifiers."),
+        AdditionalDetails = bag_pack("RequestURL", RequestURL, "FormatSpecifierCount", FormatSpecifierCount);
+
+// --- Union all detection results ---
+union
+    MemProtectChange,
+    WriteMemToRX,
+    ExecAllocAndNetwork,
+    FormatStringExploit

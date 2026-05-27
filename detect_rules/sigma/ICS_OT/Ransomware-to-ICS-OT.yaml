@@ -1,0 +1,78 @@
+title: Ransomware Deployment TTPs in ICS/OT Environments
+status: experimental
+description: >-
+  Detects common TTPs associated with ransomware deployment, such as deleting volume shadow copies, disabling recovery features,
+  and creating ransom notes. These activities are often precursors to or part of a ransomware attack targeting industrial
+  environments, as highlighted by the significant increase in such attacks.
+references:
+  - https://attack.mitre.org/techniques/T1490/
+  - https://attack.mitre.org/techniques/T1486/
+  - https://attack.mitre.org/techniques/T1070/001/
+author: RW
+date: 2025-08-18
+tags:
+  - attack.impact
+  - attack.t1490
+  - attack.t1486
+  - attack.t1070.001
+  - os.windows
+  - ot.ransomware
+logsource:
+  product: windows
+  category:
+    - process_creation
+    - file_creation
+detection:
+  inhibit_recovery:
+    # T1490: Inhibit System Recovery via command-line tools
+    selection_vssadmin:
+      category: process_creation
+      Image|endswith: '\vssadmin.exe'
+      CommandLine|contains: 'delete shadows'
+    selection_wmic:
+      category: process_creation
+      Image|endswith: '\wmic.exe'
+      CommandLine|contains: 'shadowcopy delete'
+    selection_wbadmin:
+      category: process_creation
+      Image|endswith: '\wbadmin.exe'
+      CommandLine|contains: 'delete catalog'
+    selection_bcdedit:
+      category: process_creation
+      Image|endswith: '\bcdedit.exe'
+      CommandLine|contains|all:
+        - '/set'
+        - 'recoveryenabled'
+        - 'No'
+    condition: 1 of them
+  log_clear:
+    # T1070.001: Clearing Windows Event Logs
+    category: process_creation
+    Image|endswith:
+      - '\wevtutil.exe'
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - ' cl ' # wevtutil.exe cl <log>
+      - 'clear-eventlog' # PowerShell
+      - ' cel ' # PowerShell alias for Clear-EventLog
+  ransom_note_creation:
+    # T1486: Data Encrypted for Impact - Creation of ransom notes
+    category: file_creation
+    TargetFilename|contains:
+      - 'DECRYPT'
+      - 'HELP'
+      - 'RECOVER'
+      - 'RESTORE'
+      - 'RANSOM'
+      - 'README'
+    TargetFilename|endswith:
+      - '.txt'
+      - '.html'
+      - '.hta'
+      - '.md'
+  condition: 1 of (inhibit_recovery, log_clear, ransom_note_creation)
+falsepositives:
+  - Legitimate administrative activity, especially from backup or system management software.
+  - This detection is designed for critical OT assets (e.g., HMIs, EWS, SCADA servers) where these actions are highly anomalous. It is recommended to scope the rule to these assets and whitelist known administrative tools or scripts to reduce noise.
+level: high

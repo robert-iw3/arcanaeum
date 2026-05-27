@@ -1,0 +1,38 @@
+rule gcp_suspicious_command_in_cloud_shell {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects the execution of suspicious commands within a GCP Cloud Shell environment. This could indicate that a persistence mechanism, such as a malicious .customize_environment file, is being used to download payloads, establish reverse shells, or exfiltrate data."
+    false_positives = "Legitimate administrative or development scripts that use tools like 'curl', 'wget', or 'nc' for software installation or automation. Investigate the command line and associated network activity to determine intent."
+    tactic = "TA0002"
+    technique = "T1059.004"
+    tags = "GCP, CLOUD, CLOUD_SHELL, PERSISTENCE, EXECUTION"
+
+  events:
+    // Filter for process launch events, which can capture command execution.
+    $proc.metadata.event_type = "PROCESS_LAUNCH"
+
+    // Identify processes running on a GCP Cloud Shell VM via its hostname pattern.
+    // The hostname format is typically 'cs-<size>-devshell-vm-<id>'.
+    re.regex($proc.principal.hostname, `^cs-\d+-devshell-vm-`)
+
+    // Look for common tools used for downloading payloads or creating reverse shells.
+    re.regex($proc.target.process.file.path, `/(curl|wget|nc|ncat)$`)
+
+    // Detect suspicious command-line patterns like piping to a shell or reverse shell syntax.
+    // This helps filter out benign use of these tools.
+    // Potential for FPs: Developers may use 'curl | bash' to install tools.
+    // Tuning: Consider adding exceptions for trusted domains in the command line.
+    re.regex($proc.target.process.command_line, `\s\|\s*/bin/(ba)?sh|(-e|-c)\s+/bin/(ba)?sh`)
+
+  outcome:
+    $risk_score = 50
+    $principal_hostname = array_distinct($proc.principal.hostname)
+    $principal_user = array_distinct($proc.principal.user.userid)
+    $target_process_path = array_distinct($proc.target.process.file.path)
+    $target_process_command_line = array_distinct($proc.target.process.command_line)
+    $parent_process_command_line = array_distinct($proc.principal.process.command_line)
+
+  condition:
+    $proc
+}

@@ -1,0 +1,35 @@
+rule ics_operational_state_change_command {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects the execution of Industrial Control System (ICS) engineering software with command-line arguments that suggest a change to a controller's operational state (e.g., downloading a new project, stopping the controller). This activity represents a significant deviation from normal, automated operations and could indicate an adversary attempting to manipulate a physical process. This aligns with the MOSAICS framework's goal of providing situational awareness for industrial systems, including those in maritime environments."
+    reference = "https://attack.mitre.org/techniques/ics/T0844/, https://attack.mitre.org/techniques/ics/T0854/"
+    false_positives = "Legitimate, interactive use of engineering software by an operator or engineer for maintenance or troubleshooting. These events should be correlated with authorized work orders or change management tickets. The list of processes and command-line flags may need to be tuned to your specific environment."
+    tags = "attack.ics, industry.ics, industry.maritime"
+    tactic = "TA0103, TA0102"
+    technique = "T0844, T0854"
+
+  events:
+    $process.metadata.event_type = "PROCESS_LAUNCH"
+
+    // Detects the launch of common ICS engineering and configuration software.
+    // This list is a sample and should be customized for your specific OT environment.
+    re.regex($process.target.process.file.full_path, `(?i)\\(LogixDesigner|Unity|tia-portal|S7wndax|CCT)\.exe$`)
+
+    // Detects command-line arguments that indicate a project download, upload, or change in the controller's run state.
+    // These flags are often used to manipulate the controller's logic or operation.
+    re.regex($process.target.process.command_line, `(?i)[\/\-](download|upload|force|stop|run|mode|program)`)
+
+  outcome:
+    // High risk score, as unauthorized changes to controller logic can have physical consequences.
+    $risk_score = 80
+    $principal_hostname = array_distinct($process.principal.hostname)
+    $principal_user = array_distinct($process.principal.user.userid)
+    $parent_process_cmd = array_distinct($process.principal.process.command_line)
+    $target_process_path = array_distinct($process.target.process.file.full_path)
+    $target_process_cmd = array_distinct($process.target.process.command_line)
+    $target_process_hash = array_distinct($process.target.process.file.sha256)
+
+  condition:
+    $process
+}

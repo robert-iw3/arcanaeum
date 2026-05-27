@@ -1,0 +1,37 @@
+// Name: AI Model Initiating Network Connection
+// Author: RW
+// Date: 2025-08-14
+// Description: Detects when a Python process, with a command line indicating the loading of a common AI/ML model file, initiates an outbound network connection.
+// This behavior is suspicious as model loading and inference should typically not require arbitrary network connections.
+// This could indicate a malicious model attempting data exfiltration or establishing a command-and-control channel.
+// Tactic: Command and Control, Exfiltration
+// Technique: T1071, T1041, T1566.001
+// False Positive Sensitivity: Medium. Legitimate ML workflows might connect to known services (e.g., cloud storage, model hubs like Hugging Face).
+// These should be reviewed and can be added to an exclusion list.
+
+// Define a list of common AI/ML model file extensions
+let model_extensions = dynamic([".pkl", ".pickle", ".joblib", ".bin", ".pt", ".pth", ".h5", ".keras", ".onnx", ".model", ".sav", ".ckpt", ".safetensors"]);
+
+DeviceNetworkEvents
+// Focus on successful network connections
+| where ActionType == "NetworkConnectionSuccess"
+// The initiating process is a python interpreter
+| where InitiatingProcessFileName in~ ("python.exe", "python3.exe", "pythonw.exe")
+// The initiating process command line indicates a model file is being used
+| and InitiatingProcessCommandLine has_any (model_extensions)
+// Filter out common local and private traffic to focus on external connections
+| where not(ipv4_is_private(RemoteIP)) and RemoteIP != "::1" and not(RemoteIP startswith "127.")
+// FP Tuning: Legitimate ML workflows might connect to known services.
+// Consider excluding known-good domains or IPs if this rule is noisy.
+// For example: | where RemoteUrl !has "huggingface.co" and RemoteUrl !has "amazonaws.com"
+| project
+    Timestamp,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RemoteIP,
+    RemotePort,
+    RemoteUrl,
+    InitiatingProcessId,
+    ReportId,
+    DeviceId

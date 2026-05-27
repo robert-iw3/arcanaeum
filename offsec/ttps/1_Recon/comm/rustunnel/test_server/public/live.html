@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Live Stats — rustunnel Demo</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <nav>
+    <a href="/">Home</a>
+    <a href="/about">About</a>
+    <a href="/live" class="active">Live Stats</a>
+    <a href="/api-demo">API</a>
+  </nav>
+
+  <main>
+    <div class="card" style="margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+        <span class="dot"></span>
+        <h2 style="margin:0">Live request monitor</h2>
+        <span id="refresh-badge" class="badge" style="margin:0;margin-left:auto">refreshing…</span>
+      </div>
+      <p style="color:var(--muted);font-size:13px;margin-top:4px">
+        Auto-refreshes every 2 seconds. Each page load increments the counter.
+      </p>
+    </div>
+
+    <div class="grid" style="margin-bottom:20px">
+      <div class="stat">
+        <div class="label">Total requests</div>
+        <div class="value" id="total">—</div>
+      </div>
+      <div class="stat">
+        <div class="label">Server uptime</div>
+        <div class="value green" id="uptime">—</div>
+      </div>
+      <div class="stat">
+        <div class="label">Node version</div>
+        <div class="value" id="node" style="font-size:16px;padding-top:6px">—</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Recent requests <span style="color:var(--muted);font-weight:400;font-size:13px">(last 10)</span></h2>
+      <div id="table-wrap" style="margin-top:14px;overflow-x:auto">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Method</th>
+              <th>Path</th>
+              <th>Time</th>
+              <th>IP</th>
+            </tr>
+          </thead>
+          <tbody id="req-table">
+            <tr><td colspan="5" style="color:var(--muted);text-align:center;padding:20px">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    rustunnel demo server &mdash; <a href="/api/requests">raw JSON</a>
+  </footer>
+
+  <script>
+    let intervalId;
+
+    function fmtUptime(s) {
+      if (s < 60) return s + "s";
+      if (s < 3600) return Math.floor(s / 60) + "m " + (s % 60) + "s";
+      return Math.floor(s / 3600) + "h " + Math.floor((s % 3600) / 60) + "m";
+    }
+
+    function fmtTime(iso) {
+      return new Date(iso).toLocaleTimeString();
+    }
+
+    function methodClass(m) {
+      return `method ${m}`;
+    }
+
+    async function refresh() {
+      try {
+        const [statusRes, reqRes] = await Promise.all([
+          fetch("/api/status"),
+          fetch("/api/requests"),
+        ]);
+        const status = await statusRes.json();
+        const reqs   = await reqRes.json();
+
+        document.getElementById("total").textContent = reqs.total;
+        document.getElementById("uptime").textContent = fmtUptime(status.uptime_seconds);
+        document.getElementById("node").textContent = status.node_version;
+
+        const badge = document.getElementById("refresh-badge");
+        badge.textContent = "updated " + fmtTime(status.timestamp);
+
+        const tbody = document.getElementById("req-table");
+        if (reqs.recent.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:20px">No requests yet.</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = reqs.recent.map(r => `
+          <tr>
+            <td style="color:var(--muted)">${r.id}</td>
+            <td><span class="${methodClass(r.method)}">${r.method}</span></td>
+            <td style="color:var(--text)">${r.path}</td>
+            <td style="color:var(--muted)">${fmtTime(r.time)}</td>
+            <td style="color:var(--muted)">${r.ip}</td>
+          </tr>
+        `).join("");
+      } catch (e) {
+        document.getElementById("refresh-badge").textContent = "error";
+      }
+    }
+
+    refresh();
+    intervalId = setInterval(refresh, 2000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,34 @@
+// Name: Indirect Registry Modification by LOLBin
+// Author: RW
+// Date: 2025-08-08
+// Description: Detects when a LOLBin known for registry modification is spawned by an indirect or non-standard parent process
+//              (e.g., WmiPrvSE.exe, svchost.exe) to write to the registry. This pattern is often used for persistence or staged payload delivery.
+// MITRE ATT&CK: T1112 (Modify Registry)
+
+let lookback = 1d;
+// LOLBins capable of direct registry modification.
+let registry_lolbins = dynamic(["powershell.exe", "pwsh.exe", "powershell_ise.exe", "reg.exe", "wscript.exe", "cscript.exe", "mshta.exe", "rundll32.exe"]);
+// Parent processes associated with indirect execution (WMI, Services, Scheduled Tasks, COM).
+let indirect_parents = dynamic(["WmiPrvSE.exe", "svchost.exe", "schtasks.exe", "taskhostw.exe", "services.exe", "dllhost.exe"]);
+
+DeviceRegistryEvents
+| where Timestamp > ago(lookback)
+| where ActionType == "RegistryValueSet"
+// Filter for LOLBins spawned by indirect parent processes.
+| where InitiatingProcessParentFileName in~ (indirect_parents)
+| where InitiatingProcessFileName in~ (registry_lolbins)
+// Focus on user-writable keys, a common target for malware staging.
+| where RegistryKey has "HKEY_CURRENT_USER"
+| where isnotempty(RegistryValueData)
+// Potential for False Positives: Legitimate administrative scripts, software installers, or system components may use these execution chains.
+// Consider adding exclusions for known benign command lines or specific parent/child process combinations.
+// Example: | where not (InitiatingProcessParentFileName == 'svchost.exe' and InitiatingProcessCommandLine contains 'SomeBenignTask')
+| project
+    Timestamp,
+    DeviceName,
+    InitiatingProcessParentFileName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RegistryKey,
+    RegistryValueName,
+    RegistryValueData

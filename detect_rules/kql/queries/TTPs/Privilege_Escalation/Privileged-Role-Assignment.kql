@@ -1,0 +1,63 @@
+// Name: Privileged Role Assigned Outside of PIM
+// Author: RW
+// Date: 2025-08-09
+// Description: This rule detects the direct assignment of a highly privileged administrative role to a user or service principal.
+//              Attackers escalate privileges by assigning these roles to compromised accounts or new service principals.
+//              Such assignments should ideally be managed through Privileged Identity Management (PIM) for just-in-time access.
+//              Direct, persistent assignment can indicate a privilege escalation attempt or a security misconfiguration.
+// False Positives: Legitimate, permanent role assignments made by administrators.
+// These should be reviewed and, if expected, the initiator can be added to the allowlist.
+
+// Define highly privileged role template IDs. This list can be tuned.
+// Find Role Template IDs in Entra ID -> Roles and administrators -> Select Role -> Properties -> Template ID
+let privilegedRoleTemplateIds = dynamic([
+    "62e90394-69f5-4237-9190-012177145e10", // Global Administrator
+    "194ae4cb-b126-40b2-bd5b-606bceb20793", // Application Administrator
+    "e8611ab8-c189-46e8-94e1-60213ab1a814", // Cloud Application Administrator
+    "f28a1f50-f6e7-4571-818b-6a12f2af6b6c", // Privileged Role Administrator
+    "29232cdf-9323-42fd-ade2-1d097af3e4de", // Exchange Administrator
+    "d29bf1b0-4a24-46c5-957f-931a1a0c81c7"  // Security Administrator
+]);
+
+// Allowlist for legitimate administrative accounts or service principals that perform role assignments.
+// By default, it excludes assignments made via Privileged Identity Management (PIM).
+let initiatorAllowList = dynamic([
+    "MS-PIM"
+]);
+
+AuditLogs
+| where Category == "RoleManagement" and OperationName == "Add member to role" and Result == "Success"
+// Filter out assignments made via PIM, which are generally expected.
+| where tostring(InitiatedBy.user.userPrincipalName) !in (initiatorAllowList) and tostring(InitiatedBy.app.displayName) !in (initiatorAllowList)
+// Expand the TargetResources to get role information
+| mv-expand TargetResources
+| where TargetResources.type == "Role"
+| extend RoleName = tostring(TargetResources.displayName)
+| extend RoleId = tostring(TargetResources.id)
+// Filter for the assignment of a privileged role
+| where RoleId in (privilegedRoleTemplateIds)
+// Expand modifiedProperties to find the member that was added
+| mv-expand ModifiedProperties = TargetResources.modifiedProperties
+| where ModifiedProperties.displayName == "Members"
+| extend AddedMembers = todynamic(ModifiedProperties.newValue)
+| mv-expand Member = AddedMembers
+| extend MemberId = tostring(Member.id)
+| extend MemberDisplayName = tostring(Member.displayName)
+| extend MemberType = tostring(Member.type)
+| extend InitiatorUpn = tostring(InitiatedBy.user.userPrincipalName)
+| extend InitiatorApp = tostring(InitiatedBy.app.displayName)
+| extend InitiatorIp = tostring(InitiatedBy.user.ipAddress)
+| project
+    TimeGenerated,
+    RoleName,
+    RoleId,
+    MemberDisplayName,
+    MemberId,
+    MemberType,
+    InitiatorUpn,
+    InitiatorApp,
+    InitiatorIp
+| extend
+    timestamp = TimeGenerated,
+    AccountCustomEntity = MemberDisplayName,
+    IpCustomEntity = InitiatorIp

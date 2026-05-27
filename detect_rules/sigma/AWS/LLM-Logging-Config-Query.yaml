@@ -1,0 +1,29 @@
+title: AWS Bedrock Logging Configuration Queried
+id: 474c9e2c-9bea-4f03-bcd3-bbd8780d0d74
+status: experimental
+description: >-
+  Detects attempts to query the logging configuration for Amazon Bedrock models. Attackers may use the 'GetModelInvocationLoggingConfiguration' API call to determine if their actions will be logged, allowing them to assess the risk of detection before proceeding with malicious activities like LLMjacking.
+references:
+  - https://www.sysdig.com/blog/llmjacking-stolen-cloud-credentials-used-in-new-ai-attack
+author: RW
+date: 2025-08-19
+tags:
+  - attack.discovery
+  - attack.t1526
+  - cloud
+  - aws
+  - aws.bedrock
+  - ai.llm
+logsource:
+  service: cloudtrail
+detection:
+  selection:
+    # Corresponds to the AWS Bedrock service
+    eventSource: 'bedrock.amazonaws.com'
+    # API call used to check logging configuration
+    eventName: 'GetModelInvocationLoggingConfiguration'
+  condition: selection
+falsepositives:
+  - Legitimate administrators or automated configuration management tools may query logging configurations as part of their normal operations.
+  - This detection may require tuning by filtering for known administrative user agents, IP ranges, or roles. This event is best correlated with other suspicious activities.
+level: low

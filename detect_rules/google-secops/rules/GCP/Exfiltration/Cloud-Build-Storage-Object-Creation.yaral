@@ -1,0 +1,47 @@
+rule gcp_cloud_build_creates_storage_object {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects when a Google Cloud Build service account creates an object in a Cloud Storage bucket. This is a key step in the compute image export process, which can be abused by attackers for data exfiltration. The rule filters out common noisy objects related to logging to reduce false positives."
+    false_positives = "Legitimate CI/CD pipelines that create artifacts (e.g., build outputs, container images) in Cloud Storage buckets as part of their normal operation."
+    tags = "GCP, EXFILTRATION, CLOUD_BUILD, STORAGE"
+    tactic = "TA0010"
+    technique = "T1537"
+
+  events:
+    // Filter for GCP audit logs for storage object creation.
+    $event.metadata.event_type = "GCP_CLOUDAUDIT_LOG"
+    $event.metadata.method_name = "storage.objects.create"
+
+    // Check if the action was performed by a Cloud Build service account, either directly or via delegation.
+    (
+      re.regex($event.principal.user.userid, `\@cloudbuild\.gserviceaccount\.com$`) or
+      re.regex($event.principal.user.delegated_by.userid, `^cloud-build-argo-foreman\@prod\.google\.com$`)
+    )
+
+    // Filter out common noisy objects created by Cloud Build, such as logs or temporary files.
+    // The term 'daisy' is associated with the Compute Image import/export tool used by Cloud Build.
+    not re.regex($event.resource.name, `log|daisy`, `nocase`)
+
+    // Capture the bucket name from the resource name.
+    $bucket_name = re.capture($event.resource.name, `projects/_/buckets/([^/]+)/`)
+
+  outcome:
+    // A moderate risk score, as this can be legitimate activity in CI/CD environments.
+    $risk_score = 40
+    // Actor and resource information.
+    $principal_user_userid = array_distinct($event.principal.user.userid)
+    $delegated_by_userid = array_distinct($event.principal.user.delegated_by.userid)
+    $project_id = array_distinct($event.resource.project.name)
+    $bucket_name = array_distinct($bucket_name)
+    $object_created = array_distinct($event.resource.name)
+
+  condition:
+    // The condition is met if the event is found.
+    $event
+    // To further reduce false positives, consider excluding known CI/CD project IDs or specific buckets
+    // where build artifacts are expected to be stored.
+    // For example:
+    // and not $project_id in %gcp_ci_cd_projects
+    // and not $bucket_name in %gcp_build_artifact_buckets
+}

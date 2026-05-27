@@ -1,0 +1,85 @@
+{
+  "data": {
+    "type": "signal_correlation",
+    "attributes": {
+      "name": "Comprehensive Ivanti Exploitation TTPs",
+      "enabled": true,
+      "cases": [
+        {
+          "name": "DLL Side-Loading",
+          "status": "high",
+          "query": "source:sysmon @winlog.event_id:7 (@process.image:*\\rmic.exe @process.image_loaded:*\\jli.dll OR @process.image:*\\push_detect.exe @process.image_loaded:*\\Microsoft.WindowsAppRuntime.Bootstrap.dll OR @process.image:*\\python.exe @process.image_loaded:*\\python311.dll) -@process.image.path:(*\\Program\\ Files\\* OR *\\Windows\\System32\\* OR *\\Program\\ Files\\ \\(x86\\)\\* OR *\\Windows\\SysWOW64\\*)"
+        },
+        {
+          "name": "Cobalt Strike & Fscan Artifacts",
+          "status": "high",
+          "query": "source:sysmon @winlog.event_id:11 (@file.sha256:(09087fc4f8c261a810479bb574b0ecbf8173d4a8365a73113025bd506b95e3d7 OR 1652ab693512cd4f26cc73e253b5b9b0e342ac70aa767524264fef08706d0e69 OR cff2afc651a9cba84a11a4e275cc9ec49e29af5fd968352d40aeee07fb00445e) OR (@file.target_filename:(*\\update.dat OR *\\config.ini) @process.image:(*\\rmic.exe OR *\\push_detect.exe)))"
+        },
+        {
+          "name": "Vshell C2 Communication",
+          "status": "high",
+          "query": "source:sysmon @winlog.event_id:3 @network.destination.hostname:proxy.objectlook.com @network.destination.port:80"
+        },
+        {
+          "name": "Account Manipulation via CLI",
+          "status": "medium",
+          "query": "source:sysmon @winlog.event_id:1 @process.image:(*\\net.exe OR *\\net1.exe) @process.command_line:(*\\ user\\ /add\\ * OR *\\ group\\ /add\\ * OR *\\ localgroup\\ /add\\ *) @process.command_line:(*\\ /domain\\ * OR *\\ Administrators\\ * OR *\\ Domain\\ Admins\\ * OR *\\ Enterprise\\ Admins\\ * OR *\\ Remote\\ Desktop\\ Users\\ *)"
+        },
+        {
+          "name": "Suspicious Service Creation",
+          "status": "high",
+          "query": "source:sysmon @winlog.event_id:13 @registry.target_object:*\\System\\CurrentControlSet\\Services\\*\\ImagePath @registry.details:(*C:\\Users\\* OR *C:\\ProgramData\\* OR *C:\\Temp\\* OR *C:\\Windows\\Temp\\* OR *\\AppData\\*)"
+        },
+        {
+          "name": "Suspicious Scheduled Task",
+          "status": "high",
+          "query": "source:sysmon @winlog.event_id:1 @process.image:*\\schtasks.exe @process.command_line:(*/create* OR */change*) @process.command_line:(*C:\\Users\\* OR *C:\\ProgramData\\* OR *C:\\Temp\\* OR *C:\\Windows\\Temp\\* OR *\\AppData\\*)"
+        },
+        {
+          "name": "ETW Bypass via ntdll.dll Patching",
+          "status": "high",
+          "query": "source:mde @action_type:VirtualProtectApiCall @file.name:ntdll.dll (@memory.new_protection:ExecuteReadWrite OR @memory.new_protection:0x40)"
+        },
+        {
+          "name": "Brute-Force Followed by Successful Logon",
+          "status": "high",
+          "query": "source:wineventlog @winlog.event_id:(4624 OR 4625) @logon.type:(3 OR 10)"
+        }
+      ],
+      "group_by_fields": ["@host", "@user.name"],
+      "distinct_fields": ["case_id"],
+      "correlation": {
+        "expression": "distinct_count >= 2",
+        "timeframe": "1h"
+      },
+      "message": "Comprehensive Ivanti Exploitation TTPs: {distinct_count} distinct techniques on host {@host} by user {@user.name}. Techniques: {case_names}. Details: {@process.image OR @file.target_filename OR @network.destination.hostname OR @process.command_line OR @registry.details OR @file.name}. Timeframe: {first_activity} to {last_activity}",
+      "severity": "high",
+      "tags": [
+        "security:attack",
+        "tactic:TA0003",
+        "tactic:TA0004",
+        "tactic:TA0005",
+        "tactic:TA0006",
+        "tactic:TA0007",
+        "tactic:TA0011",
+        "tactic:TA0008",
+        "technique:T1574.001",
+        "technique:T1027",
+        "technique:T1071.001",
+        "technique:T1046",
+        "technique:T1018",
+        "technique:T1136.002",
+        "technique:T1098",
+        "technique:T1543.003",
+        "technique:T1053.005",
+        "technique:T1562.001",
+        "technique:T1110.001",
+        "technique:T1021.001",
+        "technique:T1021.002"
+      ],
+      "options": {
+        "evaluation_window": "1h"
+      }
+    }
+  }
+}

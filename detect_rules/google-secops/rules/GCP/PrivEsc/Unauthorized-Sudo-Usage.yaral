@@ -1,0 +1,64 @@
+rule gcp_unauthorized_sudo_usage_after_suspicious_activity {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects a user executing 'sudo' shortly after performing a suspicious activity associated with known GCP privilege escalation techniques (e.g., LXD/Docker abuse, /etc/hosts modification for metadata hijacking). This pattern strongly indicates a successful privilege escalation attack."
+    false_positives = "An administrator performing a legitimate but unusual sequence of commands. If certain users or service accounts are expected to perform these actions, they should be excluded from the rule."
+    tags = "GCP, LINUX, PRIVILEGE_ESCALATION, SUDO, T1548.003"
+    tactic = "TA0004"
+    technique = "T1548.003"
+
+  events:
+    // Event 1: A suspicious activity indicative of a privilege escalation attempt.
+    $suspicious_activity.metadata.event_type = "PROCESS_LAUNCH"
+    $suspicious_activity.principal.hostname = $hostname
+    $suspicious_activity.principal.user.userid = $user
+    $suspicious_activity.principal.user.userid != "0" // Exclude root user
+
+    // The suspicious activity is one of the following known escalation vectors.
+    (
+      // Vector 1: LXD abuse by a user in the 'lxd' group.
+      (
+        any $suspicious_activity.principal.user.group.name = "lxd" and
+        re.regex($suspicious_activity.target.process.command_line, `\b(lxd\s+init|lxc\s+launch)\b`)
+      )
+      or
+      // Vector 2: Docker abuse by a user in the 'docker' group mounting the root filesystem.
+      (
+        any $suspicious_activity.principal.user.group.name = "docker" and
+        re.regex($suspicious_activity.target.process.command_line, `\srun\s+.*(-v|--volume)\s+"?/\s*:.+`)
+      )
+      or
+      // Vector 3: /etc/hosts modification to hijack metadata server communication.
+      (
+        re.regex($suspicious_activity.target.process.command_line, `\/etc\/hosts`) and
+        re.regex($suspicious_activity.target.process.command_line, `metadata\.google\.internal`) and
+        re.capture($suspicious_activity.target.process.command_line, `(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+.*metadata\.google\.internal`) != "169.254.169.254"
+      )
+    )
+
+    // Event 2: The same user executes 'sudo'.
+    $sudo.metadata.event_type = "PROCESS_LAUNCH"
+    $sudo.principal.hostname = $hostname
+    $sudo.principal.user.userid = $user
+    re.regex($sudo.target.process.file.path, `.*/sudo$`)
+
+  match:
+    // Correlate by hostname and user over a 30 minute window.
+    $hostname, $user over 30m
+    // Ensure the suspicious activity happens before the sudo command.
+    $suspicious_activity before $sudo
+
+  outcome:
+    // High risk score as this is a strong indicator of successful privilege escalation.
+    $risk_score = 85
+    $principal_hostname = $hostname
+    $principal_user_id = $user
+    $principal_user_display_name = array_distinct($sudo.principal.user.user_display_name)
+    $suspicious_command_lines = array_distinct($suspicious_activity.target.process.command_line)
+    $sudo_command_lines = array_distinct($sudo.target.process.command_line)
+    $event_count = count_distinct($suspicious_activity.metadata.id) + count_distinct($sudo.metadata.id)
+
+  condition:
+    $suspicious_activity and $sudo
+}

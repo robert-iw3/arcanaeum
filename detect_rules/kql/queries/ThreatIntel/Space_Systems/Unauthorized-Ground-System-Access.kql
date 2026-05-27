@@ -1,0 +1,46 @@
+// Name: Successful Logon to Ground System from Unexpected Location
+// Author: RW
+// Date: 2025-08-18
+// Description: Detects successful user logons to critical satellite ground system applications from geographic locations not on an established allowlist.
+// This could indicate a compromised account or an unauthorized remote access attempt, which is a common initial access vector for compromising space assets.
+// False Positives: Legitimate user travel, use of new VPN endpoints, or misconfigured location data can cause false positives.
+// The 'known_locations' allowlist must be carefully maintained and tuned for your organization's operational footprint.
+// Tags: Initial Access, T1078, Valid Accounts, Space, Ground System
+
+// Define the list of critical ground system applications by their display name.
+// This list is a placeholder and MUST be customized for your environment.
+let ground_system_apps = dynamic([
+    "Satellite Command and Control Portal",
+    "Mission Planning System",
+    "Ground Station VPN",
+    "Telemetry Analysis Platform"
+]);
+
+// Define the allowlist of countries where operators are expected to log in from.
+// This list is critical for reducing false positives and must be customized.
+let known_locations = dynamic([
+    "United States",
+    "France",
+    "Germany",
+    "United Kingdom"
+]);
+
+SigninLogs
+| where TimeGenerated > ago(1d)
+// Filter for successful interactive user sign-ins.
+| where ResultType == 0
+| where UserType == "Member" // Focus on internal users, can be adjusted to "Guest" if needed.
+// Filter for logons to the defined critical ground system applications.
+| where AppDisplayName in~ (ground_system_apps)
+// The core detection logic: identify logons from countries NOT in the allowlist.
+| where Location !in (known_locations)
+| project
+    TimeGenerated,
+    UserPrincipalName,
+    AppDisplayName,
+    IPAddress,
+    Location,
+    City,
+    DeviceDetail,
+    AuthenticationRequirement,
+    ConditionalAccessStatus

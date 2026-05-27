@@ -1,0 +1,58 @@
+// Name: Suspicious OAuth Endpoint Configuration for Cross-Agent COAT
+// Author: RW
+// Date: 2025-08-14
+// Description: Detects when an OAuth-enabled application or agent is configured with authorization or token endpoints pointing to a potentially malicious or non-standard domain. This is a preparatory step for a Cross-agent COAT (Cross-app/tool OAuth Account Takeover) attack, where an attacker sets up a malicious agent to intercept OAuth authorization codes.
+// False Positive Sensitivity: Medium. New legitimate integrations or custom-developed agents using new domains will trigger this alert. A robust allowlist of trusted domains is crucial for tuning.
+// Triage Steps:
+// 1. Examine the 'User', 'Application', and the 'SuspiciousUrl'.
+// 2. Determine if the domain of the URL is a legitimate Identity Provider (IdP) or a trusted partner integration for your organization.
+// 3. Investigate the user's activity. Is this user expected to be configuring OAuth applications?
+// 4. If the domain is legitimate, add it to the 'TrustedOAuthDomains' allowlist to prevent future alerts.
+// 5. If the domain is malicious, it indicates an attempt to set up a rogue agent. Investigate the application for other suspicious configurations, review all recent activity by the user, and consider disabling the application.
+
+let lookback = 7d;
+
+// This allowlist is critical for reducing FPs. Populate it with your known IdPs and trusted application domains.
+let TrustedOAuthDomains = dynamic([
+    // Common Identity Providers
+    "login.microsoftonline.com",
+    "login.windows.net",
+    "login.microsoft.com",
+    "sts.windows.net",
+    "accounts.google.com",
+    "okta.com",
+    "pingidentity.com",
+    "auth0.com",
+    // Common Application domains
+    "github.com",
+    "slack.com",
+    "salesforce.com",
+    // Add other trusted domains specific to your environment
+    "auth.my-saas.com"
+]);
+
+// This query assumes a generic audit log format. You MUST adapt the table name, ActionType, and field parsing to your specific log source (e.g., GitHub audit, Azure audit, custom application logs).
+CloudAppEvents
+| where TimeGenerated > ago(lookback)
+// Look for events related to creating or updating an application's configuration.
+| where ActionType has "update" and (Application has "app" or Application has "oauth")
+// Parse the event data to extract OAuth URLs. This is a placeholder and highly dependent on your log schema.
+| extend AuthUrl = tostring(parse_json(RawEventData).authorization_url)
+| extend TokenUrl = tostring(parse_json(RawEventData).token_url)
+// Combine the URLs into a single list for easier processing.
+| extend Urls = pack_array(AuthUrl, TokenUrl)
+| mvexpand Urls
+| extend SuspiciousUrl = tostring(Urls)
+| where isnotempty(SuspiciousUrl)
+// Extract the domain from the URL.
+| extend Domain = tostring(parse_url(SuspiciousUrl).Host)
+// The core logic: check if the configured domain is NOT in the trusted list.
+| where isnotempty(Domain) and not(Domain has_any (TrustedOAuthDomains))
+| project
+    DetectionTime = TimeGenerated,
+    User = AccountDisplayName,
+    IPAddress,
+    Application,
+    ActionType,
+    SuspiciousUrl,
+    Domain

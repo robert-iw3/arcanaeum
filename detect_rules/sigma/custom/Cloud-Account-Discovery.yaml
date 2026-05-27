@@ -1,0 +1,43 @@
+title: Cloud Account Discovery
+id: cdd759ac-50ea-4d29-8795-a0a30341a8c5
+status: experimental
+description: Detects reconnaissance activities such as listing users or downloading user/role information in cloud environments. This behavior, highlighted in threat intelligence, is often a precursor to privilege escalation or lateral movement.
+references:
+  - Threat Intel ID: 6e487ba759c8e80223efef2a739cd68b6586a6454f568bafdb580d896b47660a
+author: RW
+date: 2025-08-19
+tags:
+  - attack.discovery
+  - attack.t1087
+  - attack.t1087.004
+logsource:
+  category: cloud
+detection:
+  # AWS: Listing IAM users
+  aws_discovery:
+    product: aws
+    service: cloudtrail
+    aws.eventName: 'ListUsers'
+  # Azure: Bulk download of users or role assignments
+  azure_discovery:
+    product: azure
+    service: auditlogs
+    result: 'success'
+    activityDisplayName:
+      - 'Download users' # Corresponds to "Download users - finished (bulk)"
+      - 'Download role assignments' # Corresponds to "Download role assignments - finished (bulk)"
+  # GCP: Listing service accounts or IAM policies
+  gcp_discovery:
+    product: gcp
+    service: gcp.audit
+    gcp.method_name:
+      - 'google.iam.admin.v1.IAM.ListServiceAccounts'
+      - 'google.cloud.resourcemanager.v3.Projects.GetIamPolicy'
+      - 'google.cloud.resourcemanager.v3.Folders.GetIamPolicy'
+      - 'google.cloud.resourcemanager.v3.Organizations.GetIamPolicy'
+  condition: 1 of them
+falsepositives:
+  - Legitimate administrative scripts or tools used for auditing user accounts and permissions.
+  - Automated compliance checks or infrastructure-as-code (IaC) tools.
+  - It is recommended to baseline normal administrative activity and filter out known service principals or administrative accounts that perform these actions regularly.
+level: medium

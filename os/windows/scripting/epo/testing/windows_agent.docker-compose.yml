@@ -1,0 +1,22 @@
+# docker-compose.windows.yml - For Testing Trellix in Windows Containers
+# Mount logs to host for persistence and same paths.
+# Run on a Windows host with Docker Desktop configured for Windows containers and Hyper-V enabled.
+
+version: '3.8'
+
+services:
+  trellix-windows:
+    image: trellix-windows  # Build from Windows Dockerfile
+    isolation: hyperv  # For better kernel access; requires Windows host with Hyper-V
+    volumes:
+      - ./ProgramData_McAfee:C:\ProgramData\McAfee  # Logs (host ./ProgramData_McAfee maps to container path)
+      - ./ProgramFiles_McAfee:C:\Program Files\McAfee  # Install path
+    environment:
+      - SourcePath=\\server\share\FramePkg.exe  # Adjust to your actual source
+      - ePOServer=epo.server.com
+      - ePOPort=443
+
+# To build the image first: docker build -t trellix-windows -f Dockerfile.windows .
+# To run: docker-compose -f docker-compose.windows.yml up -d
+# Stop container to test if issues resolve (troubleshooting benefit).
+# Note: Switch Docker to Windows containers mode if needed.

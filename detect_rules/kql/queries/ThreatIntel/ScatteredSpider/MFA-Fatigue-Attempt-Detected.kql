@@ -1,0 +1,36 @@
+// title: MFA Fatigue Attempt Detected
+// description: Detects a high number of failed, denied, or timed-out multi-factor authentication (MFA) attempts for a single user in a short period. This pattern is indicative of an MFA Fatigue or "Push Bombing" attack (T1621), where an attacker who has obtained a user's credentials repeatedly triggers MFA prompts, hoping the user will eventually approve one by mistake. This technique is a known TTP of threat groups like Scattered Spider to gain initial access.
+// author: RW
+// date: 2025-07-31
+// references:
+//   - https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-320a
+// tags:
+//   - attack.t1621
+//   - attack.credential_access
+//   - group.scattered_spider
+
+// -- KQL query for Azure AD / Entra ID SigninLogs --
+
+// --_comment: Define the timeframe and failure threshold. These values are starting points and should be tuned based on your environment's baseline to balance detection with potential false positives from legitimate user issues.
+let timeframe = 10m;
+let failure_threshold = 5;
+SigninLogs
+| where TimeGenerated > ago(timeframe)
+// --_comment: Filter for MFA challenges that were explicitly denied by the user or timed out. This is more specific than general failures.
+// ResultType 50076: User did not approve the MFA prompt (denied).
+// ResultDescription contains "pending user action": The MFA prompt timed out.
+| where AuthenticationRequirement == "multiFactorAuthentication"
+    and (ResultType == 50076 or ResultDescription has "pending user action")
+// --_comment: Aggregate failed MFA attempts by user over the defined timeframe.
+| summarize StartTime = min(TimeGenerated), EndTime = max(TimeGenerated), FailureCount = count(), IPAddresses = make_set(IPAddress), Applications = make_set(AppDisplayName), UserAgents = make_set(UserAgent) by UserPrincipalName, UserId
+// --_comment: Alert when the number of failures for a single user exceeds the defined threshold.
+| where FailureCount > failure_threshold
+| project-reorder
+    StartTime,
+    EndTime,
+    UserPrincipalName,
+    FailureCount,
+    IPAddresses,
+    Applications,
+    UserAgents,
+    UserId

@@ -1,0 +1,17 @@
+[
+  {
+    "name": "Kubernetes and Container Threat Detection",
+    "search": "index=* sourcetype=* earliest=-1d (VulnerabilitySeverity=\"High\" OR VulnerabilitySeverity=\"Critical\") | sort 0 - _time | dedup VulnerabilityId, ContainerImage | eval Tactic = \"Initial Access\", Technique = \"Exploit Public-Facing Application\", DetectionSource = \"Vulnerability Scan\", Entity = ContainerImage, Description = \"High/Critical severity vulnerability '\".VulnerabilityId.\"' detected in image '\".ContainerImage.\"'.\" | fields _time, Tactic, Technique, DetectionSource, Entity, Description | append [ search index=* sourcetype=kube:audit earliest=-1d \"requestObject.spec.containers{}.securityContext.privileged\"=true | where NOT 'user.username' IN (\"system:masters\", \"cluster-admin\", \"azure-operator\") | eval Tactic = \"Privilege Escalation\", Technique = \"Escape to Host\", DetectionSource = \"Kubernetes Audit\", Entity = 'user.username', Description = \"Privileged container '\".mvindex('requestObject.spec.containers{}.name',0).\"' created by user '\".'user.username'.\"' in namespace '\".'objectRef.namespace'.\".\" | fields _time, Tactic, Technique, DetectionSource, Entity, Description ] | append [ search index=* earliest=-1d (ParentImage=\"*runc*\" OR ParentImage=\"*containerd-shim*\") process_name IN (\"nsenter\", \"insmod\", \"modprobe\", \"chroot\") | eval Tactic = \"Privilege Escalation\", Technique = \"Escape to Host\", DetectionSource = \"EDR\", Entity = dest, Description = \"Suspicious process '\".process_name.\"' with command line '\".cmdline.\"' executed from a container context on host '\".dest.\"'.\" | fields _time, Tactic, Technique, DetectionSource, Entity, Description ] | append [ search index=* sourcetype=kube:audit earliest=-1d verb=\"create\" objectRef.resource=\"clusterrolebindings\" ('requestObject.roleRef.name'=\"cluster-admin\" OR 'requestObject.roleRef.name'=\"admin\") | where NOT 'user.username' IN (\"system:masters\", \"cluster-admin\", \"azure-operator\") | eval Tactic = \"Privilege Escalation\", Technique = \"Valid Accounts\", DetectionSource = \"Kubernetes Audit\", Entity = 'user.username', Description = \"User '\".'user.username'.\"' created a cluster role binding to a privileged role '\".'requestObject.roleRef.name'.\".\" | fields _time, Tactic, Technique, DetectionSource, Entity, Description ] | append [ search index=* earliest=-1d Image=* | rex field=Image \"(?<Registry>[^/]+)/.*\" | where isnotnull(Registry) AND NOT Registry IN (\"mcr.microsoft.com\", \"docker.io\", \"k8s.gcr.io\", \"quay.io\", \"gcr.io\") | stats count by _time, Image, Computer | bin _time span=1h | eval Tactic = \"Initial Access\", Technique = \"Supply Chain Compromise\", DetectionSource = \"Container Inventory\", Entity = Image, Description = \"Container started from untrusted registry: '\".Image.\"' on host '\".Computer.\"'.\" | fields _time, Tactic, Technique, DetectionSource, Entity, Description ]",
+    "description": "Correlates vulnerability scan data, Kubernetes audit logs, and EDR data to detect various container and Kubernetes threats, including insecure configurations, runtime attacks, privilege escalation, and supply chain compromises.",
+    "is_scheduled": 1,
+    "disabled": 0,
+    "cron_schedule": "*/30 * * * *",
+    "dispatch.earliest_time": "-24h",
+    "dispatch.latest_time": "now",
+    "sharing": "global",
+    "acl": {
+      "read": ["power", "admin"],
+      "write": ["admin"]
+    }
+  }
+]

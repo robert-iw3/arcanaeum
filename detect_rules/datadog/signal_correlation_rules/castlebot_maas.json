@@ -1,0 +1,75 @@
+{
+  "name": "CastleBot MaaS Activity",
+  "type": "signal_correlation",
+  "message": "CastleBot Activity: {{distinct_count}} indicator(s) on host {{host}} by user {{usr}}: {{case_names}}",
+  "is_enabled": true,
+  "options": {
+    "detection_method": "signal_correlation",
+    "correlation_rule": {
+      "correlated_by_fields": [
+        "host",
+        "usr"
+      ],
+      "distinct_fields": [
+        "case_id"
+      ],
+      "correlation_expression": "distinct_count >= 1",
+      "correlation_time_frame": 3600
+    },
+    "evaluation_window": 3600,
+    "keep_alive": 3600,
+    "max_signal_duration": 3600
+  },
+  "queries": [
+    {
+      "name": "known_file_hashes",
+      "query": "@file.hash:(202f6b6631ade2c41e4762b5877ce0063a3beabce0c3f8564b6499a1164c1e04)",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "known_c2_ips_domains",
+      "query": "@network.destination.ip:(173.44.141.89 OR 80.77.23.48 OR 62.60.226.73 OR 107.158.128.45 OR 170.130.165.112 OR 107.158.128.105) OR @url:(*mhousecreative.com* OR *google.herionhelpline.com* OR */service/* OR */c91252f9ab114f26.php)",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "suspicious_user_agent_to_c2_ips",
+      "query": "@http.user_agent:*Googlebot* AND @network.destination.ip:(173.44.141.89 OR 80.77.23.48 OR 62.60.226.73 OR 107.158.128.45)",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "persistence_via_scheduled_task",
+      "query": "@process.name:schtasks.exe AND @process.cmdline:(*/create* AND */sc* AND *onlogon*)",
+      "data_source": "logs",
+      "aggregation": "count"
+    }
+  ],
+  "cases": [
+    {
+      "name": "Known File Hashes",
+      "status": "high",
+      "condition": "known_file_hashes >= 1"
+    },
+    {
+      "name": "Known C2 IPs/Domains",
+      "status": "high",
+      "condition": "known_c2_ips_domains >= 1"
+    },
+    {
+      "name": "Suspicious User-Agent to C2 IPs",
+      "status": "high",
+      "condition": "suspicious_user_agent_to_c2_ips >= 1"
+    },
+    {
+      "name": "Persistence via Scheduled Task",
+      "status": "medium",
+      "condition": "persistence_via_scheduled_task >= 1"
+    }
+  ],
+  "tags": [
+    "rule_id:castlebot_correlation",
+    "severity:high"
+  ]
+}

@@ -1,0 +1,8 @@
+# Monitor for changes to the Docker daemon configuration file
+-w /etc/docker/daemon.json -p wa -k docker-daemon-config
+
+# Monitor for changes to the Docker systemd service file
+-w /lib/systemd/system/docker.service -p wa -k docker-service
+
+# Monitor for changes to the Docker systemd socket file
+-w /lib/systemd/system/docker.socket -p wa -k docker-socket

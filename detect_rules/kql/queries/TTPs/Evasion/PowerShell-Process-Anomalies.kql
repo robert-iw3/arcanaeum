@@ -1,0 +1,48 @@
+// Name: PowerShell Process and Command Line Anomalies
+// Author: RW
+// Date: 2025-08-12
+// Description: Detects anomalous PowerShell activity, such as spawning unusual child processes or using heavily obfuscated/long command lines.
+//              These patterns are often associated with advanced evasion techniques and in-memory execution.
+// MITRE ATT&CK: T1059.001, T1036
+// False Positives: Legitimate administrative scripts may use encoded commands for complex tasks. Some automation tools might spawn processes
+// that appear unusual. Tuning may be required by excluding specific parent/child process relationships or known safe scripts.
+
+let suspicious_children = dynamic([
+    "rundll32.exe",
+    "regsvr32.exe",
+    "mshta.exe",
+    "wscript.exe",
+    "cscript.exe",
+    "bitsadmin.exe",
+    "certutil.exe"
+]);
+DeviceProcessEvents
+| where
+    // Condition 1: PowerShell spawning a suspicious child process often used for proxy execution or defense evasion.
+    (InitiatingProcessFileName in~ ("powershell.exe", "pwsh.exe") and FileName in~ (suspicious_children))
+    or
+    // Condition 2: PowerShell execution with clear signs of obfuscation or complex commands.
+    (
+        ProcessFileName in~ ("powershell.exe", "pwsh.exe") and
+        (
+            // Detects Base64 encoded commands, a common obfuscation method.
+            ProcessCommandLine has_any ("-e", "-en", "-enc", "-enco", "-encodedcommand") or
+            // Detects in-memory execution via Invoke-Expression.
+            ProcessCommandLine matches regex @"(?i)\b(IEX|Invoke-Expression)\b" or
+            // Detects long, complex command lines which are often a sign of obfuscation.
+            strlen(ProcessCommandLine) > 2048
+        )
+    )
+// FP Mitigation: Exclude known good scripts or parent processes if noise occurs.
+// For example: | where InitiatingProcessCommandLine !contains "C:\\AdminScripts\\known_good_script.ps1"
+| project
+    Timestamp,
+    DeviceName,
+    ProcessFileName,
+    ProcessCommandLine,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    AccountName,
+    ProcessId,
+    InitiatingProcessId,
+    ReportId

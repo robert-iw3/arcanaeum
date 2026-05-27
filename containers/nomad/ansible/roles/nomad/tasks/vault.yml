@@ -1,0 +1,40 @@
+---
+- name: Download Vault binary
+  get_url:
+    url: "{{ nomad_vault_download_url }}"
+    dest: "/tmp/vault_{{ nomad_vault_version }}.zip"
+    mode: "0600"
+    checksum: "sha256:{{ lookup('url', nomad_vault_checksum_url, wantlist=True) | select('match', '.*vault_{{ nomad_vault_version }}_linux_{{ nomad_architecture }}.zip') | first | split | first }}"
+  register: download_vault
+  tags: [vault]
+
+- name: Install Vault binary
+  unarchive:
+    src: "/tmp/vault_{{ nomad_vault_version }}.zip"
+    dest: "{{ nomad_install_dir }}"
+    remote_src: yes
+    owner: "{{ nomad_user }}"
+    group: "{{ nomad_group }}"
+    mode: "0750"
+  become: yes
+  when: download_vault.changed
+  tags: [vault]
+
+- name: Deploy Nomad Vault policy
+  template:
+    src: nomad-vault-policy.hcl.j2
+    dest: "{{ nomad_config_dir }}/nomad-vault-policy.hcl"
+    owner: "{{ nomad_user }}"
+    group: "{{ nomad_group }}"
+    mode: "0600"
+  become: yes
+  tags: [vault]
+
+- name: Apply Nomad Vault policy
+  command: vault policy write nomad-cluster {{ nomad_config_dir }}/nomad-vault-policy.hcl
+  environment:
+    VAULT_ADDR: "{{ nomad_vault_address }}"
+    VAULT_TOKEN: "{{ nomad_vault_token }}"
+  become: yes
+  become_user: "{{ nomad_user }}"
+  tags: [vault]

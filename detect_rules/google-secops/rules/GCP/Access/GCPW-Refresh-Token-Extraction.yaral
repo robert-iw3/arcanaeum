@@ -1,0 +1,54 @@
+rule gcp_gcpw_refresh_token_extraction {
+  meta:
+    description = "Detects a process accessing Google Chrome or GCPW credential stores, which may indicate an attempt to extract refresh tokens to bypass MFA and access Google Workspace or GCP resources."
+    author = "RW"
+    date = "2025-08-20"
+    tags = "GCP, GOOGLE_WORKSPACE, CREDENTIAL_ACCESS, TOKEN_THEFT, WINDOWS"
+    tactic = "TA0006"
+    technique = "T1555.003, T1528"
+    false_positives = "Legitimate backup software, data loss prevention (DLP) tools, or other administrative utilities that inspect user profiles might trigger this rule. Exclusions for known and trusted software may be required."
+
+  events:
+    // Event for a process accessing Chrome's key store file
+    $local_state.metadata.event_type = "FILE_OPEN"
+    $local_state.principal.hostname = $hostname
+    $local_state.principal.process.pid = $pid
+    $local_state.principal.process.file.full_path = $process_path
+    re.regex($local_state.target.file.full_path, `.*\\Google\\Chrome\\User Data\\.*\\Local State$`) nocase
+
+    // Event for a process accessing Chrome's token database
+    $web_data.metadata.event_type = "FILE_OPEN"
+    $web_data.principal.hostname = $hostname
+    $web_data.principal.process.pid = $pid
+    $web_data.principal.process.file.full_path = $process_path
+    re.regex($web_data.target.file.full_path, `.*\\Google\\Chrome\\User Data\\.*\\Web Data$`) nocase
+
+    // Event for a process reading the refresh token from the registry
+    $registry.metadata.event_type = "REGISTRY_READ"
+    $registry.principal.hostname = $hostname
+    $registry.principal.process.pid = $pid
+    $registry.principal.process.file.full_path = $process_path
+    re.regex($registry.target.registry.key, `.*\\SOFTWARE\\Google\\Accounts\\.*\\refresh_token$`) nocase
+
+    // FP Filter: Exclude legitimate Google processes and common browsers.
+    // This list may need to be tuned for your specific environment.
+    not re.regex($process_path, `(?i)(\\Google\\Chrome\\Application\\chrome\.exe|\\Microsoft\\Edge\\Application\\msedge\.exe|\\Google\\Update\\GoogleUpdate\.exe|\\gcpw\.exe)$`)
+
+  match:
+    $hostname, $pid, $process_path over 10m
+
+  outcome:
+    $risk_score = 65
+    $principal_hostname = $hostname
+    $principal_process_pid = $pid
+    $principal_process_path = $process_path
+    $principal_user = array_distinct($local_state.principal.user.userid, $web_data.principal.user.userid, $registry.principal.user.userid)
+    $accessed_files = array_distinct($local_state.target.file.full_path, $web_data.target.file.full_path)
+    $accessed_registry_keys = array_distinct($registry.target.registry.key)
+    $detection_method = if($registry, "Registry Read", "File Access")
+
+  condition:
+    // Condition 1: A non-standard process accesses both the encryption key file (Local State) and the token database (Web Data).
+    // Condition 2: A non-standard process reads the refresh token directly from the registry.
+    ($local_state and $web_data) or $registry
+}

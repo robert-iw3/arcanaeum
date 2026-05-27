@@ -1,0 +1,123 @@
+---
+- name: Automate SentinelOne Threat Hunting Query Pipeline
+  hosts: localhost
+  become: true
+  vars:
+    # Main configuration - override via -e or inventory/group_vars
+    container_engine: "{{ engine | default('docker') }}"          # docker or podman
+    work_dir: "/opt/sentinelone-threat-pipeline"
+    config_file: "{{ work_dir }}/pipeline-config.yaml"
+    api_token: "{{ api_token | default('') }}"                    # MUST be provided via -e
+    api_url: "{{ api_url | default('') }}"                        # MUST be provided via -e or config
+    output_dir: "{{ work_dir }}/generated_queries"
+    image_name: "sentinelone-importer:latest"
+    cleanup_after: "{{ cleanup | default(false) | bool }}"       # -e cleanup=true
+
+  tasks:
+    - name: Fail if required API credentials are missing
+      fail:
+        msg: "API_TOKEN and API_URL must be provided (via -e api_token=... api_url=...)"
+      when: api_token == '' or api_url == ''
+
+    - name: Ensure required packages are installed
+      package:
+        name:
+          - python3
+          - python3-pip
+          - "{{ container_engine }}"
+          - git   # optional - useful if you clone repo
+        state: present
+      tags: [setup]
+
+    - name: Create working directory structure
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ work_dir }}"
+        - "{{ output_dir }}"
+
+    - name: Copy pipeline files to working directory
+      copy:
+        src: "{{ item.src }}"
+        dest: "{{ work_dir }}/{{ item.dest | default(item.src | basename) }}"
+        mode: '0644'
+      loop:
+        - { src: 'parse_md_to_json.py' }
+        - { src: 'import_searches.py' }
+        - { src: 'Dockerfile' }
+        - { src: 'pipeline-config.yaml' }
+      register: copy_result
+      notify: Rebuild container if files changed
+
+    # Copy your threat intel markdown files - adjust paths as needed
+    - name: Copy threat intelligence markdown files
+      copy:
+        src: "{{ item }}"
+        dest: "{{ work_dir }}/{{ item | basename }}"
+        mode: '0644'
+      loop:
+        - CVE-2025-14847_mongobleed_leak.md
+        - serpentine_cloudflare_tunnels.md
+        - UKC-1230_Comburglar.md
+        - esxi_vm_escape.md
+        # Add more files here or use a directory copy instead
+      when: item is exists
+
+    - name: Install Python dependencies (if needed locally)
+      pip:
+        name:
+          - pyyaml
+          - requests   # only if you run parser outside container
+        state: present
+      become: false   # usually run as current user
+
+    - name: Generate Deep Visibility JSON queries from markdown
+      command: >
+        python3 parse_md_to_json.py --config {{ config_file }}
+      args:
+        chdir: "{{ work_dir }}"
+      register: parse_result
+      changed_when: "'Success! Created' in parse_result.stdout"
+      failed_when: "'Nothing was generated' in parse_result.stdout or parse_result.rc != 0"
+
+    - name: Show parsing summary
+      debug:
+        msg: "{{ parse_result.stdout_lines | select('match', '.*(Found|Generated|Success).*') | list }}"
+
+    - name: Build SentinelOne importer container image
+      command: "{{ container_engine }} build -t {{ image_name }} ."
+      args:
+        chdir: "{{ work_dir }}"
+      register: build_result
+      changed_when: build_result.rc == 0
+      notify: Remove old container image if rebuild needed
+
+    - name: Run container to upload queries to SentinelOne
+      command: >
+        {{ container_engine }} run --rm
+        -e API_TOKEN={{ api_token }}
+        -e SENTINELONE_API_URL={{ api_url }}
+        -v {{ output_dir }}:/import:ro,Z
+        {{ image_name }}
+      args:
+        chdir: "{{ work_dir }}"
+      register: upload_result
+      changed_when: true
+
+    - name: Display upload results summary
+      debug:
+        msg: "{{ upload_result.stdout_lines | select('search', 'Successfully initiated|Deep Visibility Query ID') | list }}"
+
+    - name: Cleanup generated JSON files (if enabled)
+      file:
+        path: "{{ output_dir }}"
+        state: absent
+      when: cleanup_after
+
+  handlers:
+    - name: Remove old container image if rebuild needed
+      command: "{{ container_engine }} rmi {{ image_name }}"
+      ignore_errors: true
+      when: build_result.changed

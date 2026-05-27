@@ -1,0 +1,42 @@
+rule AMSI_AmsiScanBuffer_Patching_Detection {
+  meta:
+    author = "RW"
+    description = "Detects in-memory patching of the AmsiScanBuffer function using PowerShell script block logging (Event ID 4104), indicating a potential AMSI bypass attempt."
+    severity = "CRITICAL"
+
+  events:
+    $e.metadata.event_type = "PROCESS_LAUNCH" // Likely UDM type for PowerShell script block events
+    $e.metadata.vendor_name = "Microsoft"
+    $e.metadata.product_name = "Windows"
+    $e.metadata.product_event_type = "PowerShell/Operational" // Specifies the PowerShell Operational log channel
+    $e.metadata.event_code = 4104 // Event ID for PowerShell Script Block Logging
+
+    // Combine conditions to identify suspicious keywords in the script block content.
+    // Script block content is typically mapped to 'process.command_line' in UDM for PowerShell 4104.
+    // If your parser maps it differently (e.g., extensions.powershell.script_block_text), adjust accordingly.
+    $e.principal.process.command_line = /.*VirtualProtect.*/ nocase and
+    $e.principal.process.command_line = /.*GetProcAddress.*/ nocase and
+    $e.principal.process.command_line = /.*InteropServices.*/ nocase and
+    $e.principal.process.command_line = /.*AmsiScanBuffer.*/ nocase and
+    ($e.principal.process.command_line = /.*amsi\.dll.*/ nocase or $e.principal.process.command_line = /.*clr\.dll.*/ nocase)
+
+    // Extract the parent process from the event message (if not directly available in UDM fields).
+    // Assuming 'metadata.raw_log' contains the message from which HostApplication can be extracted.
+    re.regex($e.metadata.raw_log, `HostApplication=(?<parent_process>[^\r\n]+)`)
+
+    // FP Tuning: Exclude known benign tools or processes.
+    // Use a Chronicle Reference List named `amsi_patching_whitelist` for process names/paths or parent processes.
+    // Example: not $parent_process = /pentest-tool\.exe/ nocase
+    // Example: not $e.principal.user.userid in %amsi_admin_users
+
+
+  outcome:
+    $timestamp = $e.metadata.event_timestamp.epoch_seconds // _time
+    $host = $e.principal.hostname // Computer
+    $user = $e.principal.user.userid // User
+    $parent_process = $parent_process // Extracted parent_process
+    $script_block_text = $e.principal.process.command_line // script_block_content
+
+  condition:
+    $e and $parent_process != "" // Ensure parent process was extracted and event conditions are met
+}

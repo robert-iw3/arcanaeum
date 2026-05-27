@@ -1,0 +1,62 @@
+[
+  {
+    "name": "Ntds.dit File Creation Detected",
+    "description": "This search detects the creation of the ntds.dit file, a key indicator of credential dumping. It specifically looks for `TargetFilename` ending in 'ntds.dit' in Windows event logs.",
+    "search": "index=* source=\"WinEventLog:*\" AND TargetFilename=\"*ntds.dit\"",
+    "is_scheduled": 1,
+    "disabled": 0,
+    "cron_schedule": "*/30 * * * *",
+    "dispatch.earliest_time": "-24h",
+    "dispatch.latest_time": "now",
+    "sharing": "global",
+    "acl": {
+      "read": ["power", "admin"],
+      "write": ["admin"]
+    }
+  },
+  {
+    "name": "Ntds.dit Dump or Extraction Attempt",
+    "description": "Detects various command-line patterns used to dump or extract the ntds.dit file, including use of `NTDSDump.exe`, `NTDSgrab.ps1`, `ntdsutil`, and suspicious processes copying `ntds.dit`.",
+    "search": "index=* source=\"WinEventLog:*\" AND ((((Image=\"*\\\\NTDSDump.exe\" OR Image=\"*\\\\NTDSDumpEx.exe\") OR ((CommandLine=\"*ntds.dit*\") AND (CommandLine=\"*system.hiv*\")) OR CommandLine=\"*NTDSgrab.ps1*\") OR ((CommandLine=\"*ac i ntds*\") AND (CommandLine=\"*create full*\")) OR ((CommandLine=\"*/c copy *\") AND (CommandLine=\"*\\\\windows\\\\ntds\\\\ntds.dit*\")) OR ((CommandLine=\"*activate instance ntds*\") AND (CommandLine=\"*create full*\")) OR ((CommandLine=\"*powershell*\") AND (CommandLine=\"*ntds.dit*\"))) OR (CommandLine=\"*ntds.dit*\" AND ((ParentImage=\"*\\\\apache*\" OR ParentImage=\"*\\\\tomcat*\" OR ParentImage=\"*\\\\AppData\\\\*\" OR ParentImage=\"*\\\\Temp\\\\*\" OR ParentImage=\"*\\\\Public\\\\*\" OR ParentImage=\"*\\\\PerfLogs\\\\*\") OR (Image=\"*\\\\apache*\" OR Image=\"*\\\\tomcat*\" OR Image=\"*\\\\AppData\\\\*\" OR Image=\"*\\\\Temp\\\\*\" OR Image=\"*\\\\Public\\\\*\" OR Image=\"*\\\\PerfLogs\\\\*\"))))",
+    "is_scheduled": 1,
+    "disabled": 0,
+    "cron_schedule": "*/30 * * * *",
+    "dispatch.earliest_time": "-24h",
+    "dispatch.latest_time": "now",
+    "sharing": "global",
+    "acl": {
+      "read": ["power", "admin"],
+      "write": ["admin"]
+    }
+  },
+  {
+    "name": "Ntds.dit Dump via Web or Scripting Parent Process",
+    "description": "Identifies suspicious creation of the ntds.dit file where the parent process is a common web server or scripting engine, suggesting a web shell or other exploit is being used.",
+    "search": "index=* source=\"WinEventLog:*\" AND (TargetFilename=\"*\\\\ntds.dit\" AND ((ParentImage=\"*\\\\cscript.exe\" OR ParentImage=\"*\\\\httpd.exe\" OR ParentImage=\"*\\\\nginx.exe\" OR ParentImage=\"*\\\\php-cgi.exe\" OR ParentImage=\"*\\\\powershell.exe\" OR ParentImage=\"*\\\\pwsh.exe\" OR ParentImage=\"*\\\\w3wp.exe\" OR ParentImage=\"*\\\\wscript.exe\") OR (ParentImage=\"*\\\\apache*\" OR ParentImage=\"*\\\\tomcat*\" OR ParentImage=\"*\\\\AppData\\\\*\" OR ParentImage=\"*\\\\Temp\\\\*\" OR ParentImage=\"*\\\\Public\\\\*\" OR ParentImage=\"*\\\\PerfLogs\\\\*\")))",
+    "is_scheduled": 1,
+    "disabled": 0,
+    "cron_schedule": "*/30 * * * *",
+    "dispatch.earliest_time": "-24h",
+    "dispatch.latest_time": "now",
+    "sharing": "global",
+    "acl": {
+      "read": ["power", "admin"],
+      "write": ["admin"]
+    }
+  },
+  {
+    "name": "Ntds.dit Dump via OS or Temp Location Process",
+    "description": "Detects suspicious creation of the ntds.dit file where the process or its parent originates from common user or temporary directory locations, which could indicate a malicious actor running a portable credential dumper.",
+    "search": "index=* source=\"WinEventLog:*\" AND (TargetFilename=\"*\\\\ntds.dit\" AND ((Image=\"*\\\\cmd.exe\" OR Image=\"*\\\\cscript.exe\" OR Image=\"*\\\\mshta.exe\" OR Image=\"*\\\\powershell.exe\" OR Image=\"*\\\\pwsh.exe\" OR Image=\"*\\\\regsvr32.exe\" OR Image=\"*\\\\rundll32.exe\" OR Image=\"*\\\\wscript.exe\" OR Image=\"*\\\\wsl.exe\" OR Image=\"*\\\\wt.exe\") OR (Image=\"*\\\\AppData\\\\*\" OR Image=\"*\\\\Temp\\\\*\" OR Image=\"*\\\\Public\\\\*\" OR Image=\"*\\\\PerfLogs\\\\*\")))",
+    "is_scheduled": 1,
+    "disabled": 0,
+    "cron_schedule": "*/30 * * * *",
+    "dispatch.earliest_time": "-24h",
+    "dispatch.latest_time": "now",
+    "sharing": "global",
+    "acl": {
+      "read": ["power", "admin"],
+      "write": ["admin"]
+    }
+  }
+]

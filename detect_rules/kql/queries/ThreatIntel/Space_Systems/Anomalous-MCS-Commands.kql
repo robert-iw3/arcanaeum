@@ -1,0 +1,38 @@
+// Name: Anomalous Mission Control Software Commands or Data Transfer
+// Author: RW
+// Date: 2025-08-15
+// Description: Detects anomalous command frequency or large data transfers from Spacecraft Operator workstations to
+// the Mission Control Center (MCC). Such activity could indicate that an operator's workstation has been compromised
+// and is being used to send malicious commands or exfiltrate data, potentially leveraging vulnerabilities in Mission Control Software (MCS).
+// False Positive Sensitivity: Medium
+// Tactic: Command and Control, Exfiltration
+// Technique: T1021 - Remote Services, T1030 - Data Transfer Size Limits
+
+let timeframe = 1d;
+let timeWindow = 10m;
+// FP Tuning: Define the IP addresses of authorized Spacecraft Operator workstations.
+let OperatorWorkstationIPs = dynamic([]);
+// FP Tuning: Define the IP addresses of the Mission Control Centre (MCC) servers.
+let MissionControlCenterIPs = dynamic([]);
+// FP Tuning: Establish a baseline for normal command frequency. Alerting on a high number of connections in a short window can indicate automated or malicious command activity.
+let ConnectionCountThreshold = 500;
+// FP Tuning: Establish a baseline for normal data transfer sizes. Alerting on unusually large transfers can indicate data exfiltration. (Value is in bytes, 100MB default)
+let TotalBytesSentThreshold = 104857600;
+DeviceNetworkEvents
+| where TimeGenerated > ago(timeframe)
+// Filter for successful connections originating from operator workstations to the MCC.
+| where ActionType == "ConnectionSuccess"
+| where LocalIP in (OperatorWorkstationIPs) and RemoteIP in (MissionControlCenterIPs)
+// Aggregate connection counts and data volume over a short time window.
+| summarize StartTime = min(TimeGenerated), EndTime = max(TimeGenerated), ConnectionCount = count(), SumTotalBytesSent = sum(TotalBytesSent) by LocalIP, RemoteIP, bin(TimeGenerated, timeWindow)
+// Alert if either the connection count or the total bytes sent exceeds the defined thresholds.
+| where ConnectionCount > ConnectionCountThreshold or SumTotalBytesSent > TotalBytesSentThreshold
+| project
+    StartTime,
+    EndTime,
+    LocalIP,
+    RemoteIP,
+    ConnectionCount,
+    SumTotalBytesSent,
+    ConnectionCountThreshold,
+    TotalBytesSentThreshold

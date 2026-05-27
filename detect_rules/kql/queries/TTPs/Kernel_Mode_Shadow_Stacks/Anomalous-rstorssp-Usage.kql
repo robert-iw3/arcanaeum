@@ -1,0 +1,28 @@
+let CETViolationCode = "c00004a2";
+// The exception code 0xc00004a2 corresponds to STATUS_CET_SHADOW_STACK_VIOLATION.
+// This is a high-fidelity indicator of a stack corruption attempt, which is what the CET feature is designed to prevent.
+// The rstorssp instruction is used to manage the shadow stack; anomalous usage could lead to this violation.
+Event
+| where Source == "Windows Error Reporting" and EventID == 1001
+// Search the event description for the specific exception code related to a shadow stack violation.
+| where RenderedDescription has CETViolationCode
+| parse kind=relaxed RenderedDescription with * "Problem signature:" signingLine "P1: " P1 "," * "P7: " P7 "," *
+// Confirm the exception code is in the correct field (P7) to increase accuracy.
+| where P7 == CETViolationCode
+// FP Mitigation: While CET violations are strong indicators of malicious activity, a poorly written or buggy application could potentially cause one.
+// Review the ProcessName and its prevalence in the environment.
+| extend
+    ProcessName = trim_end(@",", tostring(P1)),
+    timestamp = TimeGenerated,
+    HostName = tostring(split(Computer, ".")[0]),
+    DomainName = tostring(split(Computer, ".")[1])
+| project-reorder
+    timestamp,
+    HostName,
+    ProcessName,
+    RenderedDescription,
+    EventID,
+    Source
+| extend
+    HostCustomEntity = HostName,
+    ProcessCustomEntity = ProcessName

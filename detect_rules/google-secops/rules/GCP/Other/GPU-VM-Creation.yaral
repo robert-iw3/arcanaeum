@@ -1,0 +1,41 @@
+rule gcp_gpu_instance_creation {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects the creation of a Google Cloud Compute instance with a GPU accelerator. This activity is often associated with resource hijacking for purposes like cryptomining."
+    false_positives = "Legitimate creation of GPU instances for machine learning, data processing, or other high-performance computing tasks. Tuning may be required to exclude known projects or service accounts that perform this activity."
+    tags = "GCP, IMPACT, COMPUTE"
+    tactic = "TA0040"
+    technique = "T1496"
+
+  events:
+    // Filter for GCP audit logs related to VM instance creation.
+    $e.metadata.event_type = "GCP_COMPUTE_VM_INSERT"
+    $e.metadata.product_name = "compute.googleapis.com"
+    re.regex($e.metadata.product_event_type, `(beta|v\d)\.compute\.instances\.insert`)
+
+    // The key indicator for a GPU instance is the presence of a guest accelerator.
+    any $acc in $e.resource.instance.accelerator:
+      $acc.count > 0
+
+    // Placeholder for tuning: Exclude legitimate activity by user or project.
+    // For example, by adding a line like:
+    // not $e.principal.user.email_addr in %known_gpu_users
+    // or
+    // not $e.resource.project.name in %ml_projects
+
+  outcome:
+    // Risk score can be adjusted based on the environment's normal usage of GPUs.
+    $risk_score = 40
+    $principal_ip = array_distinct($e.principal.ip)
+    $principal_user = $e.principal.user.email_addr
+    $instance_name = $e.resource.instance.name
+    $project_id = $e.resource.project.name
+    $zone = $e.resource.zone
+    // Extract accelerator details for analyst review.
+    $accelerator_types = array_distinct($e.resource.instance.accelerator.type)
+    $accelerator_counts = array_distinct($e.resource.instance.accelerator.count)
+
+  condition:
+    $e
+}

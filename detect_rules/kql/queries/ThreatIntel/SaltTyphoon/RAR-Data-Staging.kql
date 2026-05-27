@@ -1,0 +1,64 @@
+// Name: RAR for Data Staging
+// Id: 113e5b8e-d75c-466e-a386-a3937c88e9e3
+// Version: 2
+//
+// Severity: Medium
+//
+// QueryFrequency: 1h
+// QueryPeriod: 1h
+//
+// ThreatIntel:
+//   - Salt Typhoon
+//
+// Tactics:
+//   - Collection
+//
+// MITRE ATT&CK Framework:
+//   - T1074.001: Local Data Staging
+//   - T1005: Data from Local System
+//
+// Description:
+// Detects the use of rar.exe to compress sensitive data before exfiltration, often in public or temporary directories.
+// This is a known TTP of the threat actor Salt Typhoon.
+//
+// Version History:
+// - 1.0 (2025-07-31) - Initial version (Sigma)
+// - 2.0 (2025-07-31) - Updated with new intel and converted to KQL
+//
+// Author: RW
+//
+// False Positives:
+// Legitimate use of the rar.exe command-line tool by users or administrators to archive files into these locations, although this is uncommon.
+// Consider filtering based on user context or parent processes if legitimate scripting uses this behavior.
+let lookback = 1h;
+// Define common staging directories used by adversaries, including paths specific to Salt Typhoon.
+let staging_paths = dynamic([
+    @"C:\Users\Public\",
+    @"C:\ProgramData\",
+    @"C:\Windows\Temp\",
+    @"C:\PerfLogs\",
+    @"\AppData\Local\Temp",
+    @"C:\Users\Public\Music\"
+]);
+DeviceProcessEvents
+| where TimeGenerated > ago(lookback)
+// Detects the execution of the rar command-line utility.
+| where FileName =~ "rar.exe"
+// The 'a' command is used to add files to an archive. The spaces help avoid matching filenames.
+| where ProcessCommandLine has " a "
+// Looks for output paths pointing to common staging directories.
+| where ProcessCommandLine has_any (staging_paths)
+// FP Tuning: Exclude known legitimate parent processes or user accounts if needed.
+// | where not (InitiatingProcessFileName =~ "legit_script.ps1" and AccountName =~ "admin_user")
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    AccountDomain,
+    FileName,
+    ProcessCommandLine,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    ReportId,
+    ProcessId,
+    InitiatingProcessId

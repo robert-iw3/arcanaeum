@@ -1,0 +1,31 @@
+// Name: Suspicious AMSI.DLL Load
+// Author: RW
+// Date: 2025-07-31
+// Description: Detects the loading of amsi.dll from a non-standard directory or the loading of an unsigned/improperly signed version of amsi.dll. This is indicative of DLL hijacking or other AMSI bypass techniques where an adversary replaces the legitimate AMSI provider with a malicious one.
+// Tags: TTPs, Defense Evasion, T1574.002
+
+DeviceImageLoadEvents
+// Filter for the loading of amsi.dll.
+| where FileName endswith "\\amsi.dll"
+// Focus on processes that are common targets for this bypass.
+| where InitiatingProcessFileName in~ ("powershell.exe", "pwsh.exe", "cscript.exe", "wscript.exe", "rundll32.exe", "regsvr32.exe")
+// The core detection logic: find either a non-standard path OR an invalid signature.
+| where
+    // Condition 1: The DLL is loaded from a path other than the legitimate system directories.
+    not(FolderPath in~ (@"C:\Windows\System32\", @"C:\Windows\SysWOW64\"))
+    or
+    // Condition 2: The DLL is not signed, or it is signed by someone other than Microsoft.
+    (IsSigned == false or (IsSigned == true and Signer !has "Microsoft Windows"))
+// FP Tuning: This behavior is highly anomalous. False positives might occur with custom security tools or sandboxing environments that manipulate DLL loads.
+// Exclude known legitimate tools if necessary.
+// For example: | where InitiatingProcessFolderPath !contains "\\LegitSecurityTool\\"
+| project
+    Timestamp,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    FileName,
+    FolderPath,
+    SHA1,
+    Signer,
+    IsSigned

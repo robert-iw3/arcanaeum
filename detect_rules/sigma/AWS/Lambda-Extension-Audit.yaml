@@ -1,0 +1,28 @@
+title: AWS Lambda Function and Layer Enumeration
+id: 6ba26219-dfff-42a5-9f50-789a3c51594a
+status: experimental
+description: Generates a list of AWS Lambda functions and their configurations, including attached layers. This rule is intended for hunting and auditing purposes to facilitate the review of Lambda extensions and layers for provenance and trust, as recommended for mitigating threats like LambdaSpy. It can be used to periodically inventory functions and their layers to ensure they originate from trusted sources.
+references:
+  - https://www.clearvector.com/blog/lambda-spy/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.discovery
+  - attack.t1526
+  - cloud
+  - aws
+  - aws.lambda
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    # This rule identifies successful calls to the ListFunctions API.
+    # The responseElements of this event contain the function configurations, including layers.
+    eventSource: 'lambda.amazonaws.com'
+    eventName: 'ListFunctions'
+    errorCode:
+  condition: selection
+falsepositives:
+  - This is expected behavior for administrators, developers, and automated CI/CD or security scanning tools. This rule is not intended for real-time alerting but for periodic auditing and hunting.
+level: informational

@@ -1,0 +1,59 @@
+{
+  "variables": {
+    "vm_name": "{{env `VM_NAME` | default `malware-sandbox`}}",
+    "host_os": "{{env `HOST_OS` | default `server2022`}}",
+    "cpu_count": "{{env `CPU_COUNT` | default `2`}}",
+    "memory_mb": "{{env `MEMORY_MB` | default `2048`}}",
+    "disk_size_gb": "{{env `DISK_SIZE_GB` | default `60`}}",
+    "container_runtime": "{{env `CONTAINER_RUNTIME` | default `docker`}}",
+    "evidence_tool": "{{env `EVIDENCE_TOOL` | default `magnet`}}",
+    "cuckoo_vm_ip": "{{env `CUCKOO_VM_IP` | default `192.168.56.10`}}",
+    "iso_urls": {
+      "server2019": "https://go.microsoft.com/fwlink/p/?LinkID=2195334&clcid=0x409&culture=en-us&country=US",
+      "server2022": "https://go.microsoft.com/fwlink/p/?LinkID=2195404&clcid=0x409&culture=en-us&country=US",
+      "server2025": "https://your-source/windows_server_2025_preview.iso",
+      "win10": "https://go.microsoft.com/fwlink/p/?LinkID=2195166&clcid=0x409&culture=en-us&country=US",
+      "win11": "https://go.microsoft.com/fwlink/p/?LinkID=2196230&clcid=0x409&culture=en-us&country=US"
+    },
+    "iso_checksum": "{{env `ISO_CHECKSUM` | default `sha256:your_checksum_here`}}",
+    "vsphere_user": "{{env `VSPHERE_USER`}}",
+    "vsphere_password": "{{env `VSPHERE_PASSWORD`}}",
+    "vsphere_server": "{{env `VSPHERE_SERVER`}}",
+    "ansible_winrm_password": "{{env `ANSIBLE_WINRM_PASSWORD`}}"
+  },
+  "builders": [
+    {
+      "type": "vmware-iso",
+      "vm_name": "{{user `vm_name`}}",
+      "iso_url": "{{user `iso_urls`[{{user `host_os`}}]}}",
+      "iso_checksum": "{{user `iso_checksum`}}",
+      "memory": "{{user `memory_mb`}}",
+      "cpus": "{{user `cpu_count`}}",
+      "disk_size": "{{user `disk_size_gb`}}000",
+      "guest_os_type": "{{user `host_os` | default `windows9Server64`}}",
+      "communicator": "winrm",
+      "winrm_username": "Administrator",
+      "winrm_password": "{{user `ansible_winrm_password`}}",
+      "boot_command": [
+        "<enter><wait><enter><wait><enter>"
+      ]
+    }
+  ],
+  "provisioners": [
+    {
+      "type": "powershell",
+      "inline": [
+        "Install-PackageProvider -Name NuGet -Force; Install-Module -Name PSWindowsUpdate -Force",
+        "Install-WindowsUpdate -AcceptAll -AutoReboot",
+        "choco install python -y --version 3.12.7",
+        "pip install ansible pywinrm",
+        "New-Item -Path 'E:\\Malware' -ItemType Directory -Force",
+        "New-Item -Path 'E:\\Collections' -ItemType Directory -Force",
+        "New-Item -Path 'C:\\Logs' -ItemType Directory -Force",
+        "New-Item -Path 'E:\\Tools\\Windows' -ItemType Directory -Force",
+        "Test-WSMan -ErrorAction Stop",
+        "ansible-playbook -i 'localhost,' --connection=winrm --extra-vars 'ansible_user=Administrator ansible_password={{user `ansible_winrm_password`}} container_runtime={{user `container_runtime`}} evidence_tool={{user `evidence_tool`}} cuckoo_vm_ip={{user `cuckoo_vm_ip`}}' C:\\vagrant\\ansible-playbook.yml"
+      ]
+    }
+  ]
+}

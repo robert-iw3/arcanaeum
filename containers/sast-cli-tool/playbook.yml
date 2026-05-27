@@ -1,0 +1,413 @@
+---
+- name: Deploy Static Code Analyzer with Web App, API, and DB
+  hosts: localhost
+  connection: local
+  vars:
+    project_dir: "{{ ansible_env.HOME }}/static-code-analyzer"
+    repo_url: "https://github.com/your-org/static-code-analyzer.git"
+    jwt_secret: "{{ lookup('env', 'JWT_SECRET') | default('securejwtsecret', true) }}"
+    test_file_content_js: |
+      function vulnerable() {
+          eval("alert(1)");
+          document.write("<p>Hello</p>");
+          document.execCommand("copy");
+          localStorage.setItem("token", "secret");
+          crypto.createHash("md5");
+          innerText("user_input");
+          eval(atob("YWxlcnQoMSk="));
+          var token = "0123456789abcdef0123456789abcdef";
+          app.use("/api");
+          http.get("http://example.com");
+          JSON.parse("{\"data\": \"test\"}");
+          evalScript("malicious");
+      }
+      // Simulate large file
+      {{ '{{' }}% for i in range(200000) %{{ '}}' }}
+      // Comment line {{ '{{' }} i {{ '}}' }}
+      {{ '{{' }}% endfor %{{ '}}' }}
+    test_file_content_py: |
+      password = "secret123"
+      eval("print(1)")
+      http.get("http://example.com")
+      import os
+      os.system("rm -rf /")
+      import pickle
+      pickle.loads(b"malicious")
+      # Simulate large file
+      {{ '{{' }}% for i in range(200000) %{{ '}}' }}
+      # Comment line {{ '{{' }} i {{ '}}' }}
+      {{ '{{' }}% endfor %{{ '}}' }}
+    test_file_content_java: |
+      public class Vulnerable {
+          public void vulnerable() {
+              String secret = "xyz123";
+              System.getProperty("user.dir");
+              Runtime.getRuntime().exec("cmd.exe");
+              javax.servlet.http.HttpSession session;
+              session.setAttribute("user", secret);
+              System.getenv("JAVA_HOME");
+              ObjectInputStream.readObject();
+          }
+      }
+      // Simulate large file
+      {{ '{{' }}% for i in range(200000) %{{ '}}' }}
+      // Comment line {{ '{{' }} i {{ '}}' }}
+      {{ '{{' }}% endfor %{{ '}}' }}
+    test_file_content_json: |
+      {
+        "dependencies": [
+          {"name": "lodash", "version": "4.17.20"},
+          {"name": "log4j", "version": "2.16.0"},
+          {"name": "express", "version": "4.17.0"},
+          {"name": "normalize-url", "version": "4.5.0"}
+        ]
+      }
+    container_runtime: "{{ 'podman' if podman_available else 'docker' }}"
+    compose_file: "{{ project_dir }}/docker-compose.yml"
+  tasks:
+    - name: Check for Podman availability
+      command: command -v podman
+      register: podman_check
+      changed_when: false
+      failed_when: false
+    - name: Set Podman availability
+      set_fact:
+        podman_available: "{{ podman_check.rc == 0 }}"
+
+    - name: Install required packages for Docker
+      package:
+        name:
+          - git
+          - docker.io
+          - docker-compose
+          - python3-pip
+          - npm
+        state: present
+      become: yes
+      when: not podman_available
+
+    - name: Install required packages for Podman
+      package:
+        name:
+          - git
+          - podman
+          - podman-compose
+          - python3-pip
+          - npm
+        state: present
+      become: yes
+      when: podman_available
+
+    - name: Ensure Docker service is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+      become: yes
+      when: not podman_available
+
+    - name: Ensure Podman socket is running
+      service:
+        name: podman.socket
+        state: started
+        enabled: yes
+      become: yes
+      when: podman_available
+
+    - name: Install Python module for Docker
+      pip:
+        name: docker
+        state: present
+      become: yes
+      when: not podman_available
+
+    - name: Install Python module for Podman
+      pip:
+        name: podman-compose
+        state: present
+      become: yes
+      when: podman_available
+
+    - name: Create project directory
+      file:
+        path: "{{ project_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create test project directory
+      file:
+        path: "{{ project_dir }}/test_project"
+        state: directory
+        mode: '0755'
+
+    - name: Create test files
+      template:
+        src: "{{ project_dir }}/test_project/{{ item.src }}"
+        dest: "{{ project_dir }}/test_project/{{ item.dest }}"
+        mode: '0644'
+      loop:
+        - { src: "test_large.js.j2", dest: "test_large.js", content: "{{ test_file_content_js }}" }
+        - { src: "test_large.py.j2", dest: "test_large.py", content: "{{ test_file_content_py }}" }
+        - { src: "test_large.java.j2", dest: "test_large.java", content: "{{ test_file_content_java }}" }
+        - { src: "package.json.j2", dest: "package.json", content: "{{ test_file_content_json }}" }
+
+    - name: Create results directory
+      file:
+        path: "{{ project_dir }}/results"
+        state: directory
+        mode: '0755'
+
+    - name: Create logs directory
+      file:
+        path: "{{ project_dir }}/logs"
+        state: directory
+        mode: '0755'
+
+    - name: Copy config.yaml
+      copy:
+        content: "{{ lookup('file', 'config.yaml') }}"
+        dest: "{{ project_dir }}/config.yaml"
+        mode: '0644'
+
+    - name: Create web directory
+      file:
+        path: "{{ project_dir }}/web"
+        state: directory
+        mode: '0755'
+
+    - name: Create web-frontend directory
+      file:
+        path: "{{ project_dir }}/web-frontend"
+        state: directory
+        mode: '0755'
+
+    - name: Copy frontend files
+      copy:
+        src: "{{ item }}"
+        dest: "{{ project_dir }}/web-frontend/{{ item | basename }}"
+        mode: '0644'
+      loop:
+        - App.tsx
+        - vite.config.ts
+        - package.json
+        - tsconfig.json
+        - tsconfig.node.json
+        - tailwind.config.js
+
+    - name: Install frontend dependencies
+      command: npm install
+      args:
+        chdir: "{{ project_dir }}/web-frontend"
+
+    - name: Build frontend
+      command: npm run build
+      args:
+        chdir: "{{ project_dir }}/web-frontend"
+      environment:
+        VITE_API_URL: "https://localhost:443"
+
+    - name: Copy frontend build to web directory
+      copy:
+        src: "{{ project_dir }}/web-frontend/dist/"
+        dest: "{{ project_dir }}/web/dist/"
+        mode: '0644'
+
+    - name: Create NGINX configuration
+      copy:
+        content: |
+          server {
+              listen 443 ssl;
+              server_name localhost;
+              ssl_certificate /etc/nginx/certs/self-signed.crt;
+              ssl_certificate_key /etc/nginx/certs/self-signed.key;
+              ssl_protocols TLSv1.2 TLSv1.3;
+              ssl_ciphers HIGH:!aNULL:!MD5;
+              ssl_prefer_server_ciphers on;
+              add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+              add_header X-Frame-Options DENY;
+              add_header X-Content-Type-Options nosniff;
+              add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://localhost:443;";
+              root /usr/share/nginx/html;
+              index index.html;
+              location / {
+                  try_files $uri $uri/ /index.html;
+              }
+              location /results {
+                  proxy_pass http://api:5000;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+          }
+        dest: "{{ project_dir }}/web/nginx.conf"
+        mode: '0644'
+
+    - name: Create SSL certificates directory
+      file:
+        path: "{{ project_dir }}/certs"
+        state: directory
+        mode: '0755'
+
+    - name: Generate self-signed SSL certificate
+      command: >
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048
+        -keyout {{ project_dir }}/certs/self-signed.key
+        -out {{ project_dir }}/certs/self-signed.crt
+        -subj "/C=US/ST=State/L=City/O=Org/OU=Unit/CN=localhost"
+      args:
+        creates: "{{ project_dir }}/certs/self-signed.crt"
+
+    - name: Create api directory
+      file:
+        path: "{{ project_dir }}/api"
+        state: directory
+        mode: '0755'
+
+    - name: Copy backend files
+      copy:
+        src: "{{ item }}"
+        dest: "{{ project_dir }}/api/{{ item | basename }}"
+        mode: '0644'
+      loop:
+        - scanner.py
+        - languages.py
+        - log.py
+        - api.py
+        - __init__.py
+        - setup.py
+        - test_scanner.py
+
+    - name: Initialize Postgres database
+      command: >
+        {{ 'podman' if podman_available else 'docker' }} exec static-code-analyzer-db-1
+        psql -U analyzer -d analyzer -c
+        "CREATE TABLE IF NOT EXISTS scan_results (id SERIAL PRIMARY KEY, data JSONB NOT NULL, timestamp TIMESTAMP NOT NULL)"
+      args:
+        chdir: "{{ project_dir }}"
+      become: yes
+      ignore_errors: yes
+
+    - name: Create Docker Compose file
+      copy:
+        content: |
+          version: '3.8'
+          services:
+            db:
+              image: postgres:15
+              environment:
+                POSTGRES_USER: analyzer
+                POSTGRES_PASSWORD: "{{ lookup('env', 'DB_PASSWORD') | default('securepassword', true) }}"
+                POSTGRES_DB: analyzer
+              volumes:
+                - "{{ project_dir }}/db-data:/var/lib/postgresql/data"
+              ports:
+                - "5432:5432"
+            api:
+              build:
+                context: "{{ project_dir }}/api"
+                dockerfile: Dockerfile
+              environment:
+                JWT_SECRET: "{{ jwt_secret }}"
+                DB_HOST: db
+                DB_PORT: 5432
+                DB_NAME: analyzer
+                DB_USER: analyzer
+                DB_PASSWORD: "{{ lookup('env', 'DB_PASSWORD') | default('securepassword', true) }}"
+              volumes:
+                - "{{ project_dir }}/results:/app/results"
+                - "{{ project_dir }}/logs:/app/logs"
+              depends_on:
+                - db
+              ports:
+                - "5000:5000"
+            web:
+              image: nginx:1.25
+              volumes:
+                - "{{ project_dir }}/web/dist:/usr/share/nginx/html"
+                - "{{ project_dir }}/web/nginx.conf:/etc/nginx/conf.d/default.conf"
+                - "{{ project_dir }}/certs:/etc/nginx/certs"
+              ports:
+                - "443:443"
+              depends_on:
+                - api
+            scanner:
+              build:
+                context: "{{ project_dir }}/api"
+                dockerfile: Dockerfile
+              command: python -m static_code_analyzer.scanner -f /app/test_project -o /app/results/results.json --config /app/config.yaml
+              environment:
+                DB_HOST: db
+                DB_PORT: 5432
+                DB_NAME: analyzer
+                DB_USER: analyzer
+                DB_PASSWORD: "{{ lookup('env', 'DB_PASSWORD') | default('securepassword', true) }}"
+              volumes:
+                - "{{ project_dir }}/test_project:/app/test_project"
+                - "{{ project_dir }}/results:/app/results"
+                - "{{ project_dir }}/logs:/app/logs"
+                - "{{ project_dir }}/config.yaml:/app/config.yaml"
+              depends_on:
+                - db
+          volumes:
+            db-data:
+        dest: "{{ compose_file }}"
+        mode: '0644'
+
+    - name: Create Dockerfile for API and scanner
+      copy:
+        content: |
+          FROM python:3.10-slim
+          WORKDIR /app
+          COPY . .
+          RUN pip install --no-cache-dir -r requirements.txt
+          CMD ["python", "-m", "flask", "--app", "api.api", "run", "--host=0.0.0.0", "--port=5000"]
+        dest: "{{ project_dir }}/api/Dockerfile"
+        mode: '0644'
+
+    - name: Create requirements.txt
+      copy:
+        content: |
+          flask==3.1.2
+          flask-cors==5.0.0
+          flask-limiter==3.7.0
+          pyjwt==2.9.0
+          psycopg2-binary==2.9.9
+          aiohttp==3.10.5
+          aiofiles==24.1.0
+          pyyaml==6.0.2
+          regex==2024.9.11
+          tenacity==9.0.0
+          jsonschema==4.23.0
+        dest: "{{ project_dir }}/api/requirements.txt"
+        mode: '0644'
+
+    - name: Build and start Docker Compose services
+      command: "{{ 'podman-compose' if podman_available else 'docker-compose' }} up -d --build"
+      args:
+        chdir: "{{ project_dir }}"
+      environment:
+        COMPOSE_DOCKER_CLI_BUILD: 1
+        DOCKER_BUILDKIT: 1
+      become: yes
+
+    - name: Wait for web service to be available
+      wait_for:
+        host: localhost
+        port: 443
+        delay: 5
+        timeout: 30
+
+    - name: Wait for API service to be available
+      wait_for:
+        host: localhost
+        port: 5000
+        delay: 5
+        timeout: 30
+
+    - name: Wait for DB service to be available
+      wait_for:
+        host: localhost
+        port: 5432
+        delay: 5
+        timeout: 30

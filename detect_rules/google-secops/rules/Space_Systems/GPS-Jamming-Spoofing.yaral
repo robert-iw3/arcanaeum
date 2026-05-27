@@ -1,0 +1,56 @@
+rule potential_gps_jamming_or_spoofing {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects potential GPS jamming or spoofing activity by monitoring for anomalous navigation system behavior on critical assets. The rule identifies sudden signal loss, significant degradation in position accuracy, or specific system error codes indicative of electronic warfare."
+    reference = "id-76c7b8b0b6d27f004dcbec4248f3eaded30e1641a5a37b59d97465c08c28876d"
+    tactic = "TA0040"
+    technique = "T1499"
+    false_positives = "Natural signal degradation due to environmental factors (e.g., urban canyons, tunnels, severe weather) or hardware malfunctions can trigger this rule. Tuning thresholds and baselining normal behavior for specific assets is recommended."
+    severity = "HIGH"
+
+  events:
+    // This rule assumes a custom log source for navigation system data is mapped to UDM.
+    // The event type and specific fields may need to be adjusted for your environment.
+    $gps_anomaly.metadata.event_type = "GENERIC_EVENT"
+    $gps_anomaly.metadata.product_name = "NavigationSystem" // Example product name for filtering
+    $gps_anomaly.principal.hostname = $hostname
+    $gps_anomaly.principal.hostname in %critical_navigation_assets
+
+    (
+      // Condition 1: Jamming-related error codes are reported.
+      // The '%jamming_error_codes' list should contain strings like "ERR_SIGNAL_LOST", "HIGH_INTERFERENCE", etc.
+      $gps_anomaly.security_result.summary in %jamming_error_codes or
+
+      // Condition 2: Spoofing-related error codes are reported.
+      // The '%spoofing_error_codes' list should contain strings like "ERR_INCONSISTENT_DATA", "ERR_POS_JUMP", etc.
+      $gps_anomaly.security_result.summary in %spoofing_error_codes or
+
+      // Condition 3: Signal strength (custom field) drops below a critical threshold.
+      // This assumes a custom field 'extensions.signal_strength_dbm' is populated. The threshold may need tuning.
+      $gps_anomaly.extensions.signal_strength_dbm < -130 or
+
+      // Condition 4: Position accuracy (standard UDM field) degrades significantly.
+      // The threshold (in meters) may need tuning based on the asset's operational requirements.
+      $gps_anomaly.target.location.accuracy_meters > 100
+    )
+
+  match:
+    // Correlate multiple anomalies on the same host over a 10-minute window.
+    $hostname over 10m
+
+  outcome:
+    // Set a high risk score due to the potential impact on critical operations.
+    $risk_score = 80
+    $principal_hostname = array_distinct($hostname)
+    $event_count = count_distinct($gps_anomaly.metadata.id)
+
+    // Capture key metrics for investigation.
+    $min_signal_strength_dbm = min($gps_anomaly.extensions.signal_strength_dbm)
+    $max_position_accuracy_meters = max($gps_anomaly.target.location.accuracy_meters)
+    $reported_error_codes = array_distinct($gps_anomaly.security_result.summary)
+
+  condition:
+    // Trigger if any of the anomalous conditions are met for a critical asset.
+    $hostname
+}

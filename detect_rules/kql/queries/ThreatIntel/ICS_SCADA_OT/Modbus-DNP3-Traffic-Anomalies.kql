@@ -1,0 +1,49 @@
+// Name: External Communication to OT Protocols (Modbus/DNP3)
+// Description: This detection identifies network connections from the internal network to external IP addresses, or from external IPs to internal devices, over ports commonly used for Operational Technology (OT) protocols like Modbus (502) and DNP3 (20000). Such traffic can indicate misconfigured devices, unauthorized external access, or reconnaissance attempts against sensitive industrial control systems.
+// Author: RW
+// Date: 2025-08-17
+// MITRE ATT&CK:
+// - T1071.004: Application Layer Protocol: File Transfer Protocols
+// - T1090: Proxy
+// - T1572: Protocol Tunneling
+// False Positive Sensitivity: Medium
+// - Legitimate remote administration, cloud-based SCADA monitoring services, or connections from business partners may use these protocols over the internet.
+// - To reduce false positives, add the IP addresses of any authorized external systems to the 'ot_ip_allowlist' below.
+// References:
+// - https://www.veridify.com/modbus-security-issues-and-how-to-mitigate-cyber-risks/
+// - https://www.veridify.com/dnp3-security-risks/
+
+let lookback = 1d;
+// Define the target OT ports
+let otPorts = dynamic([502, 20000]); // 502: Modbus, 20000: DNP3
+// Define a placeholder for known-good external IP addresses that communicate with the OT network.
+// This is crucial for tuning and reducing false positives.
+let ot_ip_allowlist = dynamic(["1.2.3.4", "2.3.4.5"]); // Placeholder - add legitimate external IPs here.
+DeviceNetworkEvents
+| where TimeGenerated > ago(lookback)
+// Filter for successful network connections to or from the target OT ports
+| where ActionType in ("ConnectionSuccess", "InboundConnectionAccepted") and RemotePort in (otPorts)
+// Focus on connections with external IP addresses, excluding any specified in the allowlist
+| where isnotempty(RemoteIP) and ipv4_is_private(RemoteIP) == false and RemoteIP !in (ot_ip_allowlist)
+// Summarize activity to reduce alert volume
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    ConnectionCount = count(),
+    ActionTypes = make_set(ActionType),
+    RemoteIPs = make_set(RemoteIP),
+    InitiatingProcesses = make_set(InitiatingProcessFileName)
+    by DeviceName, DeviceId, RemotePort, LocalIP
+| extend Protocol = case(RemotePort == 502, "Modbus", RemotePort == 20000, "DNP3", "Other")
+| project-reorder
+    StartTime,
+    EndTime,
+    DeviceName,
+    Protocol,
+    RemotePort,
+    LocalIP,
+    ConnectionCount,
+    RemoteIPs,
+    InitiatingProcesses,
+    ActionTypes,
+    DeviceId

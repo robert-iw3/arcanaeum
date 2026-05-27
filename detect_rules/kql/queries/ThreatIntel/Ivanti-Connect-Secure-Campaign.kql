@@ -1,0 +1,167 @@
+// Name: Comprehensive Ivanti Exploitation TTPs
+// Author: RW
+// Date: 2025-08-14
+// Description: A composite rule that detects multiple tactics, techniques, and procedures (TTPs) associated with attacks exploiting
+// Ivanti Connect Secure vulnerabilities, as detailed by JPCERT/CC. This includes DLL side-loading, specific malware artifacts,
+// C2 communication, persistence mechanisms, defense evasion, and lateral movement patterns.
+// Tactic: Persistence, Privilege Escalation, Defense Evasion, Credential Access, Discovery, Command and Control, Lateral Movement
+// Technique: T1574.001, T1027, T1071.001, T1046, T1018, T1136.002, T1098, T1543.003, T1053.005, T1562.001, T1110.001, T1021.001, T1021.002
+// False Positive Sensitivity: Medium
+
+// Part 7: Brute-Force Data Preparation
+// FP Tuning: Adjust the timeframe and failure_threshold to fit your environment's baseline.
+let timeframe = 1h;
+let failure_threshold = 20;
+// Key Logic: Identify source IPs with a high number of failed RDP (LogonType 10) or SMB (LogonType 3) logons to a target device.
+let brute_force_attempts =
+    DeviceLogonEvents
+    | where TimeGenerated > ago(timeframe)
+    | where LogonResult == "Failure"
+    | where LogonType in (3, 10)
+    | summarize FailureCount = count(), StartTime = min(TimeGenerated), EndTime = max(TimeGenerated) by RemoteIP, DeviceName, LogonType
+    | where FailureCount > failure_threshold;
+// --- End of Data Preparation ---
+(
+    // Part 1: DLL Side-Loading via Legitimate Processes
+    DeviceImageLoadEvents
+    // Key Logic: Identifies specific legitimate processes loading DLLs associated with MDifyLoader or the Fscan loader.
+    | where
+        (InitiatingProcessFileName =~ "rmic.exe" and FileName =~ "jli.dll") or
+        (InitiatingProcessFileName =~ "push_detect.exe" and FileName =~ "Microsoft.WindowsAppRuntime.Bootstrap.dll") or
+        (InitiatingProcessFileName =~ "python.exe" and FileName =~ "python311.dll")
+    // FP Tuning: A common pattern for DLL side-loading is for the malicious DLL to be in the same directory as the legitimate executable.
+    | where InitiatingProcessFolderPath == FolderPath
+    and not(FolderPath has_any (@"C:\Program Files", @"C:\Windows\System32", @"C:\Program Files (x86)", @"C:\Windows\SysWOW64"))
+    | project
+        TimeGenerated,
+        DeviceName,
+        DetectionType = "DLL Side-Loading",
+        ActionType = "ImageLoaded",
+        Details = strcat("Legitimate process '", InitiatingProcessFileName, "' loaded suspicious DLL '", FileName, "' from '", FolderPath, "'."),
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        AccountName,
+        ReferenceTechnique = "T1574.001"
+)
+| union (
+    // Part 2: Cobalt Strike & Fscan Artifacts
+    DeviceFileEvents
+    // Key Logic: Detects the creation of known Cobalt Strike beacon files or the Fscan binary.
+    | where ActionType == "FileCreated" and (
+        SHA256 in (
+            "09087fc4f8c261a810479bb574b0ecbf8173d4a8365a73113025bd506b95e3d7", // update.dat (CS)
+            "1652ab693512cd4f26cc73e253b5b9b0e342ac70aa767524264fef08706d0e69", // config.ini (CS)
+            "cff2afc651a9cba84a11a4e275cc9ec49e29af5fd968352d40aeee07fb00445e"  // k.bin (Fscan)
+        ) or
+        (FileName in~ ("update.dat", "config.ini") and InitiatingProcessFileName in~ ("rmic.exe", "push_detect.exe"))
+    )
+    // FP Tuning: The behavioral part (process + filename) may have FPs. Add exclusions for known legitimate updaters if needed.
+    | project
+        TimeGenerated,
+        DeviceName,
+        DetectionType = case(
+            SHA256 == "cff2afc651a9cba84a11a4e275cc9ec49e29af5fd968352d40aeee07fb00445e", "Fscan Binary Dropped",
+            "Cobalt Strike Beacon Dropped"
+        ),
+        ActionType,
+        Details = strcat("File '", FileName, "' (SHA256: ", SHA256, ") created by '", InitiatingProcessFileName, "'."),
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        AccountName = InitiatingProcessAccountName,
+        ReferenceTechnique = case(
+            SHA256 == "cff2afc651a9cba84a11a4e275cc9ec49e29af5fd968352d40aeee07fb00445e", "T1046",
+            "T1027"
+        )
+), (
+    // Part 3: Vshell C2 Communication
+    DeviceNetworkEvents
+    // Key Logic: Detects network traffic to the known vshell C2 domain on port 80.
+    | where RemoteUrl has "proxy.objectlook.com" and RemotePort == 80
+    // FP Tuning: This IOC is specific. If the domain is sinkholed or repurposed, it could generate FPs.
+    | project
+        TimeGenerated,
+        DeviceName,
+        DetectionType = "Vshell C2 Communication",
+        ActionType,
+        Details = strcat("Connection to known C2 URL: ", RemoteUrl),
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        AccountName = InitiatingProcessAccountName,
+        ReferenceTechnique = "T1071.001"
+), (
+    // Part 4: Account Manipulation via CLI
+    DeviceProcessEvents
+    | where FileName in~ ("net.exe", "net1.exe")
+    // Key Logic: Looks for command lines used to add users or add members to privileged groups.
+    | where ProcessCommandLine has_any ("user /add", "group /add", "localgroup /add")
+        and (ProcessCommandLine contains "/domain" or ProcessCommandLine has_any ("Administrators", "Domain Admins", "Enterprise Admins", "Remote Desktop Users"))
+    // FP Tuning: Legitimate administrative activity will trigger this. Filter by known admin accounts or look for execution from unexpected parent processes if noisy.
+    | project
+        TimeGenerated,
+        DeviceName,
+        DetectionType = "Account Manipulation via CLI",
+        ActionType = "ProcessCreated",
+        Details = ProcessCommandLine,
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        AccountName,
+        ReferenceTechnique = "T1136.002, T1098"
+), (
+    // Part 5: Suspicious Service or Scheduled Task Creation
+    DeviceEvents
+    | where ActionType in ("ServiceCreated", "ScheduledTaskCreated")
+    // Key Logic: Identifies services or tasks whose executable path is in a suspicious, user-writable location.
+    | where (ActionType == "ServiceCreated" and RegistryValueData has_any (@"C:\Users\", @"C:\ProgramData\", @"C:\Temp\", @"C:\Windows\Temp\", @"\AppData\"))
+        or (ActionType == "ScheduledTaskCreated" and ProcessCommandLine has_any (@"C:\Users\", @"C:\ProgramData\", @"C:\Temp\", @"C:\Windows\Temp\", @"\AppData\"))
+    // FP Tuning: Legitimate software may use these locations. Exclude known good software by InitiatingProcessFileName or path.
+    | project
+        TimeGenerated,
+        DeviceName,
+        DetectionType = iif(ActionType == "ServiceCreated", "Suspicious Service Creation", "Suspicious Scheduled Task"),
+        ActionType,
+        Details = iif(ActionType == "ServiceCreated", strcat("Service Name: ", RegistryKey, ", Image Path: ", RegistryValueData), ProcessCommandLine),
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        AccountName,
+        ReferenceTechnique = iif(ActionType == "ServiceCreated", "T1543.003", "T1053.005")
+), (
+    // Part 6: ETW Bypass via ntdll.dll Patching
+    DeviceEvents
+    | where ActionType == "VirtualProtectApiCall"
+    // Key Logic: Detects a process making the ntdll.dll memory region writable, a prerequisite for patching ETW functions.
+    | where FileName =~ "ntdll.dll" and (NewMemoryProtection == "ExecuteReadWrite" or NewMemoryProtection == "0x40")
+    | where InitiatingProcessId == ModifiedProcessId
+    // FP Tuning: Legitimate software like anti-cheat or DRM may do this. Exclude known legitimate processes if they generate FPs.
+    | project
+        TimeGenerated,
+        DeviceName,
+        DetectionType = "ETW Bypass via ntdll.dll Patching",
+        ActionType,
+        Details = strcat("Process '", InitiatingProcessFileName, "' changed memory protection for '", FileName, "' to '", NewMemoryProtection, "'."),
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        AccountName,
+        ReferenceTechnique = "T1562.001"
+), (
+    // Part 7: Brute-Force Followed by Successful Logon
+    brute_force_attempts
+    | join kind=inner (
+        DeviceLogonEvents
+        | where TimeGenerated > ago(timeframe)
+        | where LogonResult == "Success"
+        | where LogonType in (3, 10)
+    ) on RemoteIP, DeviceName, LogonType
+    // Key Logic: Correlate the brute-force activity with a successful logon from the same source IP to the same target device.
+    | where TimeGenerated between (StartTime .. (EndTime + 5m))
+    // FP Tuning: Exclude known vulnerability scanners or misconfigured servers if they cause noise.
+    | project
+        TimeGenerated,
+        DeviceName,
+        DetectionType = "Brute-Force Followed by Successful Logon",
+        ActionType = "LogonSuccess",
+        Details = strcat("Successful ", iif(LogonType == 3, "SMB", "RDP"), " logon from ", RemoteIP, " after ", FailureCount, " failures."),
+        InitiatingProcessFileName = "N/A",
+        InitiatingProcessCommandLine = "N/A",
+        AccountName,
+        ReferenceTechnique = "T1110.001, T1021.001, T1021.002"
+)

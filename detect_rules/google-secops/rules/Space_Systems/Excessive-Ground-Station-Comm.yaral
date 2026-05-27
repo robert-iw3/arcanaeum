@@ -1,0 +1,40 @@
+rule excessive_ground_station_communication_attempts {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects a single ground station or source IP attempting to communicate with an anomalously high number of satellites in a short period. This rule triggers on a high volume of total communication attempts, which can be an indicator of an attacker looping through stolen radio configurations to discover or attack multiple satellites, as described in the Hack-A-Sat competition. The outcome fields provide the distinct satellite count for analyst verification."
+    false_positives = "Legitimate ground stations, especially those at polar locations, may communicate with a high number of satellites as part of normal operations. The total communication attempts threshold needs to be tuned based on baseline activity for specific ground stations."
+    tactic = "TA0007"
+    technique = "T1595"
+    tags = "SATELLITE, ICS, GROUND_STATION, DISCOVERY, NETWORK"
+
+  events:
+    // This rule assumes ground station communication logs are ingested as GENERIC_LOG.
+    // Field names like principal.hostname for the ground station and target.hostname for the satellite are placeholders and should be adjusted to match the actual UDM mapping.
+    $comm.metadata.event_type = "GENERIC_LOG"
+    $comm.metadata.product_log_name = "ground_station_communication"
+    $comm.principal.hostname = $ground_station_id
+    $comm.principal.ip = $source_ip
+    $comm.target.hostname = $satellite_id
+
+  match:
+    // Correlate communication attempts from the same ground station and source IP over a 30 minute window.
+    $ground_station_id, $source_ip over 30m
+
+  outcome:
+    // A medium risk score is assigned as this requires analyst verification of the distinct satellite count.
+    $risk_score = 45
+    $ground_station_id = array_distinct($ground_station_id)
+    $principal_ip = array_distinct($source_ip)
+    // Provide key metrics for the analyst to determine if the activity is malicious.
+    $total_attempts = count($comm.metadata.id)
+    $distinct_satellite_count = count_distinct($comm.target.hostname)
+    $targeted_satellites = array_distinct($comm.target.hostname)
+    $first_seen = min($comm.metadata.event_time)
+    $last_seen = max($comm.metadata.event_time)
+
+  condition:
+    // Trigger if more than 10 total communication attempts are seen from the same source.
+    // This threshold is a proxy for suspicious activity and should be tuned.
+    #comm > 10
+}

@@ -1,0 +1,66 @@
+{
+  "data": {
+    "type": "signal_correlation",
+    "attributes": {
+      "name": "Active Directory and Network Attack TTPs",
+      "enabled": true,
+      "cases": [
+        {
+          "name": "Suspicious Computer Account Creation by Non-Admin User",
+          "status": "high",
+          "query": "source:securityeventlog @EventID:4741 -@SubjectUserName:*\\$ | lookup identity_admin_users.csv user=@SubjectUserName OUTPUT user as is_admin | filter is_admin IS NULL"
+        },
+        {
+          "name": "NTLM Relay Attempt",
+          "status": "high",
+          "query": "source:securityeventlog @EventID:4624 @LogonType:3 @AuthenticationPackageName:NTLM -@IpAddress:(127.0.0.1 OR ::1) | eval dest_host=lower(split(@host, '.')[@index:0]), src_workstation=lower(split(@WorkstationName, '.')[@index:0]) | filter dest_host=src_workstation AND dest_host!='' AND dest_host!='-'"
+        },
+        {
+          "name": "LDAP ACL Modification for DCSync or Privileged Group",
+          "status": "critical",
+          "query": "source:securityeventlog ((@EventID:5136 @ObjectClass:domainDNS @AttributeLDAPDisplayName:nTSecurityDescriptor @AttributeValue:(*1131f6ad-9c07-11d1-f79f-00c04fc2dcd2* OR *1131f6aa-9c07-11d1-f79f-00c04fc2dcd2* OR *9923a32a-3607-11d2-b9be-0000f87a36b2*)) OR (@EventID:(4728 OR 4732 OR 4756) @TargetUserName:(Enterprise Admins OR Domain Admins OR Administrators OR Schema Admins))) -@SubjectUserName:(*DWM-1 OR *UMFD-1 OR (?i)MSOL_.*)"
+        },
+        {
+          "name": "LLMNR, NBT-NS, or IPv6 DNS Poisoning",
+          "status": "high",
+          "query": "(source:networktraffic @transport:udp @network.destination.port:(137 OR 5355) | groupby @network.source.ip dc(@network.destination.ip) as victim_count | filter victim_count > 10) OR (source:networkresolution @qtype:(AAAA OR ANY) | lookup authorized_dns_servers.csv server_ip=@network.destination.ip OUTPUT server_ip as is_authorized | filter is_authorized IS NULL AND @network.destination.ip!=0.0.0.0 | groupby @network.destination.ip dc(@network.source.ip) as victim_count | filter victim_count > 1)"
+        },
+        {
+          "name": "Impacket secretsdump.py (DCSync Attack)",
+          "status": "critical",
+          "query": "source:securityeventlog @EventID:4662 @Properties:(?i)(1131f6ad-9c07-11d1-f79f-00c04fc2dcd2 OR 1131f6aa-9c07-11d1-f79f-00c04fc2dcd2 OR 9923a32a-3607-11d2-b9be-0000f87a36b2) | lookup domain_controllers.csv ip=@IpAddress OUTPUT ip as is_dc | filter is_dc IS NULL -@SubjectUserName:(*DWM-1 OR *UMFD-1 OR *\\$)"
+        },
+        {
+          "name": "Evil-WinRM Remote PowerShell Session",
+          "status": "high",
+          "query": "source:powershell @EventID:4104 @ScriptBlockText:(*function\\ prompt.* AND *Evil-WinRM.*) -@ScriptBlockText:*(grep OR select-string)*"
+        }
+      ],
+      "group_by_fields": ["@SubjectUserName", "@AccountName", "@user", "@network.source.ip"],
+      "distinct_fields": ["case_id"],
+      "correlation": {
+        "expression": "distinct_count >= 2",
+        "timeframe": "1h"
+      },
+      "message": "Active Directory and Network Attack TTPs: {distinct_count} distinct techniques detected for user {@SubjectUserName OR @AccountName OR @user} or source IP {@network.source.ip}. Techniques: {case_names}. Details: {@TargetUserName OR @ObjectName OR @MemberName OR @ScriptBlockText OR @reason OR @AttributeValue}. Timeframe: {first_activity} to {last_activity}",
+      "severity": "high",
+      "tags": [
+        "security:attack",
+        "tactic:TA0003",
+        "tactic:TA0004",
+        "tactic:TA0005",
+        "tactic:TA0006",
+        "tactic:TA0008",
+        "technique:T1136.002",
+        "technique:T1558.003",
+        "technique:T1098",
+        "technique:T1550.002",
+        "technique:T1021.006",
+        "technique:T1059.001"
+      ],
+      "options": {
+        "evaluation_window": "1h"
+      }
+    }
+  }
+}

@@ -1,0 +1,107 @@
+// title: GRU Unit 29155 (Ember Bear/Cadet Blizzard) Activity
+// description: >-
+//   Detects a wide range of Tactics, Techniques, and Procedures (TTPs) associated with the Russian GRU Unit 29155, also known as Ember Bear, Cadet Blizzard, and UNC2589.
+//   This rule covers process execution, network communications, and specific tool usage as detailed in CISA advisory AA24-249A.
+// references:
+//   - https://www.cisa.gov/news-events/cybersecurity-advisories/aa24-249a
+// author: RW
+// date: 2025-08-21
+// tags:
+//   - attack.g1003
+//   - attack.execution
+//   - attack.t1059.001
+//   - attack.defense_evasion
+//   - attack.t1562.001
+//   - attack.command_and_control
+//   - attack.t1090.003
+//   - attack.t1572
+//   - attack.credential_access
+//   - attack.t1003
+//   - attack.lateral_movement
+//   - attack.t1550.002
+//   - attack.exfiltration
+//   - attack.t1567.002
+//   - threat_group.ember_bear
+//   - threat_group.cadet_blizzard
+//   - threat_group.unc2589
+//   - threat_group.uac-0056
+// falsepositives:
+//   - Some of the tools detected, such as Rclone, ProxyChains, and Ngrok, are legitimate and may be used by system administrators or developers. It is important to investigate the context of the activity.
+//   - Network connections to Discord's CDN are common. The detection should be correlated with other suspicious activity.
+// level: high
+
+let lookback = 1d;
+let c2_ips = dynamic([
+    "5.226.139.66", "45.141.87.11", "46.101.242.222", "62.173.140.223", "79.124.8.66",
+    "90.131.156.107", "112.51.253.153", "112.132.218.45", "154.21.20.82", "179.43.133.202",
+    "179.43.142.42", "179.43.162.55", "179.43.175.38", "179.43.175.108", "179.43.176.60",
+    "179.43.187.47", "179.43.189.218", "185.245.84.227", "185.245.85.251", "194.26.29.84",
+    "194.26.29.95", "194.26.29.98", "194.26.29.251"
+]);
+let c2_domains = dynamic([
+    "interlinks.top", "3proxy.ru", "nssm.cc"
+]);
+let gost_hash_md5 = "896e0f54fc67d72d94b40d7885f10c51";
+
+(union isfuzzy=true
+    // --- Process Creation Detections ---
+    (DeviceProcessEvents
+    | where Timestamp > ago(lookback)
+    | where
+        // Detects PowerShell execution with a specific encoded command used by WhisperGate's stage2.exe
+        (ProcessCommandLine has_all ("-enc", "UwB0AGEAcgB0AC0AUwBsAGUAZQBwACAALQBzACAAMQAwAA==") and FileName =~ "powershell.exe") or
+        // Detects PowerShell command to exclude the C: drive from Windows Defender scans
+        (ProcessCommandLine has_all ("Set-MpPreference", "-ExclusionPath", "C:\\") and FileName =~ "powershell.exe") or
+        // Detects AdvancedRun.exe used to disable Windows Defender
+        (FileName endswith "AdvancedRun.exe" and ProcessCommandLine has_any ("stop WinDefend", "rmdir 'C:\\ProgramData\\Microsoft\\Windows Defender'")) or
+        // Detects InstallUtil.exe being run from a temp directory, as seen in WhisperGate
+        (FileName endswith "InstallUtil.exe" and InitiatingProcessFolderPath has_any ("C:\\Users\\", "C:\\Windows\\Temp\\")) or
+        // Detects execution of Impacket's secretsdump.py for credential dumping
+        (ProcessCommandLine has "secretsdump.py") or
+        // Detects execution of Impacket's psexec.py for lateral movement
+        (ProcessCommandLine has "psexec.py") or
+        // Detects Rclone usage for data exfiltration to MEGA. Can be noisy.
+        (FileName in~ ("rclone.exe", "rclone") and ProcessCommandLine has "mega.nz") or
+        // Detects GOST tunneling tool execution patterns
+        (FileName endswith "java" and ProcessCommandLine has "-L" and ProcessCommandLine has_any ("socks5://", "rtcp://")) or
+        // Detects ProxyChains usage. Can be legitimate.
+        (ProcessCommandLine has "proxychains") or
+        // Detects su-bruteforce tool
+        (ProcessCommandLine has "su-bruteforce") or
+        // Detects execution of LinPEAS privilege escalation script
+        (ProcessCommandLine has_any ("linpeas.sh", "linpeas.py"))
+    | extend RuleName = "GRU Unit 29155 - Suspicious Process", Tactic = "Execution", Technique = "T1059"
+    | project-reorder Timestamp, DeviceName, RuleName, Tactic, Technique, ProcessCommandLine, FileName, InitiatingProcessFolderPath
+    ),
+    // --- File Detections ---
+    (DeviceFileEvents
+    | where Timestamp > ago(lookback)
+    | where MD5 == gost_hash_md5
+    | extend RuleName = "GRU Unit 29155 - GOST Tool Hash", Tactic = "Command and Control", Technique = "T1572"
+    | project-reorder Timestamp, DeviceName, RuleName, Tactic, Technique, FileName, FolderPath, MD5
+    ),
+    // --- Network and DNS Detections ---
+    (DeviceNetworkEvents
+    | where Timestamp > ago(lookback)
+    | where
+        // Detects connections to known jump host and C2 domains
+        (domain_suffix(RemoteUrl, 1) in (c2_domains) or domain_suffix(RemoteUrl, 2) in (c2_domains)) or
+        // Detects connections to known Unit 29155 C2 IP addresses
+        (RemoteIP in (c2_ips)) or
+        // Detects network connections to Discord CDN. Correlate with other activity.
+        (RemoteUrl has "cdn.discordapp.com/attachments/") or
+        // Ngrok is a legitimate service but is often abused. Investigate context.
+        (RemoteUrl has "ngrok.com")
+    | extend RuleName = "GRU Unit 29155 - C2 Network Connection", Tactic = "Command and Control", Technique = "T1071"
+    | project-reorder Timestamp, DeviceName, RuleName, Tactic, Technique, RemoteIP, RemoteUrl, InitiatingProcessFileName
+    ),
+    (DeviceEvents
+    | where Timestamp > ago(lookback)
+    | where ActionType == "DnsQuery"
+    | extend DnsQuery = tostring(parse_json(AdditionalFields).QueryName)
+    // Detects DNS queries associated with Iodine DNS tunneling tool
+    | where DnsQuery =~ "dns.test658324901domain.me"
+    | extend RuleName = "GRU Unit 29155 - Iodine DNS Tunneling", Tactic = "Command and Control", Technique = "T1071.004"
+    | project-reorder Timestamp, DeviceName, RuleName, Tactic, Technique, DnsQuery, InitiatingProcessFileName
+    )
+)

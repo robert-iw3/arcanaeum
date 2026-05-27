@@ -1,0 +1,42 @@
+// Name: PyTorch Model Loaded from Untrusted Location
+// Author: RW
+// Date: 2025-08-14
+// Description: Detects a Python process that appears to be loading a PyTorch model from a temporary, download, or other non-standard directory.
+// Loading models from unverified sources can lead to Remote Code Execution (RCE) if the model file is malicious.
+// False Positive Sensitivity: Medium
+
+let model_extensions = dynamic([
+    ".pt",
+    ".pth",
+    ".bin"
+]);
+// Define common locations where untrusted files might be stored.
+let untrusted_paths = dynamic([
+    "/tmp/",
+    "/var/tmp/",
+    "/dev/shm/",
+    "/mnt/",
+    "Downloads",
+    "C:\\Windows\\Temp\\",
+    "\\AppData\\Local\\Temp"
+]);
+DeviceProcessEvents
+| where ActionType == "ProcessCreated"
+// Focus on Python processes which are used to run PyTorch.
+| where FileName has_any ("python", "python3", "python.exe")
+// Check if the command line references a model file by its extension.
+| where ProcessCommandLine has_any (model_extensions)
+// Identify if the model path in the command line points to a common temporary or download location.
+| where ProcessCommandLine has_any (untrusted_paths)
+// FP Tuning: Data scientists or automated scripts might legitimately load models from these locations.
+// Consider excluding known project paths or specific user accounts to reduce noise.
+// For example: | where ProcessCommandLine !contains "/path/to/legit/project/"
+| project
+    Timestamp = TimeGenerated,
+    DeviceName,
+    ProcessFileName = FileName,
+    ProcessCommandLine,
+    AccountName,
+    ProcessId,
+    ParentProcessId,
+    ParentProcessCommandLine = InitiatingProcessCommandLine

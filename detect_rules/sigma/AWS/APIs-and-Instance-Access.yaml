@@ -1,0 +1,40 @@
+title: AWS Lateral Movement via Cloud API Remote Access
+id: 43532e6f-315e-411b-8544-f31cf2117aa4
+status: experimental
+description: Detects attempts to move laterally within an AWS environment by gaining interactive access to compute resources like EC2 instances or ECS containers. Attackers with sufficient permissions can use services like EC2 Instance Connect, SSM Session Manager, or ECS Execute Command to gain shell access and pivot to other resources.
+references:
+  - https://cloud.hacktricks.wiki/en/pentesting-cloud/aws-security/index.html
+author: RW
+date: 2025-08-19
+tags:
+  - attack.lateral_movement
+  - attack.t1021.001
+  - attack.t1021.004
+  - attack.t1021.007
+  - attack.t1578.002
+  - cloud
+  - aws
+logsource:
+  service: aws.cloudtrail
+  category: cloud
+detection:
+  selection:
+    eventName:
+      - 'SendSSHPublicKey'  # Enables temporary SSH access to an EC2 instance
+      - 'StartSession'      # Starts an interactive shell session on an EC2 instance via SSM
+      - 'ExecuteCommand'    # Runs an interactive command or shell on an ECS container
+    errorCode:      # Filter for successful API calls only
+  filter_known_activity:
+    # This filter is a placeholder for known good behavior.
+    # Tune this section to exclude legitimate administrative roles, users, or automation tools.
+    userIdentity.arn:
+      - 'arn:aws:iam::*:role/aws-service-role/ssm.amazonaws.com/AWSServiceRoleForAmazonSSM'
+    userAgent:
+      - 'AWS-SystemsManager-StartSession-Web-Console' # Legitimate console access
+      - 'aws-toolkit-vscode' # AWS Toolkit for IDEs
+  condition: selection and not filter_known_activity
+falsepositives:
+  - Legitimate administrative access by DevOps or SREs for troubleshooting, debugging, or maintenance.
+  - Automated systems that use these services for management tasks.
+  - It is crucial to baseline normal administrative activity and add filters for known benign user identities and user agents.
+level: medium

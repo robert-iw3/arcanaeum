@@ -1,0 +1,37 @@
+// Name: Uncommon NTDS.dit Parent Process
+// Author: RW
+// Date: 2025-08-08
+// Description: Detects access to or creation of the ntds.dit file by processes running from uncommon locations such as
+//              temporary or user-writable directories. APTs may use this technique to dump credentials while
+//              attempting to evade standard detections.
+// False Positive Sensitivity: Medium
+// Tactics: Credential Access
+// Techniques: T1003.003
+
+let suspicious_paths = dynamic([
+    @'\AppData\',
+    @'\Temp\',
+    @'\Public\',
+    @'\PerfLogs\',
+    @'\apache',
+    @'\tomcat'
+]);
+DeviceFileEvents
+// Looks for file events related to the Active Directory database file
+| where FolderPath endswith @"\ntds.dit"
+// Identifies when the initiating process is running from an unusual or user-writable location
+| where InitiatingProcessFolderPath has_any (suspicious_paths)
+// FP Tuning: Legitimate backup or security software might access ntds.dit.
+// If this generates noise, exclude known legitimate processes by name or path.
+// For example: | where InitiatingProcessFileName !~ "legit_backup.exe"
+| project
+    TimeGenerated,
+    DeviceName,
+    ActionType,
+    FileName,
+    FolderPath,
+    InitiatingProcessFileName,
+    InitiatingProcessFolderPath,
+    InitiatingProcessCommandLine,
+    ReportId,
+    InitiatingProcessId

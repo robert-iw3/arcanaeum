@@ -1,0 +1,60 @@
+// Name: Azure Storage Object Replication Policy Created
+// Author: RW
+// Date: 2025-10-26
+// Description: Detects the creation or modification of an Azure Storage object replication policy. Threat actors can abuse this feature to configure automatic replication of blobs to a storage account under their control, effectively propagating malicious payloads or exfiltrating data across environments in a supply chain-style attack.
+// Tactics: Command and Control, Exfiltration, Lateral Movement
+// Techniques: T1105
+// References: https://www.microsoft.com/en-us/security/blog/2025/10/20/inside-the-attack-chain-threat-activity-targeting-azure-blob-storage/
+// False Positive Sensitivity: Medium
+
+let timeframe = 1d;
+// Placeholder for trusted user accounts or service principals that normally create these policies (e.g., IaC service principals, storage admins).
+// Legitimate disaster recovery or geo-distribution setups will create these policies.
+let Actor_Allowlist = dynamic([]);
+// Placeholder for trusted IP ranges (e.g., corporate network, VPN, Azure DevOps service tags).
+let IP_Allowlist = dynamic([]);
+// Placeholder for subscription IDs that are valid destinations for replication. Replication to other subscriptions is considered suspicious.
+let TrustedDestinationSubscriptions = dynamic([]);
+
+AzureActivity
+| where TimeGenerated > ago(timeframe)
+// Filter for the creation or update of an object replication policy on a storage account.
+| where OperationNameValue =~ "MICROSOFT.STORAGE/STORAGEACCOUNTS/OBJECTREPLICATIONPOLICIES/WRITE"
+| where ActivityStatusValue == "Success"
+// Filter out known benign actors and IPs to reduce noise from legitimate administrative activities.
+| where not(Caller in (Actor_Allowlist)) and not(ipv4_is_in_any_range(CallerIpAddress, IP_Allowlist))
+// Parse the request body to inspect the policy's rules.
+| extend requestbody = todynamic(Properties).requestbody
+// A policy can have multiple rules, so expand them to evaluate each one.
+| mv-expand rule = requestbody.properties.rules
+| extend
+    SourceAccountName = tostring(split(ResourceId, '/')[8]),
+    SourceContainer = tostring(rule.sourceContainer),
+    DestinationContainerResourceId = tostring(rule.destinationContainer),
+    SourceSubscriptionId = SubscriptionId
+// Extract details about the destination from its resource ID.
+| extend
+    DestinationSubscriptionId = tostring(split(DestinationContainerResourceId, '/')[2]),
+    DestinationResourceGroup = tostring(split(DestinationContainerResourceId, '/')[4]),
+    DestinationAccountName = tostring(split(DestinationContainerResourceId, '/')[8]),
+    DestinationContainer = tostring(split(DestinationContainerResourceId, '/')[-1])
+// Identify suspicious conditions. Cross-subscription replication to an untrusted subscription is a strong indicator of malicious activity.
+| extend IsCrossSubscriptionReplication = SourceSubscriptionId != DestinationSubscriptionId
+| extend IsUntrustedDestination = IsCrossSubscriptionReplication and not(DestinationSubscriptionId in (TrustedDestinationSubscriptions))
+// Alert if the policy is created by a non-allowlisted actor/IP, with higher emphasis if it's an untrusted cross-subscription replication.
+| where isnotempty(DestinationAccountName) // Ensure parsing was successful before alerting.
+| project
+    TimeGenerated,
+    Caller,
+    CallerIpAddress,
+    OperationName = OperationNameValue,
+    SourceAccountName,
+    SourceContainer,
+    DestinationAccountName,
+    DestinationContainer,
+    SourceSubscriptionId,
+    DestinationSubscriptionId,
+    IsCrossSubscriptionReplication,
+    IsUntrustedDestination,
+    CorrelationId,
+    ResourceId

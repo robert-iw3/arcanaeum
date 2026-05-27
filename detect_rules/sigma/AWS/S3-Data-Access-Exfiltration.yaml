@@ -1,0 +1,36 @@
+title: AWS S3 Data Access or Creation via S3 Browser
+id: 7b928ff9-cdb2-465f-81f8-1cca1c26193a
+status: experimental
+description: Detects data access (GetObject, HeadObject) or data creation (PutObject) API calls originating from the S3 Browser tool. Threat actors like Bling Libra have used this tool to access and manipulate data in S3 buckets as part of their extortion campaigns.
+references:
+  - https://unit42.paloaltonetworks.com/shinyhunters-ransomware-extortion/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.exfiltration
+  - attack.ta0010
+  - attack.collection
+  - attack.ta0009
+  - attack.t1530
+  - cloud
+  - aws
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+        # S3 Browser is a legitimate tool but has been abused by threat actors like Bling Libra
+    UserAgent|startswith: 'S3 Browser/'
+        # These events indicate accessing object metadata, downloading an object, or uploading an object
+    EventName:
+      - 'HeadObject'
+      - 'GetObject'
+      - 'PutObject'
+    # To reduce noise, consider adding filters for non-standard user identities or IP addresses.
+    # filter:
+    #   ...
+  condition: selection
+falsepositives:
+  - Legitimate use of the S3 Browser tool by administrators, developers, or automated processes for managing S3 data.
+  - This rule may require tuning by filtering for known user identities or IP ranges that are expected to use this tool.
+level: medium

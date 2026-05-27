@@ -1,0 +1,58 @@
+// Name: Data Exfiltration to Cloud Storage for Potential Leak
+// Author: RW
+// Date: 2025-08-08
+// Description: Detects the exfiltration of a large volume of data to common cloud storage or file-sharing services.
+//              This behavior is a common precursor to data being leaked publicly as part of an information warfare
+//              or psychological operation, a tactic used by Iranian-aligned groups. The rule aggregates network traffic
+//              over a one-hour window to identify significant data uploads from a single device to a specific service.
+// False Positive Sensitivity: Medium
+// MITRE ATT&CK: T1537
+
+// Define the data upload threshold in bytes. Default is 100MB.
+let upload_threshold = 100 * 1024 * 1024;
+
+// Define domains for common cloud storage, file sharing, and messaging platforms used for exfiltration.
+// FP Tuning: Add or remove services based on your organization's policies.
+let exfil_domains = dynamic([
+    "dropbox.com",
+    "mega.nz",
+    "drive.google.com",
+    "onedrive.live.com",
+    "wetransfer.com",
+    "sendspace.com",
+    "mediafire.com",
+    "pcloud.com",
+    "box.com",
+    "transfer.sh",
+    "file.io",
+    "api.telegram.org" // Telegram API endpoint
+]);
+
+DeviceNetworkEvents
+| where ActionType == "NetworkConnectionSuccess"
+| where RemoteUrl has_any (exfil_domains)
+| where TotalBytesSent > 0
+// Summarize data sent from a device to a specific URL over a 1-hour window.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    TotalBytesSent = sum(TotalBytesSent),
+    ReportId = makeset(ReportId),
+    InitiatingProcesses = makeset(InitiatingProcessFileName)
+    by DeviceName, RemoteUrl, bin(TimeGenerated, 1h)
+// Apply the threshold to the aggregated data volume.
+| where TotalBytesSent > upload_threshold
+// FP Tuning: Legitimate use of these services can trigger this alert.
+// Consider excluding known corporate-sanctioned applications or devices that regularly transfer large files.
+// For example: | where not (InitiatingProcesses has "approved_backup_app.exe")
+| project
+    StartTime,
+    EndTime,
+    DeviceName,
+    RemoteUrl,
+    TotalBytesSent,
+    InitiatingProcesses
+| extend
+    TotalMBSent = round(todouble(TotalBytesSent) / (1024*1024), 2),
+    Tactic = "Exfiltration",
+    Technique = "T1537"

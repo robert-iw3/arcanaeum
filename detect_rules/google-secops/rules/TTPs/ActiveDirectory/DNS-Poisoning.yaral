@@ -1,0 +1,27 @@
+rule Potential_Rogue_DNSServer_Detection {
+  meta:
+    author = "RW"
+    description = "Detects potential rogue DNS servers by identifying DNS responses from unauthorized servers, excluding 0.0.0.0."
+    severity = "HIGH"
+
+  events:
+    $e.metadata.event_type = "DNS_LOOKUP" // UDM event type for DNS lookups
+    $e.network.dns.query_type in ("AAAA", "ANY") // DNS query type
+
+    // This requires a Chronicle Reference List named "authorized_dns_servers" containing the legitimate server IPs.
+    not $e.principal.ip in %authorized_dns_servers // DNS.dest is the DNS server (principal.ip)
+
+    not $e.principal.ip = "0.0.0.0"
+
+  match:
+    $dns_server_ip = $e.principal.ip // The DNS server IP (DNS.dest)
+    $client_ip = $e.target.ip // The client making the DNS request (DNS.src)
+
+  outcome:
+    $poisoner = $dns_server_ip // Renamed to "poisoner" for consistency
+    $victim_count = count(distinct $client_ip) // Count distinct clients per DNS server
+    $reason = "Potential Rogue DNS Server Detected"
+
+  condition:
+    $e and $victim_count > 1 // Threshold for number of distinct clients
+}

@@ -1,0 +1,57 @@
+// Name: PowerShell XOR Decryption and Execution
+// Author: RW
+// Date: 2025-08-02
+// Description: Detects a PowerShell script performing XOR decryption of a file, writing the output to a new executable, and then executing that new file. This is a common TTP for malware droppers to evade static analysis of payloads.
+// False Positive Sensitivity: Medium. Legitimate software updaters or complex installers might use similar techniques. Review the script content and the reputation of the created file. Consider excluding scripts signed by trusted publishers.
+
+// Define the time window for correlating the events (script, file write, execution).
+let timeWindow = 5m;
+
+// Step 1: Find PowerShell script blocks that contain XOR decryption logic.
+// This requires script block logging (e.g., Event ID 4104) to be enabled and ingested.
+let suspiciousScriptEvents = DeviceEvents
+| where Timestamp > ago(1d)
+| where ActionType == "ScriptControlScriptBlock" // This ActionType is specific to Microsoft Defender for Endpoint.
+// Look for the combination of reading a file, using the XOR operator, and writing a file.
+| where AdditionalFields has_all ("[IO.File]::ReadAllBytes", "-bxor", "[IO.File]::WriteAllBytes")
+| project ScriptTime = Timestamp, DeviceId, ScriptingProcessId = InitiatingProcessId, ScriptBlockText = AdditionalFields;
+
+// Step 2: Find executable files created by the processes that ran the suspicious scripts.
+let fileCreationEvents = DeviceFileEvents
+| where Timestamp > ago(1d)
+| where ActionType == "FileCreated"
+| extend CreatedFilePath = strcat(FolderPath, FileName)
+// Focus on common executable file extensions.
+| where CreatedFilePath has_any (".exe", ".dll", ".scr", ".com")
+| project CreationTime = Timestamp, DeviceId, ScriptingProcessId = InitiatingProcessId, CreatedFilePath;
+
+// Step 3: Find all process execution events.
+let processExecutionEvents = DeviceProcessEvents
+| where Timestamp > ago(1d)
+| project ExecutionTime = Timestamp, DeviceId, ExecutedFilePath = strcat(FolderPath, FileName), ExecutedProcessCommandLine = ProcessCommandLine;
+
+// Step 4: Correlate the events in sequence: Script -> File Creation -> File Execution.
+suspiciousScriptEvents
+// Join suspicious scripts with files they created.
+| join kind=inner (
+    fileCreationEvents
+) on DeviceId, ScriptingProcessId
+// The file must be created within the time window after the script runs.
+| where CreationTime between (ScriptTime .. (ScriptTime + timeWindow))
+// Join the created files with their subsequent execution.
+| join kind=inner (
+    processExecutionEvents
+) on DeviceId
+// The path of the executed file must match the path of the file created by the script.
+| where ExecutedFilePath =~ CreatedFilePath
+// The execution must happen within the time window after the file was created.
+| where ExecutionTime between (CreationTime .. (CreationTime + timeWindow))
+// Summarize the results to create a single alert per incident.
+| summarize
+    StartTime = min(ScriptTime),
+    EndTime = max(ExecutionTime),
+    ScriptBlock = take_any(ScriptBlockText),
+    DecryptedAndExecutedFile = take_any(CreatedFilePath),
+    ExecutedCommandLine = take_any(ExecutedProcessCommandLine)
+    by DeviceId, ScriptingProcessId
+| project-reorder StartTime, EndTime, DeviceId, ScriptingProcessId, DecryptedAndExecutedFile, ExecutedCommandLine, ScriptBlock

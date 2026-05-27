@@ -1,0 +1,48 @@
+title: Suspicious Process Execution from Logon Script
+status: experimental
+description: >-
+  Detects suspicious child processes spawned by the Group Policy logon script handler (gpscript.exe).
+  Adversaries may abuse logon scripts to execute malicious commands, perform reconnaissance, or establish persistence.
+  This can expose sensitive data or grant unauthorized access.
+references:
+  - https://attack.mitre.org/techniques/T1037/001/
+author: RW
+date: 2025-08-18
+tags:
+  - attack.persistence
+  - attack.execution
+  - attack.t1037.001
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  # This selection identifies the parent process as the Group Policy script handler.
+  selection_parent:
+    ParentImage|endswith: '\gpscript.exe'
+  # This selection identifies child processes that are unusual or suspicious in the context of a logon script.
+  selection_child:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+      - '\cmd.exe'
+      - '\cscript.exe'
+      - '\wscript.exe'
+      - '\whoami.exe'
+      - '\net.exe'
+      - '\net1.exe'
+      - '\nltest.exe'
+      - '\systeminfo.exe'
+      - '\quser.exe'
+      - '\qwinsta.exe'
+      - '\reg.exe'
+      - '\certutil.exe'
+      - '\bitsadmin.exe'
+      - '\rundll32.exe'
+      - '\regsvr32.exe'
+  # The condition requires both the specific parent and a suspicious child to be present.
+  condition: selection_parent and selection_child
+falsepositives:
+  - Legitimate logon scripts may use tools like 'net.exe' to map network drives (e.g., `net use ...`).
+  - Scripts used for software inventory or system checks might use 'systeminfo.exe'.
+  - The list of suspicious child processes may need to be tuned for your environment. Consider excluding specific, known-good command lines if they generate noise.
+level: medium

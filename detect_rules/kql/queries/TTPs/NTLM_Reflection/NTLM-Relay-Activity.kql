@@ -1,0 +1,60 @@
+// Name: Potential NTLM Relay Activity
+// Author: RW
+// Date: 2025-08-07
+// Tactic: Credential Access
+// Technique: T1557.001, Man-in-the-Middle: LLMNR, NBT-NS, and mDNS Poisoning
+// False Positive Sensitivity: Medium
+// - This detection may trigger on legitimate administrative servers, vulnerability scanners, or software deployment systems
+//   that authenticate to multiple hosts as part of their normal function. These systems should be added to the 'excluded_ips' list below.
+//
+// Detection Comment Level: Medium
+
+let timeframe = 1h;
+// The threshold for the number of distinct machine accounts a single source IP authenticates with.
+// A relay tool will often handle authentications from multiple coerced victims.
+// This value may need tuning for your environment.
+let machine_account_threshold = 3;
+
+// Add legitimate servers that perform broad network authentication (e.g., SCCM, backup servers, vulnerability scanners) to this list to prevent false positives.
+let excluded_ips = dynamic([
+    "192.168.1.10", // Placeholder for a known admin server
+    "10.0.0.50"     // Placeholder for a known scanner
+]);
+
+SecurityEvent
+| where TimeGenerated > ago(timeframe)
+// Focus on successful network logons (Type 3) using the NTLM protocol.
+| where EventID == 4624
+| where AuthenticationPackageName == "NTLM"
+| where LogonType == 3
+// Filter for machine account authentications, which are the primary target of coercion attacks leading to relay.
+| where AccountType == "Machine" or TargetUserName endswith "$"
+// Exclude local and known-benign source IPs.
+| where isnotempty(IpAddress) and IpAddress !in ("127.0.0.1", "::1")
+| where IpAddress !in (excluded_ips)
+// In a relay, the source machine name (victim) should not be the same as the target machine.
+| where isnotempty(WorkstationName) and isnotempty(Computer) and Computer != WorkstationName
+// Aggregate by the source IP, which represents the potential attacker relay host.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    RelayedAccounts = make_set(TargetUserName),
+    UniqueRelayedAccountCount = dcount(TargetUserName),
+    RelayedFromVictims = make_set(WorkstationName),
+    RelayTargets = make_set(Computer)
+    by IpAddress, LogonTypeName
+// A single source IP authenticating on behalf of multiple distinct machine accounts is highly suspicious.
+| where UniqueRelayedAccountCount > machine_account_threshold
+| extend
+    timestamp = StartTime,
+    HostCustomEntity = IpAddress,
+    AlgorithmCustomEntity = "NTLM Relay"
+| project-reorder
+    timestamp,
+    HostCustomEntity,
+    UniqueRelayedAccountCount,
+    RelayedAccounts,
+    RelayedFromVictims,
+    RelayTargets,
+    StartTime,
+    EndTime

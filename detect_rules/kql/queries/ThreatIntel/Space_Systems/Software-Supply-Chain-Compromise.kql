@@ -1,0 +1,52 @@
+// Name: Anomalous Code File Creation in Sensitive Directory
+// Author: RW
+// Date: 2025-08-18
+// Description: Detects the creation of executable, library, or script files in sensitive directories by unexpected processes.
+// This could indicate a software supply chain compromise or unauthorized software deployment, similar to the technique described
+// in the CYSAT demo where a vulnerable JAR file was placed on a satellite system.
+// False Positives: Legitimate software updates, administrative scripts, or new software installations may trigger this alert.
+// Tuning the 'sensitive_directories' and 'legitimate_updaters' lists is crucial to reduce noise.
+// Tags: T1195.002, Supply Chain Compromise, Space, Satellite
+
+// Define sensitive directories where critical software or hosted payloads reside.
+// These paths are examples and MUST be customized for the target environment (e.g., ground control systems, development environments).
+let sensitive_directories = dynamic([
+    @"C:\Program Files\SatelliteControl\",
+    @"C:\ProgramData\HostedPayloads\",
+    @"/opt/payload_apps/",
+    @"/srv/satellite_services/",
+    @"/usr/lib/",
+    @"/usr/local/lib/",
+    @"C:\Windows\System32\"
+]);
+
+// Define common code/script file extensions. The CYSAT demo involved a JAR file.
+let code_extensions = dynamic([".jar", ".dll", ".so", ".exe", ".py", ".sh", ".bin", ".ps1"]);
+
+// Whitelist legitimate software installer and updater processes.
+// This list should be expanded based on legitimate activity in your environment.
+let legitimate_updaters = dynamic(["msiexec.exe", "yum", "apt", "patch.exe", "dnf", "trustedinstaller.exe", "waagent.exe"]);
+
+DeviceFileEvents
+| where ActionType == "FileCreated"
+// Filter for common code or script file extensions.
+| where FileName has_any (code_extensions)
+// Exclude files created by known legitimate updater processes.
+| where not(InitiatingProcessFileName in~ (legitimate_updaters))
+// The mv-expand and startswith combination provides a scalable way to check for path prefixes.
+| mv-expand dir = sensitive_directories to typeof(string)
+| where FolderPath startswith dir
+// For higher fidelity, consider filtering for unsigned files by uncommenting the following line.
+//| where IsSigned == false
+| project
+    TimeGenerated,
+    DeviceName,
+    FileName,
+    FolderPath,
+    SHA1,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessParentFileName,
+    InitiatingProcessAccountName,
+    IsSigned,
+    Publisher

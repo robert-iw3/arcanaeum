@@ -1,0 +1,30 @@
+title: AWS Lateral Movement Detected
+id: af89f5f9-2eee-476d-80e4-d4caac0ec844
+status: experimental
+description: >-
+  Detects potential lateral movement within an AWS environment. This includes cloud-to-cloud movement via role assumption and cloud-to-ground movement via remote access services like Systems Manager (SSM) or EC2 Instance Connect.
+references:
+  - https://www.chrisfarris.com/post/aws-ir/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.lateral_movement
+  - attack.t1078.004
+  - attack.t1219
+  - attack.t1059.006
+  - attack.t1098.004
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    eventName:
+      - AssumeRole # Cloud-to-cloud lateral movement by assuming a role in another account.
+      - StartSession # Cloud-to-ground remote access via SSM.
+      - SendCommand # Cloud-to-ground remote execution via SSM.
+      - SendSSHPublicKey # Cloud-to-ground SSH access setup via EC2 Instance Connect.
+  condition: selection
+falsepositives:
+  - These API calls are very common for legitimate administrative tasks, cross-account access, and automated instance management.
+  - It is highly recommended to filter for events initiated by non-standard users/roles, from untrusted IP addresses, or targeting sensitive resources to reduce noise.
+level: medium

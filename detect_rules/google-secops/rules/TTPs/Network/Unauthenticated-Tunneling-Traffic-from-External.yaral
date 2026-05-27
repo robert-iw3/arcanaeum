@@ -1,0 +1,82 @@
+rule unauthenticated_tunneling_traffic_from_external_source {
+  meta:
+    description = "Detects inbound traffic from the internet to internal hosts using common tunneling protocols (IPIP, GRE, 6in4, GUE). This can indicate a misconfigured device or an attempt to establish an unauthorized channel, which is a prerequisite for several novel DoS and spoofing attacks as described in the 'Haunted by Legacy' research paper."
+    author = "RW"
+    date = "2025-08-16"
+    reference = "https://github.com/vanhoefm/tunneltester"
+    tags = "TUNNEL, DOS, SPOOFING, IPIP, GRE, GUE, NETWORK"
+    tactic = "TA0001, TA0005"
+    technique = "T1090"
+    false_positives = "Legitimate, unencrypted tunneling from known business partners or cloud services. Misidentified internal IP ranges. To reduce false positives, populate the 'known_tunnel_peers' reference list with the IP addresses of legitimate external tunnel endpoints."
+    severity = "Medium"
+
+  events:
+    // Event filter for network connections
+    $traffic.metadata.event_type = "NETWORK_CONNECTION"
+
+    // Define source and destination IPs
+    $traffic.principal.ip = $src_ip
+    $traffic.target.ip = $dest_ip
+
+    // Filter for traffic from external to internal networks
+    // Note: This assumes standard RFC1918 internal address spaces. Adjust if your environment uses public IPs internally.
+    (
+      net.ip_in_range_cidr($dest_ip, "10.0.0.0/8") or
+      net.ip_in_range_cidr($dest_ip, "172.16.0.0/12") or
+      net.ip_in_range_cidr($dest_ip, "192.168.0.0/16")
+    )
+    and not (
+      net.ip_in_range_cidr($src_ip, "10.0.0.0/8") or
+      net.ip_in_range_cidr($src_ip, "172.16.0.0/12") or
+      net.ip_in_range_cidr($src_ip, "192.168.0.0/16")
+    )
+
+    // Filter for common tunneling protocols by IANA number or UDP port for GUE
+    // IPIP (4), GRE (47), 6in4/4in6 (41), GUE (UDP/6080)
+    (
+      $traffic.network.ip_protocol = 4 or
+      $traffic.network.ip_protocol = 47 or
+      $traffic.network.ip_protocol = 41 or
+      ($traffic.network.transport_protocol = "UDP" and $traffic.target.port = 6080)
+    )
+
+    // Placeholder for excluding known legitimate tunnel peers.
+    // This should be populated with a reference list of your organization's known peers.
+    // Example: not $src_ip in %known_tunnel_peers
+
+  match:
+    // Group events by the external source and internal destination over a 1-hour window
+    $src_ip, $dest_ip over 1h
+
+  outcome:
+    // Set a medium risk score
+    $risk_score = 40
+
+    // Consolidate key fields for the detection alert
+    $principal_ip = array_distinct($traffic.principal.ip)
+    $target_ip = array_distinct($traffic.target.ip)
+    $target_hostname = array_distinct($traffic.target.hostname)
+    $event_count = count_distinct($traffic.metadata.id)
+    $total_bytes = sum($traffic.network.sent_bytes) + sum($traffic.network.received_bytes)
+
+    // Identify the specific tunneling protocol(s) observed
+    $tunnel_protocols = array_distinct(
+        if($traffic.network.transport_protocol = "UDP" and $traffic.target.port = 6080,
+           "GUE (UDP/6080)",
+           if($traffic.network.ip_protocol = 4,
+              "IPIP (4)",
+              if($traffic.network.ip_protocol = 47,
+                 "GRE (47)",
+                 if($traffic.network.ip_protocol = 41,
+                    "6in4/4in6 (41)",
+                    "Unknown"
+                 )
+              )
+           )
+        )
+    )
+
+  condition:
+    // Trigger if more than 5 unauthenticated tunnel connections are seen from the same source to the same destination
+    #traffic > 5
+}

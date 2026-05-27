@@ -1,0 +1,31 @@
+title: IAM Identity Center Abuse for Persistence or Access
+id: 4ac44a4d-ef07-4fba-9b3c-8c42d48509d2
+status: experimental
+description: >-
+  Detects the creation of users, permission sets, or account assignments within AWS IAM Identity Center (formerly AWS SSO). An attacker who has compromised a management or delegated administrator account can abuse IAM Identity Center to create new users and grant them administrative access to member accounts, establishing persistence or enabling lateral movement.
+references:
+  - https://hackingthe.cloud/aws/general-knowledge/aws_organizations_defaults/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.t1098
+  - attack.t1136
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    # These events are part of the workflow to create a new user and assign them permissions to an AWS account via IAM Identity Center.
+    # The eventSource for user creation is 'identitystore.amazonaws.com', while permission set and assignment actions are under 'sso.amazonaws.com'.
+    eventSource:
+      - 'sso.amazonaws.com'
+      - 'identitystore.amazonaws.com'
+    eventName:
+      - 'CreateUser' # Creates a new user in the Identity Store associated with IAM Identity Center.
+      - 'CreatePermissionSet' # Creates a new permission set that defines a level of access.
+      - 'ProvisionPermissionSet' # Provisions a permission set for use in a specified AWS account.
+      - 'CreateAccountAssignment' # Assigns a user/group access to an AWS account using a permission set.
+  condition: selection
+falsepositives:
+  - Legitimate administrative activity when setting up or managing users, groups, and access permissions within AWS IAM Identity Center. This activity should be correlated with change management records.
+level: medium

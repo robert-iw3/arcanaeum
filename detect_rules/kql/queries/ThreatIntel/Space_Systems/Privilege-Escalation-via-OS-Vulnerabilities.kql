@@ -1,0 +1,28 @@
+// Name: Suspicious SUID or SGID Bit Set via Chmod
+// Author: RW
+// Date: 2025-08-18
+// Description: Detects the use of the 'chmod' utility to set the SUID or SGID bit on a file. Setting the SUID/SGID bit on a file, especially
+// a shell or a script, is a common privilege escalation technique used by attackers to maintain privileged access. The CYSAT demo highlighted
+// privilege escalation as a key step after initial access.
+// False Positives: Legitimate software installation scripts or system administrators may occasionally set SUID/SGID bits.
+// It is important to review the context, such as the user, parent process, and the file being modified, to determine legitimacy.
+// Exclusions for known administrative activity may be required.
+// Tags: T1548.001, Privilege Escalation, SUID, SGID, Linux
+
+DeviceProcessEvents
+// The process executing the command will most likely be 'chmod'.
+| where FileName =~ "chmod"
+// Look for chmod commands that add the SUID ('u+s' or 4000 bit) or SGID ('g+s' or 2000 bit).
+// This covers symbolic modes and octal modes (e.g., 4755, 2755, 6755).
+| where ProcessCommandLine has_any ("u+s", "g+s") or ProcessCommandLine matches regex @".*\s+[2-7]\d{3}\s+.*"
+// Exclude common package managers and configuration management tools that might perform this action legitimately.
+// This allowlist may need to be tuned for your environment.
+| where InitiatingProcessFileName !in ("yum", "apt", "apt-get", "dpkg", "rpm", "ansible", "puppet", "chef-client")
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    FileName,
+    ProcessCommandLine,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine

@@ -1,0 +1,126 @@
+rule lockbit_ttps_and_iocs {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects multiple Tactics, Techniques, and Procedures (TTPs) and Indicators of Compromise (IOCs) associated with LockBit ransomware campaigns, including DLL sideloading, process masquerading, credential theft, discovery, persistence, and PowerShell-based encryption."
+    tactic = "TA0002, TA0003, TA0004, TA0005, TA0006, TA0007, TA0008, TA0011"
+    technique = "T1059.001, T1071, T1574.002, T1036.005, T1569.002, T1543.003, T1087, T1069, T1555, T1486"
+    false_positives = "Legitimate administrative activity using tools like PsExec, nssm, or discovery commands (net, nltest) may trigger this rule. Tuning may be required for known administrative tools and scripts."
+
+  events:
+    // Event for executable hash-based IOCs
+    $ioc_process_hash.metadata.event_type = "PROCESS_LAUNCH"
+    $ioc_process_hash.target.process.file.sha256 in (
+      "f689ee9af94b00e9e3f0bb072b34caaf207f32dcb4f5782fc9ca351df9a06c97", // Nssm.exe
+      "5ca8e1d001a2c3800afce017424ca471f3cba41f9089791074a9cb7591956430", // Tokenutils.exe
+      "0201a6dbe62d35b81d7cd7d7a731612458644b5e3b1abe414b0ea86d3266ab03", // sd1.exe
+      "1cd644b750884906b707419c8f40598c04f1402e4e93cbf4a33f3254846dc870", // <domain>.exe (Masqueraded MpCmdRun.exe)
+      "011b31d7e12a2403507a71deb33335d0e81f626d08ff68575a298edac45df4cb", // <domain>access.exe (Masqueraded clink_x86.exe)
+      "10f1a789e515fdaf9c04e56b8a5330cfb1995825949e6db8c9eaba4ea9914c97", // jarsigner.exe
+      "6285d32a9491a0084da85a384a11e15e203badf67b1deed54155f02b7338b108", // nxc.exe
+      "785e5aaecd9430451f4b0bad637658e6afeea1e722b3d0dd674cb6a11f4ce286", // encth.exe, dwa.exe
+      "24480dbe306597da1ba393b6e30d542673066f98826cc07ac4b9033137f37dbf"  // o.exe, edge.exe.exe
+    )
+
+    // Event for DLL hash-based IOCs
+    $ioc_module_hash.metadata.event_type = "MODULE_LOAD"
+    $ioc_module_hash.target.file.sha256 in (
+      "edcf76600cd11ef7d6a5c319087041abc604e571239fe2dae4bca83688821a3a", // mpclient.dll
+      "4147589aa11732438751c2ecf3079fb94fa478a01ac4f08d024fb55f7ffb52f3", // clink_dll_x86.dll
+      "086567b46fca2a27d404d9b61bdb482394e1591dc13f1302b813bb2ddf5e54cf"  // jli.dll
+    )
+
+    // Event for C2 network IOCs
+    $ioc_network.metadata.event_type = "NETWORK_CONNECTION"
+    $ioc_network.network.url = "msupdate.updatemicfosoft.com"
+
+    // Event for DLL Sideloading TTP
+    $sideload.metadata.event_type = "MODULE_LOAD"
+    // Key condition: DLL is loaded from the same directory as the executable.
+    $sideload.principal.process.file.directory = $sideload.target.file.directory and $sideload.principal.process.file.directory != ""
+    // Look for known sideloading pairs
+    and (
+      (re.regex($sideload.principal.process.file.full_path, `jarsigner\.exe$`) nocase and re.regex($sideload.target.file.full_path, `jli\.dll$`)) or
+      (re.regex($sideload.principal.process.file.full_path, `MpCmdRun\.exe$`) nocase and re.regex($sideload.target.file.full_path, `mpclient\.dll$`)) or
+      (re.regex($sideload.principal.process.file.full_path, `clink_x86\.exe$`) nocase and re.regex($sideload.target.file.full_path, `clink_dll_x86\.dll$`))
+    )
+
+    // Event for Masquerading TTP
+    $masquerade.metadata.event_type = "PROCESS_LAUNCH"
+    (
+      // svchost.exe should only run from system32
+      (re.regex($masquerade.target.process.file.full_path, `svchost\.exe$`) nocase and $masquerade.target.process.file.directory != "C:\\Windows\\System32") or
+      // Look for other common system processes in suspicious user-writable locations
+      (
+        re.regex($masquerade.target.process.file.full_path, `(explorer|cmd)\.exe$`) nocase and
+        re.regex($masquerade.target.process.file.directory, `^C:\\(Users|ProgramData|Perflogs|Temp)`)
+      )
+    )
+
+    // Event for PsExec with SYSTEM privileges TTP
+    $psexec.metadata.event_type = "PROCESS_LAUNCH"
+    (re.regex($psexec.target.process.file.full_path, `psexec`) nocase or re.regex($psexec.principal.process.file.full_path, `psexesvc`))
+    and re.regex($psexec.target.process.command_line, `\s-s\s`)
+
+    // Event for NSSM Service Installation TTP
+    $nssm.metadata.event_type = "PROCESS_LAUNCH"
+    // nssm.exe is the parent process installing or starting a service
+    re.regex($nssm.principal.process.file.full_path, `nssm\.exe$`) nocase
+    and re.regex($nssm.principal.process.command_line, `(install|start)`) nocase
+    // The child process (the service) has a suspicious name or path
+    and (
+      re.regex($nssm.target.process.file.full_path, `(edge\.exe\.exe|o\.exe)$`) nocase or
+      re.regex($nssm.target.process.file.directory, `^C:\\(Users|ProgramData|Perflogs|Temp)`)
+    )
+
+    // Event for Reconnaissance Commands TTP
+    $discovery.metadata.event_type = "PROCESS_LAUNCH"
+    // Filter for suspicious parent processes to reduce FPs from legitimate admin activity
+    re.regex($discovery.principal.process.file.full_path, `(psexesvc\.exe|wsmprovhost\.exe|wmiprvse\.exe)$`) nocase
+    and (
+      (re.regex($discovery.target.process.file.full_path, `net\.exe$`) nocase and re.regex($discovery.target.process.command_line, `\s(user|group)\s`)) or
+      (re.regex($discovery.target.process.file.full_path, `nltest\.exe$`) nocase and re.regex($discovery.target.process.command_line, `/domain_trusts`)) or
+      (re.regex($discovery.target.process.file.full_path, `query\.exe$`) nocase and re.regex($discovery.target.process.command_line, `\suser`))
+    )
+
+    // Event for Known Credential Theft Tool TTP
+    $cred_theft.metadata.event_type = "PROCESS_LAUNCH"
+    re.regex($cred_theft.target.process.file.full_path, `(TokenUtils\.exe|sd1\.exe)$`) nocase
+
+    // Event for PowerShell Ransomware Script TTP
+    $ps_ransom.metadata.event_type = "PROCESS_LAUNCH"
+    re.regex($ps_ransom.target.process.file.full_path, `powershell\.exe$`) nocase
+    and re.regex($ps_ransom.target.process.command_line, `RSACryptoServiceProvider`)
+    and re.regex($ps_ransom.target.process.command_line, `FromXmlString`)
+    and re.regex($ps_ransom.target.process.command_line, `Encrypt`)
+    and re.regex($ps_ransom.target.process.command_line, `gci`)
+    and re.regex($ps_ransom.target.process.command_line, `Recurse`)
+    and re.regex($ps_ransom.target.process.command_line, `\.xlockxlock`)
+
+  outcome:
+    // Use a high risk score as these are strong indicators of ransomware activity.
+    $risk_score = 75
+
+    // Determine which specific TTP or IOC was detected for alert clarity.
+    $detection_method =
+      if($ioc_process_hash, "IOC - Known Malicious Process Hash",
+      if($ioc_module_hash, "IOC - Known Malicious Module Hash",
+      if($ioc_network, "IOC - C2 Domain Communication",
+      if($sideload, "TTP - DLL Sideloading",
+      if($masquerade, "TTP - Masquerading as System Process",
+      if($psexec, "TTP - PsExec with System privileges",
+      if($nssm, "TTP - NSSM Service Installation",
+      if($discovery, "TTP - Reconnaissance Commands",
+      if($cred_theft, "TTP - Known Credential Theft Tool",
+      if($ps_ransom, "TTP - PowerShell Ransomware Script", "Unknown"))))))))))
+
+    // Consolidate the primary hostname for the alert.
+    $principal_hostname = array_distinct(
+      $ioc_process_hash.principal.hostname, $ioc_module_hash.principal.hostname, $ioc_network.principal.hostname,
+      $sideload.principal.hostname, $masquerade.principal.hostname, $psexec.principal.hostname,
+      $nssm.principal.hostname, $discovery.principal.hostname, $cred_theft.principal.hostname, $ps_ransom.principal.hostname
+    )[0]
+
+  condition:
+    $ioc_process_hash or $ioc_module_hash or $ioc_network or $sideload or $masquerade or $psexec or $nssm or $discovery or $cred_theft or $ps_ransom
+}

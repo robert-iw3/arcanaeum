@@ -1,0 +1,117 @@
+{
+  "data": {
+    "type": "signal_correlation",
+    "attributes": {
+      "name": "LockBit Ransomware Activity Detection",
+      "enabled": true,
+      "cases": [
+        {
+          "name": "Cobalt Strike Beacon Hash",
+          "status": "high",
+          "query": "source:endpoint @process.hash:d8b2d883d3b376833fa8e2093e82d0a118ba13b01a2054f8447f57d9fec67030 | aggregate count by @host, @user, @parent_process.name, @process.name, @process.command_line, @process.hash"
+        },
+        {
+          "name": "Cobalt Strike C2 Domain Detection",
+          "status": "high",
+          "query": "source:network_resolution @dns.query:(*compdatasystems.com OR *retailadvertisingservices.com) | aggregate count by @ip.src, @ip.dst, @dns.query"
+        },
+        {
+          "name": "Cobalt Strike C2 / GhostSOCKS / SystemBC IP Detection",
+          "status": "high",
+          "query": "source:network_traffic @ip.dst:(31.172.83.162 OR 159.100.14.254 OR 185.236.232.20 OR 91.142.74.28 OR 195.2.70.38 OR 38.180.61.247 OR 93.115.26.127 OR 46.21.250.52) | aggregate count by @ip.src, @ip.dst, @port.dst, @user, @process.name"
+        },
+        {
+          "name": "Rclone for Exfiltration",
+          "status": "high",
+          "query": "source:endpoint @process.name:rclone.exe @process.command_line:(\" copy \" OR \" sync \") @process.command_line:(mega: OR ftp: OR sftp: OR dropbox: OR onedrive: OR gdrive:) @process.command_line:(\"--no-console\" OR \"--auto-confirm\" OR \"-q\") | aggregate collect(@process.command_line) AS process by @host, @user, @parent_process.name"
+        },
+        {
+          "name": "Process Injection into WUAUCLT.exe",
+          "status": "high",
+          "query": "source:endpoint @process.name:wuauclt.exe @process.target:lsass.exe @signature:/(0x1010|0x1410|0x1fffff)/ | aggregate collect(@process.command_line) AS process by @host, @user, @parent_process.name, @signature"
+        },
+        {
+          "name": "Disabling Windows Defender",
+          "status": "high",
+          "query": "source:endpoint (@process.name:powershell.exe @process.command_line:(Set-MpPreference AND DisableRealtimeMonitoring AND ($true OR 1)) OR @registry.path:*\\SOFTWARE\\Policies\\Microsoft\\Windows Defender\\Real-Time Protection\\DisableRealtimeMonitoring @registry.value:(0x00000001 OR 1)) | aggregate collect(coalesce(@process.command_line, @registry.path + \" set to \" + @registry.value)) AS details by @timestamp, coalesce(@process.host, @registry.host) AS dest, coalesce(@process.user, @registry.user) AS user, coalesce(@parent_process.name, @registry.process_name) AS parent_process, case(@process.command_line IS NOT NULL => \"PowerShell Command\", true => \"Registry Modification\") AS activity_type"
+        },
+        {
+          "name": "PsExec and BITSAdmin for Ransomware",
+          "status": "high",
+          "query": "source:endpoint (@parent_process.name:PSEXESVC.exe OR (@parent_process.name:wmiprvse.exe @process.name:bitsadmin.exe @process.command_line:\" /transfer \")) | aggregate collect(@process.command_line) AS process, collect(@process.name) AS process_name by @host, @user, @parent_process.name, case(@parent_process.name = \"PSEXESVC.exe\" => \"PsExec Remote Execution\", @parent_process.name = \"wmiprvse.exe\" => \"WMI/BITSAdmin Payload Download\") AS threat_pattern"
+        },
+        {
+          "name": "Scheduled Task for Persistence",
+          "status": "high",
+          "query": "source:endpoint @process.name:schtasks.exe @process.command_line:(\"/create\" AND (\"/ru SYSTEM\" OR @process.command_line:(*%PUBLIC%* OR *C:\\Users\\Public\\* OR *C:\\ProgramData\\* OR *%TEMP%*) OR @process.command_line:(\"*rundll32*\" OR \"*powershell*\" OR \"*mshta*\" OR \"*regsvr32*\"))) | aggregate count by @host, @user, @parent_process.name, @process.command_line"
+        },
+        {
+          "name": "Registry Run Key for Persistence",
+          "status": "high",
+          "query": "source:endpoint @registry.path:*\\Software\\Microsoft\\Windows\\CurrentVersion\\Run* @registry.value:(*%PUBLIC%* OR *\\Users\\Public\\* OR *%APPDATA%* OR *\\AppData\\Roaming\\* OR *%TEMP%* OR *\\AppData\\Local\\Temp\\* OR *\\Windows\\Temp\\* OR *C:\\ProgramData\\*) @registry.value:(*.exe* OR *.dll* OR *.bat* OR *.vbs* OR *.ps1* OR *.scr*) | aggregate count by @host, @user, @registry.process_name, @registry.path, @registry.value_name, @registry.value"
+        },
+        {
+          "name": "Remote Service Creation for Lateral Movement",
+          "status": "high",
+          "query": "source:endpoint @service.action:installed (@service.path:(*\\Users\\Public\\* OR *C:\\ProgramData\\* OR *\\AppData\\* OR *\\Windows\\Temp\\*) OR (@service.path:(*cmd.exe* OR *powershell.exe*) AND @service.path:(\"* -encodedcommand *\" OR \"* -w hidden *\" OR \"* /c *\")) OR (@service.path:*rundll32.exe* AND @service.path:(*\\Users\\Public\\* OR *C:\\ProgramData\\* OR *\\AppData\\* OR *\\Windows\\Temp\\*)) OR (len(@service.name) < 10 AND @service.name:/^[a-zA-Z0-9]+$/)) | aggregate count by @host, @user, @service.name, @service.path, @service.start_type"
+        },
+        {
+          "name": "Active Directory Reconnaissance",
+          "status": "high",
+          "query": "source:endpoint ((@process.name:nltest.exe @process.command_line:(\"/dclist:\" OR \"/domain_trusts\")) OR (@process.name:(net.exe OR net1.exe) @process.command_line:(\" group \" AND (\"\\\"Domain Admins\\\"\" OR \"\\\"Enterprise Admins\\\"\" OR \"\\\"Schema Admins\\\"\"))) OR (@process.name:powershell.exe @process.command_line:(Get-ADComputer OR Get-ADUser OR Get-ADGroup OR Get-ADDomain OR \"Import-Module ActiveDirectory\"))) | aggregate collect(@process.command_line) AS process by @host, @user, @parent_process.name"
+        },
+        {
+          "name": "Credential Dumping from Veeam",
+          "status": "high",
+          "query": "source:endpoint (@process.name:powershell.exe @process.command_line:*Veeam-Get-Creds.ps1* OR @script.block:(*Veeam\\Veeam\\ Backup\\ and\\ Replication* AND *[dbo].[Credentials]* AND *SELECT*password*)) | aggregate collect(coalesce(@process.command_line, @script.block)) AS details by @timestamp, coalesce(@process.host, @script.host) AS dest, coalesce(@process.user, @script.user) AS user, @parent_process.name"
+        },
+        {
+          "name": "Accessing Shared Account Passwords",
+          "status": "high",
+          "query": "source:endpoint @process.command_line:(*passwords.txt* OR *password.txt* OR *creds.txt* OR *credentials.txt* OR *passwords.docx* OR *credentials.docx* OR *passwords.xlsx* OR *credentials.xlsx* OR *secrets.txt* OR *account*password* OR *shared*password* OR *shared_account_passwords.docx*) | aggregate collect(@process.command_line) AS process by @host, @user, @parent_process.name"
+        },
+        {
+          "name": "NTDS.dit Access Attempt",
+          "status": "high",
+          "query": "source:endpoint ((@process.name:ntdsutil.exe @process.command_line:(\" ifm \" AND (\" create \" OR \" cr \"))) OR (@process.name:(copy.exe OR xcopy.exe OR robocopy.exe) @process.command_line:*\\NTDS\\ntds.dit)) | aggregate count by @host, @user, @parent_process.name, @process.command_line"
+        }
+      ],
+      "group_by_fields": ["@host", "@ip.src", "@user"],
+      "distinct_fields": ["case_id"],
+      "correlation": {
+        "expression": "distinct_count >= 2",
+        "timeframe": "1h"
+      },
+      "message": "LockBit Ransomware Activity Detected: {distinct_count} distinct TTPs on host {@host}, source IP {@ip.src}, or user {@user}. Techniques: {case_names}. Details: {@process.command_line OR @dns.query OR @ip.dst OR @signature OR @registry.value OR @service.path OR @script.block}. Timeframe: {first_activity} to {last_activity}",
+      "severity": "high",
+      "tags": [
+        "security:attack",
+        "tactic:TA0001",
+        "tactic:TA0002",
+        "tactic:TA0005",
+        "tactic:TA0006",
+        "tactic:TA0007",
+        "tactic:TA0010",
+        "technique:T1059.001",
+        "technique:T1059.003",
+        "technique:T1543.003",
+        "technique:T1574.002",
+        "technique:T1055",
+        "technique:T1112",
+        "technique:T1078.004",
+        "technique:T1567.002",
+        "technique:T1018",
+        "technique:T1003.001",
+        "technique:T1003.003",
+        "malware:lockbit",
+        "tool:cobalt_strike",
+        "tool:rclone",
+        "tool:systembc",
+        "tool:ghostsocks"
+      ],
+      "options": {
+        "evaluation_window": "1h"
+      }
+    }
+  }
+}

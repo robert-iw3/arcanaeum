@@ -1,0 +1,91 @@
+{
+    "siems": [
+        {
+            "_comment0": "SIEM type: splunk, elastic, opensearch, or standard (for generic JSON-based SIEMs)",
+            "type": "splunk",
+            "_comment1": "Endpoint URL (Splunk HEC: https://<host>:8088/services/collector/event for on-prem or cloud)",
+            "endpoint": "https://splunk.example.com:8088",
+            "_comment2": "For Splunk Cloud, use https://input-<instance>.cloud.splunk.com:8088/services/collector/event",
+            "_comment3": "Authentication token (required for Splunk HEC; optional for standard)",
+            "token": "splunk_hec_token",
+            "_comment4": "Path to CA certificate file (e.g., /app/certs/ca.pem) for self-signed/custom CA; set to null for trusted CAs",
+            "ca_cert": null,
+            "_comment5": "Enable SSL verification (true/false); set to false only for testing with warning",
+            "ssl_verify": true,
+            "_comment6": "Splunk index for logs (optional, defaults to main)",
+            "index": "trellix_logs",
+            "_comment7": "Splunk sourcetype (optional, defaults to trellix_log)",
+            "sourcetype": "trellix_log",
+            "_comment8": "Batch size for this SIEM (optional, overrides global batch_size)",
+            "batch_size": 100,
+            "_comment9": "Optional username and password for basic auth (if needed instead of token)",
+            "username": null,
+            "password": null
+        },
+        {
+            "type": "elastic",
+            "_comment10": "Endpoint URL (Elasticsearch: https://<host>:9200 for on-prem or cloud)",
+            "endpoint": "https://elasticsearch.example.com:9200",
+            "_comment11": "For Elastic Cloud, use https://<cloud_id>.es.<region>.<provider>:9243",
+            "_comment12": "Authentication token (optional, use for API key - base64 encoded 'id:api_key' or tuple via code)",
+            "token": "elastic_api_key",
+            "_comment13": "Optional username and password for basic auth (overrides token if set)",
+            "username": null,
+            "password": null,
+            "ca_cert": "/app/certs/ca.pem",
+            "ssl_verify": true,
+            "_comment14": "Elasticsearch index for logs (required)",
+            "index": "trellix_logs",
+            "batch_size": 500
+        },
+        {
+            "type": "opensearch",
+            "_comment15": "Endpoint URL (OpenSearch: https://<host>:9200 for on-prem or AWS)",
+            "endpoint": "https://opensearch.example.com:9200",
+            "_comment16": "For AWS OpenSearch, use https://search-<domain>-<id>.<region>.es.amazonaws.com",
+            "_comment17": "Authentication token (optional, use for API key or bearer token)",
+            "token": null,
+            "_comment18": "Optional AWS region for AWS SigV4 auth (if set, uses AWS credentials from env)",
+            "aws_region": "us-east-1",
+            "_comment19": "Optional username and password for basic auth (overrides token if set)",
+            "username": null,
+            "password": null,
+            "ca_cert": null,
+            "ssl_verify": true,
+            "_comment20": "OpenSearch index for logs (required)",
+            "index": "trellix_logs",
+            "batch_size": 500
+        },
+        {
+            "type": "standard",
+            "_comment21": "Endpoint URL for generic JSON POST (e.g., QRadar, ArcSight)",
+            "endpoint": "https://siem.example.com/api/logs",
+            "_comment22": "Optional token for authentication",
+            "token": null,
+            "ca_cert": null,
+            "ssl_verify": true,
+            "batch_size": 100
+        }
+    ],
+    "_comment23": "Log parsing configuration",
+    "_comment24": "Log directories to monitor (discovered automatically if empty)",
+    "log_paths": [
+        "/var/log/trellix",
+        "/var/log/mcafee",
+        "/var/McAfee/agent/logs",
+        "/var/Trellix/agent/logs",
+        "/var/log/trellix/solidcore",
+        "/var/log/mcafee/solidcore"
+    ],
+    "_comment25": "Log format: text, csv, or xml",
+    "log_format": "text",
+    "_comment26": "Global batch size for log parsing (overridden by siem.batch_size if specified)",
+    "batch_size": 100,
+    "_comment27": "Field mappings for custom SIEM fields (used for standard type)",
+    "field_mappings": {
+        "timestamp": "event_time",
+        "severity": "log_level",
+        "module": "event_module",
+        "message": "event_details"
+    }
+}

@@ -1,0 +1,65 @@
+rule DnsC2FrameworkActivity {
+  meta:
+    name = "DNS C2 Framework Activity"
+    author = "RW"
+    date = "2025-08-06"
+    mitre_ttps = "T1071.004"
+    description = "Detects potential DNS C2 activity by correlating suspicious DNS query patterns with the processes that initiated them. Identifies non-standard applications making a high volume of unique DNS queries to a single domain, indicative of C2 frameworks like Sliver, Havoc, or Mythic."
+    severity = "MEDIUM"
+    false_positives = "Legitimate applications performing numerous DNS lookups or domains with many unique subdomains. Tuning of allowlists and thresholds is crucial."
+
+  // --- Rule Tuning ---
+  // Set the threshold for the number of unique subdomains queried by a single process.
+  // C2 frameworks often use unique subdomains for each beacon or task.
+  strings:
+    $subdomain_count_threshold = 20
+
+  events:
+    // Event 1: DNS Query Event
+    $dns_query.metadata.event_type = "NETWORK_DNS"
+    $dns_query.network.dns.questions.name != ""
+    not $dns_query.principal.process.file.full_path in %process_allowlist // Use a Chronicle reference list
+    not $dns_query.network.dns.questions.name in %domain_allowlist // Use a Chronicle reference list
+
+    // Event 2: Network Connection Event (to identify the process)
+    $net_conn.metadata.event_type = "NETWORK_CONNECTION"
+    $net_conn.network.target.port = 53
+    $net_conn.principal.process.file.full_path != ""
+
+    // Correlate DNS query with network connection by IP and within a time window
+    $dns_query.principal.ip = $net_conn.principal.ip
+    $dns_query.metadata.event_timestamp between $net_conn.metadata.event_timestamp - 30s and $net_conn.metadata.event_timestamp + 30s
+
+    // Extract registrable domain using strings.extract_domain
+    $dns_query.network.dns.questions.name = $full_domain_name
+    strings.extract_domain($full_domain_name) = $registrable_domain
+
+  match:
+    // Group by process, client IP, and registrable domain over the specified timeframe
+    $dns_query.principal.process.file.full_path, $dns_query.principal.ip, $registrable_domain
+    group by $dns_query.principal.process.file.full_path, $dns_query.principal.ip, $registrable_domain
+    // For historical hunting, you'd specify the timeframe in the search query.
+
+  outcome:
+    $start_time = min($dns_query.metadata.event_timestamp)
+    $end_time = max($dns_query.metadata.event_timestamp)
+    $initiating_process_file_name = $dns_query.principal.process.file.full_path
+    $client_ip = $dns_query.principal.ip
+    $suspicious_domain = $registrable_domain
+    $unique_query_count = count_distinct($dns_query.network.dns.questions.name) // `dcount` equivalent
+    $sample_queries = array_distinct($dns_query.network.dns.questions.name) limit 5 // `make_set` equivalent
+
+    // Map entities for investigation.
+    $src_ip_custom_entity = $client_ip
+    $process_custom_entity = $initiating_process_file_name
+    $domain_custom_entity = $suspicious_domain
+
+  condition:
+    $unique_query_count > $subdomain_count_threshold // Alert when unique queries exceed threshold
+}
+
+// Reference Lists (to be created in Chronicle):
+// 1.  **process_allowlist:** Create a Chronicle Reference List named `process_allowlist` and populate it with:
+//     svchost.exe, msedge.exe, chrome.exe, firefox.exe, teams.exe, outlook.exe, onedrive.exe, msmpeng.exe, sense.exe
+// 2.  **domain_allowlist:** Create a Chronicle Reference List named `domain_allowlist` and populate it with:
+//     mcas.ms, protection.outlook.com, windowsupdate.com, live.com, office.com

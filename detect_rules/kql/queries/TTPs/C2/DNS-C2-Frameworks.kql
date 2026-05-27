@@ -1,0 +1,87 @@
+// Name: DNS C2 Framework Activity
+// Author: RW
+// Date: 2025-08-06
+// MITRE TTPs: T1071.004
+// Description: This rule detects potential DNS C2 activity by correlating suspicious DNS query patterns
+//              with the processes that initiated them. It identifies non-standard applications making a
+//              high volume of unique DNS queries to a single domain, a pattern indicative of C2 frameworks
+//              like Sliver, Havoc, or Mythic.
+
+// --- Rule Tuning ---
+let timeframe = 1h;
+// Set the threshold for the number of unique subdomains queried by a single process.
+// C2 frameworks often use unique subdomains for each beacon or task.
+let subdomain_count_threshold = 20;
+
+// --- False Positive Mitigation ---
+// Allowlist legitimate processes that are known to perform numerous DNS lookups.
+// Tuning Note: Add any internal tools or other legitimate software specific to your environment.
+let process_allowlist = dynamic([
+    "svchost.exe",
+    "msedge.exe",
+    "chrome.exe",
+    "firefox.exe",
+    "teams.exe",
+    "outlook.exe",
+    "onedrive.exe",
+    "msmpeng.exe",
+    "sense.exe"
+]);
+// Allowlist domains that are known to generate a high number of unique subdomain queries.
+let domain_allowlist = dynamic([
+    "mcas.ms",
+    "protection.outlook.com",
+    "windowsupdate.com",
+    "live.com",
+    "office.com"
+]);
+
+// Create a dataset of DNS queries enriched with the initiating process name.
+// This join correlates DnsEvents with DeviceNetworkEvents based on the device IP and a tight time window.
+// Note: This join can be resource-intensive and may require optimization in large environments.
+let DnsWithProcess = DnsEvents
+| where TimeGenerated > ago(timeframe)
+| join kind=inner hint.strategy=shuffle (
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(timeframe)
+    | where RemotePort == 53 and isnotempty(InitiatingProcessFileName)
+    | project ProcessTime = TimeGenerated, DeviceIP, InitiatingProcessFileName
+) on $left.ClientIP == $right.DeviceIP
+// Correlate events that occurred within a 1-minute window of each other.
+| where ProcessTime between (TimeGenerated - 30s .. TimeGenerated + 30s)
+| project TimeGenerated, ClientIP, Name, InitiatingProcessFileName;
+
+DnsWithProcess
+// Filter out common processes and domains to reduce false positives.
+| where not(InitiatingProcessFileName in~ (process_allowlist))
+| where not(Name has_any (domain_allowlist))
+// Extract the registrable domain (e.g., 'google.com' from 'sub.www.google.com') to group related queries.
+| extend domain_parts = split(Name, '.')
+| extend registrable_domain = iif(
+    array_length(domain_parts) > 1,
+    strcat(domain_parts[-2], '.', domain_parts[-1]),
+    Name
+)
+// Aggregate by process and domain to find suspicious beaconing patterns.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    UniqueQueryCount = dcount(Name),
+    SampleQueries = make_set(Name, 5)
+    by InitiatingProcessFileName, ClientIP, registrable_domain
+// Alert when an unusual process makes many unique subdomain queries to a single domain.
+| where UniqueQueryCount > subdomain_count_threshold
+| project
+    StartTime,
+    EndTime,
+    InitiatingProcessFileName,
+    ClientIP,
+    registrable_domain,
+    UniqueQueryCount,
+    SampleQueries
+| extend
+    // Map entities for investigation.
+    timestamp = StartTime,
+    SrcIpCustomEntity = ClientIP,
+    ProcessCustomEntity = InitiatingProcessFileName,
+    DomainCustomEntity = registrable_domain

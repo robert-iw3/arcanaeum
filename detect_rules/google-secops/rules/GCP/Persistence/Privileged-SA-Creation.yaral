@@ -1,0 +1,50 @@
+rule gcp_privileged_service_account_creation {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects the creation of a Google Cloud service account that is subsequently granted a highly privileged role, such as Owner, within a short time frame. This pattern can indicate privilege escalation or persistence attempts by an attacker."
+    false_positives = "Legitimate administrative actions, especially by infrastructure-as-code (IaC) tools like Terraform or by administrators setting up new services. Consider excluding known administrative users or service accounts from this rule."
+    tags = "GCP, PRIVILEGE_ESCALATION, PERSISTENCE, IAM, T1136.003"
+    tactic = "TA0004, TA0003"
+    technique = "T1136.003"
+
+  events:
+    // Event 1: A new service account is created.
+    $creation.metadata.event_type = "GCP_IAM_SERVICE_ACCOUNT_CREATE"
+    $creation.metadata.product_event_type = "google.iam.admin.v1.CreateServiceAccount"
+    // Capture the email address of the newly created service account and the actor.
+    $sa_email = $creation.target.user.email_addr
+    $principal_user = $creation.principal.user.email_addr
+
+    // Event 2: An IAM policy is updated, granting permissions.
+    $binding.metadata.event_type = "GCP_IAM_POLICY_UPDATE"
+    $binding.metadata.product_event_type = "SetIamPolicy"
+    // Ensure the same user is performing both actions.
+    $binding.principal.user.email_addr = $principal_user
+
+    // Check the IAM policy delta for the addition of the new service account to a privileged role.
+    any $delta in $binding.security_result.iam_policy_delta.binding_deltas:
+      $delta.action = "ADD" and
+      // The member field includes a "serviceAccount:" prefix.
+      $delta.member = "serviceAccount:" + $sa_email and
+      // Check for highly privileged roles. "roles/owner" is the most critical.
+      $delta.role = "roles/owner"
+      // Capture the role for the outcome section.
+      $privileged_role = $delta.role
+
+  match:
+    // Correlate the events by the service account email and the principal over a 5 minute window.
+    $sa_email, $principal_user over 5m
+
+  outcome:
+    // High risk score due to the direct path to privilege escalation.
+    $risk_score = 75
+    $principal_ip = array_distinct($creation.principal.ip)
+    $actor = $principal_user
+    $created_service_account = $sa_email
+    $granted_role = array_distinct($privileged_role)
+    $project_id = array_distinct($binding.resource.project.name)
+
+  condition:
+    $creation and $binding
+}

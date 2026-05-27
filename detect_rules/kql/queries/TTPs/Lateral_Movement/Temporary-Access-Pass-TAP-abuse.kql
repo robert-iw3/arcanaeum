@@ -1,0 +1,72 @@
+// Name: Correlated TAP Abuse and Multi-User Sign-in from Single Device
+// Author: RW
+// Date: 2025-08-10
+// Description: This query correlates multiple indicators of Temporary Access Pass (TAP) abuse. It detects when multiple users,
+//              who recently had a TAP created for them, sign in from the same non-corporate device. This pattern is highly
+//              indicative of an attacker creating TAPs for compromised accounts and using a single attacker-controlled device
+//              to obtain Primary Refresh Tokens (PRTs).
+// False Positive Sensitivity: Low. The correlation of multiple distinct indicators (TAP creation + multi-user sign-in + non-corporate device)
+// significantly reduces the likelihood of false positives.
+// Tuning: Adjust 'TimeWindow', 'UserCountThreshold', and 'TapUserThreshold' to match your environment's risk tolerance and baseline activity.
+
+// Define time window and thresholds
+let TimeWindow = 1d;
+let UserCountThreshold = 3; // Minimum number of total distinct users signing in from the device
+let TapUserThreshold = 2;   // Minimum number of those users who must have had a recent TAP
+
+// Step 1: Find all users who had a TAP created within the time window
+let TapUsers =
+    AuditLogs
+    | where TimeGenerated > ago(TimeWindow)
+    | where Category == "UserManagement" and OperationName == "Admin registered temporary access pass for user" and Result == "success"
+    | mv-expand TargetResources
+    | where isnotempty(TargetResources.userPrincipalName)
+    | extend TargetUserPrincipalName = tostring(TargetResources.userPrincipalName)
+    | extend ActorUserPrincipalName = tostring(InitiatedBy.user.userPrincipalName)
+    | project TapCreationTime = TimeGenerated, TargetUserPrincipalName, ActorUserPrincipalName;
+
+// Step 2: Find non-corporate devices used by multiple users
+let SuspiciousDeviceSignins =
+    SigninLogs
+    | where TimeGenerated > ago(TimeWindow)
+    | where ResultType == 0 // Successful sign-ins
+    | where isnotempty(DeviceId) and isnotempty(UserPrincipalName)
+    // Filter for attacker-registered devices (typically not managed or compliant)
+    | where DeviceDetail.trustType == "Azure AD registered"
+    | where tobool(DeviceDetail.isManaged) == false and tobool(DeviceDetail.isCompliant) == false
+    | summarize
+        StartTime = min(TimeGenerated),
+        EndTime = max(TimeGenerated),
+        AllUsersOnDevice = make_set(UserPrincipalName),
+        DistinctIPAddresses = make_set(IPAddress)
+        by DeviceId
+    | where array_length(AllUsersOnDevice) >= UserCountThreshold;
+
+// Step 3: Correlate the suspicious devices with the users who had TAPs created
+SuspiciousDeviceSignins
+| mv-expand User = AllUsersOnDevice to typeof(string)
+// Join with TAP creation events to find users who both signed into the device and had a TAP created
+| join kind=inner (TapUsers) on $left.User == $right.TargetUserPrincipalName
+// Group the correlated events back by the device to create a single alert
+| summarize
+    StartTime = any(StartTime),
+    EndTime = any(EndTime),
+    AllUsersOnDevice = any(AllUsersOnDevice),
+    DistinctIPAddresses = any(DistinctIPAddresses),
+    UsersWithTaps = make_set(User),
+    TapCreators = make_set(ActorUserPrincipalName)
+    by DeviceId
+| extend TotalUserCountOnDevice = array_length(AllUsersOnDevice)
+| extend UsersWithTapsCount = array_length(UsersWithTaps)
+// Final filter: ensure the number of users with TAPs on this device meets our threshold
+| where UsersWithTapsCount >= TapUserThreshold
+| project
+    StartTime,
+    EndTime,
+    DeviceId,
+    TotalUserCountOnDevice,
+    UsersWithTapsCount,
+    AllUsersOnDevice,
+    UsersWithTaps,
+    TapCreators,
+    DistinctIPAddresses

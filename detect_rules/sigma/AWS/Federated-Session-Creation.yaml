@@ -1,0 +1,26 @@
+title: AWS Federated Session Creation via GetFederationToken
+id: 5bb2af85-08ff-479c-95a2-9625f7206ffe
+status: experimental
+description: |
+  Detects the use of the 'sts:GetFederationToken' API call. Adversaries can use this call to create a federated user session from a compromised IAM user. This session remains active even if the original IAM user's access keys are deactivated, allowing for persistent access to the AWS environment.
+references:
+  - https://www.crowdstrike.com/en-us/blog/how-adversaries-persist-with-aws-user-federation/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.t1098.001
+  - attack.t1136.003
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+        # Detects the GetFederationToken API call
+    eventName: 'GetFederationToken'
+    eventSource: 'sts.amazonaws.com'
+        # Focus on sessions created from an IAM User, as highlighted in the research
+    userIdentity.sessionContext.sessionIssuer.type: 'IAMUser'
+  condition: selection
+falsepositives:
+  - This API call can be used legitimately by proxy applications or custom identity brokers to get temporary credentials. It is important to baseline normal usage of this API call within your environment and exclude legitimate use cases.
+level: medium

@@ -1,0 +1,86 @@
+{
+  "name": "Malicious VSCode Extension Activity",
+  "type": "signal_correlation",
+  "message": "Malicious VSCode Activity: {{distinct_count}} method(s) on host {{host}} by user {{usr}}: {{case_names}}",
+  "is_enabled": true,
+  "options": {
+    "detection_method": "signal_correlation",
+    "correlation_rule": {
+      "correlated_by_fields": [
+        "host",
+        "usr"
+      ],
+      "distinct_fields": [
+        "case_id"
+      ],
+      "correlation_expression": "distinct_count >= 1",
+      "correlation_time_frame": 3600
+    },
+    "evaluation_window": 3600,
+    "keep_alive": 3600,
+    "max_signal_duration": 3600
+  },
+  "queries": [
+    {
+      "name": "vscode_uri_handler_installation",
+      "query": "@process.name:Code.exe AND @process.cmdline:*--open-url* AND @process.cmdline:*vscode://*",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "vscode_extension_cli_installation",
+      "query": "@process.name:Code.exe AND @process.cmdline:*--install-extension* AND @process.cmdline:*.vsix*",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "suspicious_outbound_connection_from_vscode",
+      "query": "@process.name:Code.exe AND @url:* -@url:(*marketplace.visualstudio.com* OR *vscode.blob.core.windows.net* OR *update.code.visualstudio.com* OR *gallerycdn.vsassets.io*)",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "file_write_to_vscode_extension_directory",
+      "query": "@file.path:(*\\\\.vscode\\extensions\\* OR *\\\\Microsoft\\ VS\\ Code\\resources\\app\\extensions\\*)",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "suspicious_node_module_loaded_by_vscode",
+      "query": "@process.name:Code.exe AND @dll.name:*.node AND (@dll.path:*\\\\AppData\\Local* OR @dll.path:*\\\\Temp*) -@dll.path:(*\\\\.vscode\\extensions* OR *Microsoft\\ VS\\ Code*)",
+      "data_source": "logs",
+      "aggregation": "count"
+    }
+  ],
+  "cases": [
+    {
+      "name": "VSCode URI Handler Installation",
+      "status": "high",
+      "condition": "vscode_uri_handler_installation >= 1"
+    },
+    {
+      "name": "VSCode Extension CLI Installation",
+      "status": "high",
+      "condition": "vscode_extension_cli_installation >= 1"
+    },
+    {
+      "name": "Suspicious Outbound Connection from VSCode",
+      "status": "medium",
+      "condition": "suspicious_outbound_connection_from_vscode >= 1"
+    },
+    {
+      "name": "File Write to VSCode Extension Directory",
+      "status": "medium",
+      "condition": "file_write_to_vscode_extension_directory >= 1"
+    },
+    {
+      "name": "Suspicious Node Module Loaded by VSCode",
+      "status": "high",
+      "condition": "suspicious_node_module_loaded_by_vscode >= 1"
+    }
+  ],
+  "tags": [
+    "rule_id:vscode_malicious_correlation",
+    "severity:high"
+  ]
+}

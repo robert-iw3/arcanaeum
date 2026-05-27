@@ -1,0 +1,51 @@
+rule unauthorized_it_to_ot_network_communication {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects network traffic originating from a defined IT network segment and destined for a protected OT network segment. This could indicate a network segmentation breach, unauthorized access attempts, or lateral movement from the IT environment into the OT environment. This rule requires tuning by defining the specific IP ranges for your IT and OT networks."
+    reference = "https://isc.sans.edu/diary/lt+appears+that+the+number+of+industrial+devices+accessible+from+the+internet+has+risen+by+30+thousand+over+the+past+three+years/30860"
+    tactic = "TA0008, TA0007"
+    technique = "T1210, T1046"
+    tags = "OT, ICS, IT_OT_CONVERGENCE, LATERAL_MOVEMENT"
+    false_positives = "Authorized communication from systems like data historians, HMIs, or engineering workstations that are designed to bridge IT and OT networks. These should be added to an exclusion list., Misconfiguration of the IT/OT network IP ranges in the rule., Network scanning from authorized vulnerability management tools."
+
+  events:
+    // Event represents a network connection.
+    $conn.metadata.event_type = "NETWORK_CONNECTION"
+
+    // *IMPORTANT*: Define your IT network ranges here.
+    // These are placeholders and MUST be customized for your environment.
+    net.ip_in_range_cidr($conn.principal.ip, [
+      "192.168.0.0/16", // Example: Corporate IT network
+      "10.0.0.0/8"      // Example: Corporate IT network
+    ])
+
+    // *IMPORTANT*: Define your protected OT network ranges here.
+    // These are placeholders and MUST be customized for your environment.
+    net.ip_in_range_cidr($conn.target.ip, [
+      "172.16.0.0/12",   // Example: OT/ICS network
+      "10.100.0.0/16"    // Example: OT/ICS network
+    ])
+
+    // To reduce false positives, exclude known authorized IT systems (e.g., jump servers, data historians)
+    // that are permitted to communicate with the OT network.
+    // Consider using a reference list for easier management: not $conn.principal.ip in %authorized_it_to_ot_sources
+    not net.ip_in_range_cidr($conn.principal.ip, [
+      "192.168.1.50", // Placeholder for an authorized engineering workstation
+      "10.10.1.100"   // Placeholder for a data historian server
+    ])
+
+  outcome:
+    // Risk score is set to high as this violates a critical security boundary.
+    $risk_score = 75
+    $principal_ip = array_distinct($conn.principal.ip)
+    $principal_port = array_distinct($conn.principal.port)
+    $target_ip = array_distinct($conn.target.ip)
+    $target_port = array_distinct($conn.target.port)
+    $network_protocol = array_distinct($conn.network.ip_protocol)
+    $principal_hostname = array_distinct($conn.principal.hostname)
+    $target_hostname = array_distinct($conn.target.hostname)
+
+  condition:
+    $conn
+}

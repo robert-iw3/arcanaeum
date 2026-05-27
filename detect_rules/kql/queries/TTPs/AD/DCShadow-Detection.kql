@@ -1,0 +1,56 @@
+// Name: DCShadow Attack Attempt
+// Author: RW
+// Date: 2025-08-04
+// Description: This rule detects a potential DCShadow attack by identifying when replication-specific
+//              Service Principal Names (SPNs), such as 'GC/' or 'DRS/', are added to a computer account
+//              that is not a known Domain Controller. This is a key step an attacker takes to register a rogue DC.
+// MITRE ATT&CK: T1207
+// False Positive Sensitivity: Medium
+// Tags: Persistence, T1207
+
+let timeWindow = 1d;
+
+// This list is critical for tuning. You MUST populate it with the computer names (without the '$') of all legitimate Domain Controllers.
+let DomainControllers = dynamic([
+    "DC01",
+    "DC02"
+    // Add all DC hostnames here.
+]);
+
+// SPNs typically associated with Domain Controllers and replication.
+let DC_SPNs = dynamic([
+    "GC/", // Global Catalog
+    "DRS/" // Directory Replication Service
+]);
+
+SecurityEvent
+| where TimeGenerated > ago(timeWindow)
+// Event ID 4742: A computer account was changed. This event logs changes to computer object attributes, including SPNs.
+| where EventID == 4742
+| parse EventData with * 'ServicePrincipalNames' '<Data Name="ServicePrincipalNames">' ServicePrincipalNames '</Data>' *
+| where isnotempty(ServicePrincipalNames)
+// The core logic: check if a DC-specific SPN was added to the computer account.
+| where ServicePrincipalNames has_any (DC_SPNs)
+| parse EventData with * 'TargetUserName' '<Data Name="TargetUserName">' TargetUserName '</Data>' *
+| extend TargetComputerName = toupper(trim_end('$', TargetUserName))
+// The alert triggers if the computer account being modified is NOT a known Domain Controller.
+| where TargetComputerName !in (DomainControllers)
+// Summarize to create a concise alert per targeted computer.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    EventCount = count(),
+    AddedSPNs = make_set(ServicePrincipalNames)
+    by TargetComputer = TargetComputerName,
+       ModifyingAccount = SubjectUserName,
+       ModifyingAccountSid = SubjectUserSid,
+       Activity
+// Project the relevant fields for the alert.
+| project
+    StartTime,
+    EndTime,
+    TargetComputer,
+    ModifyingAccount,
+    ModifyingAccountSid,
+    AddedSPNs,
+    EventCount

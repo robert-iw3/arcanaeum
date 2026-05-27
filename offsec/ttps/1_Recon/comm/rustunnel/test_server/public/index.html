@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>rustunnel — Demo App</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <nav>
+    <a href="/" class="active">Home</a>
+    <a href="/about">About</a>
+    <a href="/live">Live Stats</a>
+    <a href="/api-demo">API</a>
+  </nav>
+
+  <main>
+    <div class="hero">
+      <div class="badge">🚀 Running through rustunnel</div>
+      <h1>Hello from the <span>demo app</span></h1>
+      <p>This tiny web server exists purely to show rustunnel forwarding HTTP traffic to a local service.</p>
+      <div class="btn-row" style="justify-content:center">
+        <a href="/about" class="btn">Learn more</a>
+        <a href="/live" class="btn outline">Live stats →</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>What is this?</h2>
+      <p>
+        This is a zero-dependency Node.js server running on your machine.
+        When you start it and then run <code>rustunnel http 3000</code>, every
+        request that arrives at the public URL is securely forwarded here
+        through the encrypted tunnel.
+      </p>
+    </div>
+
+    <div class="grid">
+      <div class="stat">
+        <div class="label">Transport</div>
+        <div class="value" style="font-size:18px;color:var(--accent2)">WebSocket + TLS</div>
+      </div>
+      <div class="stat">
+        <div class="label">Multiplexer</div>
+        <div class="value" style="font-size:18px;color:var(--accent2)">yamux</div>
+      </div>
+      <div class="stat">
+        <div class="label">Language</div>
+        <div class="value" style="font-size:18px">🦀 Rust</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:20px">
+      <h2>Try the other pages</h2>
+      <ul style="list-style:none;display:flex;flex-direction:column;gap:10px;margin-top:8px">
+        <li>
+          <a href="/about" style="color:var(--accent);text-decoration:none;font-weight:600">About →</a>
+          <span style="color:var(--muted);margin-left:8px">How the tunnel works, end to end.</span>
+        </li>
+        <li>
+          <a href="/live" style="color:var(--accent);text-decoration:none;font-weight:600">Live Stats →</a>
+          <span style="color:var(--muted);margin-left:8px">Real-time request counter, auto-refreshes every 2 s.</span>
+        </li>
+        <li>
+          <a href="/api-demo" style="color:var(--accent);text-decoration:none;font-weight:600">API Demo →</a>
+          <span style="color:var(--muted);margin-left:8px">Hit the JSON endpoints and see responses inline.</span>
+        </li>
+      </ul>
+    </div>
+  </main>
+
+  <footer>
+    rustunnel demo server &mdash; <a href="https://github.com/your-org/rustunnel">github.com/your-org/rustunnel</a>
+  </footer>
+</body>
+</html>

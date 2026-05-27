@@ -1,0 +1,67 @@
+// Name: Suspicious Process with External Network Connection from User-Writable Path
+// Author: RW
+// Date: 2025-08-20
+// Description: Detects a process executing from a user-writable or temporary directory that establishes an external network connection.
+// This behavior is common for Remote Access Trojans (RATs) or other malware dropped after initial access, which often try to evade detection
+// by running from non-standard locations. The intelligence notes that custom RATs were used to bypass traditional defenses.
+// False Positive Sensitivity: Medium. Legitimate software installers, updaters, or portable applications may trigger this alert.
+// Tuning the 'legitimate_processes_allowlist' is recommended to reduce noise from known applications in your environment.
+// Tactics: Command and Control, Execution
+// Techniques: T1059
+
+// Define suspicious folder paths that are user-writable and often abused by malware.
+let suspicious_paths = dynamic([
+    @'C:\Users\',
+    @'C:\ProgramData\',
+    @'C:\PerfLogs\',
+    @'C:\Windows\Temp\'
+]);
+
+// Tuning: Add legitimate application names that are common in your environment to this allowlist.
+let legitimate_processes_allowlist = dynamic([
+    "teams.exe", "ms-teams.exe", "msedge.exe", "chrome.exe", "firefox.exe",
+    "OneDrive.exe", "Dropbox.exe", "Box.exe", "Code.exe", "slack.exe",
+    "Zoom.exe", "Webex.exe", "Spotify.exe", "msrdc.exe"
+]);
+
+DeviceProcessEvents
+| where TimeGenerated > ago(1d)
+// Look for processes created in suspicious, user-writable locations.
+| where FolderPath has_any (suspicious_paths) and isnotempty(FolderPath)
+// Exclude common legitimate applications that run from user profiles.
+| where FileName !in~ (legitimate_processes_allowlist)
+// Exclude processes running from expected AppData subfolders for known vendors to reduce FPs.
+| where not (FolderPath matches regex @'C:\\Users\\[^\\]+\\AppData\\(Local|Roaming)\\' and FolderPath has_any ("Microsoft", "Google", "Mozilla", "Discord", "GitHub"))
+// Join with network events to find processes making outbound connections.
+| join kind=inner (
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(1d)
+    // Focus on external connections, ignoring private and loopback addresses.
+    | where RemoteIPType == "Public"
+    // Exclude common cloud service ranges to reduce noise.
+    | where not(ipv4_is_in_range(RemoteIP, "13.64.0.0/11") or ipv4_is_in_range(RemoteIP, "40.64.0.0/10") or ipv4_is_in_range(RemoteIP, "52.96.0.0/11"))
+) on $left.DeviceId == $right.DeviceId and $left.ProcessId == $right.InitiatingProcessId
+// Further refine by looking for unsigned executables, a common trait of custom malware.
+| where IsTrusted == false
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    take_any(FileName, FolderPath, ProcessCommandLine, MD5, SHA1, SHA256, InitiatingProcessFileName, InitiatingProcessCommandLine),
+    RemoteIPSet = make_set(RemoteIP, 5),
+    RemoteUrlSet = make_set(RemoteUrl, 5),
+    RemotePortSet = make_set(RemotePort, 5),
+    NetworkConnections = dcount(RemoteIP)
+    by DeviceId, DeviceName, AccountName, AccountUpn, ProcessId
+| extend
+    // Map entities for investigation in Microsoft Sentinel.
+    HostName = DeviceName,
+    AccountUPN = AccountUpn,
+    Process = FileName,
+    CommandLine = ProcessCommandLine
+| project-reorder StartTime, EndTime, HostName, AccountUPN, Process, CommandLine, FolderPath, InitiatingProcessFileName, RemoteIPSet, RemoteUrlSet, RemotePortSet, NetworkConnections
+| extend
+    HostCustomEntity = HostName,
+    AccountCustomEntity = AccountUPN,
+    IPCustomEntity = RemoteIPSet,
+    FileCustomEntity = Process,
+    ProcessCustomEntity = CommandLine

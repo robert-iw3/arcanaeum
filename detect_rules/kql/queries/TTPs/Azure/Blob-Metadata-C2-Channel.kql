@@ -1,0 +1,46 @@
+// Name: Azure Blob Metadata C2 Channel
+// Author: RW
+// Date: 2025-10-26
+// Description: Detects a high frequency of metadata-only operations (GetBlobProperties or SetBlobMetadata) against a single blob from a single source IP address. This pattern is indicative of a potential command-and-control (C2) channel where malware polls a blob's metadata for commands and/or writes back results, avoiding the need to download or upload the full blob content.
+// Tactics: Command and Control
+// Techniques: T1105
+// References: https://www.microsoft.com/en-us/security/blog/2025/10/20/inside-the-attack-chain-threat-activity-targeting-azure-blob-storage/
+// False Positive Sensitivity: Medium
+
+let timeframe = 1h;
+// Define the threshold for the number of metadata operations against a single blob from a single IP.
+// Tune this value based on your environment. Legitimate applications rarely poll metadata this frequently.
+let metadataOperationThreshold = 20;
+// Placeholder for trusted IP ranges (e.g., corporate network, monitoring services) that may perform legitimate metadata operations.
+let IP_Allowlist = dynamic([]);
+// Placeholder for trusted user agents.
+let UserAgent_Allowlist = dynamic([]);
+
+StorageBlobLogs
+| where TimeGenerated > ago(timeframe)
+// Filter for metadata-only operations. GetBlobProperties is a HEAD request.
+| where OperationName in ("GetBlobProperties", "SetBlobMetadata")
+| where StatusCode between (200 .. 299)
+// Filter out known benign sources to reduce potential false positives.
+| where not(ipv4_is_in_any_range(CallerIpAddress, IP_Allowlist))
+| where not(UserAgentHeader in (UserAgent_Allowlist))
+// Summarize activity on a per-blob, per-source-IP basis.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    OperationCount = count(),
+    Operations = make_set(OperationName, 5),
+    UserAgents = make_set(UserAgentHeader, 3)
+    by CallerIpAddress, AccountName, ObjectName, AuthenticationType
+// Alert if the number of metadata operations exceeds the defined threshold.
+| where OperationCount > metadataOperationThreshold
+| project
+    StartTime,
+    EndTime,
+    CallerIpAddress,
+    AuthenticationType,
+    AccountName,
+    BlobName = ObjectName,
+    OperationCount,
+    Operations,
+    UserAgents

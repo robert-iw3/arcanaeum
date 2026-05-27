@@ -1,0 +1,39 @@
+rule gcp_ssh_key_metadata_modified {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects when SSH keys are added or modified in Google Cloud Platform (GCP) instance or project metadata. This can be a technique for privilege escalation or persistence, where an attacker adds their own SSH key to gain access to a Compute Engine instance."
+    tags = "GCP, IAM, PERSISTENCE, PRIVILEGE_ESCALATION"
+    tactic = "TA0003, TA0004"
+    technique = "T1098.004, T1078"
+    false_positives = "Legitimate administrative actions, such as adding new users or rotating keys via automation (e.g., Terraform, Ansible) or manual configuration. Consider filtering based on known-good service accounts or administrative users."
+
+  events:
+    // Filter for GCP audit logs related to setting instance or project metadata
+    $e.metadata.event_type = "GCP_AUDIT_LOG"
+    (
+      $e.metadata.product_event_type = "compute.instances.setMetadata" or
+      $e.metadata.product_event_type = "compute.projects.setCommonInstanceMetadata"
+    )
+
+    // Check if the 'ssh-keys' metadata key was added or modified in the metadata delta
+    (
+      any k in $e.metadata.additional_fields["instanceMetadataDelta.addedMetadataKeys"] = "ssh-keys" or
+      any k in $e.metadata.additional_fields["instanceMetadataDelta.modifiedMetadataKeys"] = "ssh-keys" or
+      any k in $e.metadata.additional_fields["projectMetadataDelta.addedMetadataKeys"] = "ssh-keys" or
+      any k in $e.metadata.additional_fields["projectMetadataDelta.modifiedMetadataKeys"] = "ssh-keys"
+    )
+
+  outcome:
+    $risk_score = 65
+    $principal_ip = array_distinct($e.principal.ip)
+    $principal_user_userid = array_distinct($e.principal.user.userid)
+    $target_resource_name = array_distinct($e.target.resource.name)
+    $project_id = array_distinct($e.target.resource.project_id)
+    $method_name = array_distinct($e.metadata.product_event_type)
+    // For tuning, consider creating a reference list of legitimate automation accounts
+    // and adding a condition like: $principal_user_userid not in %gcp_legit_automation_accounts
+
+  condition:
+    $e
+}

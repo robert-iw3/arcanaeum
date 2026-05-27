@@ -1,0 +1,103 @@
+// This rule is a composite of multiple detection strategies for the Salt Typhoon APT group.
+// In a production environment, it is highly recommended to split these into separate, focused rules for better performance, manageability, and tuning.
+//
+// References:
+// - https://dti.domaintools.com/inside-salt-typhoon-chinas-state-corporate-advanced-persistent-threat/
+// - https://attack.mitre.org/groups/G1045/
+//
+// Define IOCs for Salt Typhoon for easier management
+
+let salt_typhoon_ips = dynamic(["162.251.82.125", "162.251.82.252", "172.64.53.3"]);
+let salt_typhoon_domains = dynamic([
+    "irdns.mars.orderbox-dns.com", "ns4.1domainregistry.com", "ns1.value-domain.com", "earth.monovm.com", "mars.monovm.com",
+    "aria-hidden.com", "asparticrooftop.com", "availabilitydesired.us", "caret-right.com", "chekoodver.com",
+    "clubworkmistake.com", "col-lg.com", "dateupdata.com", "e-forwardviewupdata.com", "fessionalwork.com",
+    "fitbookcatwer.com", "fjtest-block.com", "gandhibludtric.com", "gesturefavour.com", "getdbecausehub.com",
+    "hateupopred.com", "incisivelyfut.com", "lookpumrron.com", "materialplies.com", "onlineeylity.com",
+    "redbludfootvr.com", "requiredvalue.com", "ressicepro.com", "shalaordereport.com", "siderheycook.com",
+    "sinceretehope.com", "solveblemten.com", "togetheroffway.com", "toodblackrun.com", "troublendsef.com",
+    "verfiedoccurr.com", "waystrkeprosh.com", "xdmgwctese.com"
+]);
+let salt_typhoon_cves = dynamic(["CVE-2023-20198", "CVE-2023-35082", "CVE-2024-21887", "CVE-2024-3400", "CVE-2018-0171"]);
+let salt_typhoon_malware = dynamic(["Demodex", "SigRouter", "GhostSpider", "SnappyBee", "Masol RAT", "China Chopper"]);
+let c2_exfil_services = dynamic(["github.com", "gmail.com", "anonfiles.com", "file.io"]);
+// Combine multiple detection methods using 'union'
+(union isouter=true
+    (
+        // Detection Method 1: IOC Matching for known Domains and IPs
+        (union
+            (CommonSecurityLog
+            | where DestinationIP in (salt_typhoon_ips) or DestinationHostName in (salt_typhoon_domains)
+            | project TimeGenerated, DetectionMethod="IOC Match - Network", ThreatReason="Known Salt Typhoon C2/Infrastructure", SourceIP, DestinationIP, DestinationHostName, DeviceName=Computer, User=coalesce(InitiatingProcessAccount, SourceUserName), AdditionalInfo=strcat("Protocol: ", Protocol, ", Port: ", DestinationPort)
+            ),
+            (DnsEvents
+            | where Name in (salt_typhoon_domains)
+            | project TimeGenerated, DetectionMethod="IOC Match - DNS", ThreatReason="Known Salt Typhoon C2/Infrastructure", SourceIP=ClientIP, DestinationIP=IPAddresses, DestinationHostName=Name, DeviceName, User="N/A", AdditionalInfo=strcat("DNS Query Type: ", QueryType)
+            )
+        )
+    ),
+    (
+        // Detection Method 2: Exploitation of Network Edge Devices
+        // Requires IDS/IPS/Firewall Threat logs ingested into CommonSecurityLog or SecurityAlerts.
+        CommonSecurityLog
+        | where isnotempty(ThreatName) or isnotempty(Activity)
+        | where ThreatName has_any (salt_typhoon_cves) or Activity has_any (salt_typhoon_cves) or AdditionalExtensions has_any (salt_typhoon_cves)
+        | project TimeGenerated, DetectionMethod="CVE Exploit Attempt", ThreatReason="Potential Exploitation of Vulnerability linked to Salt Typhoon", SourceIP, DestinationIP, DestinationHostName, DeviceName=Computer, User=InitiatingProcessAccount, AdditionalInfo=coalesce(ThreatName, Activity)
+    ),
+    (
+        // Detection Method 3: Linux User Creation/Modification for Persistence
+        // Requires Linux auditd or Syslog logs. This query is a template and may need adjustment for your specific logging schema.
+        Syslog
+        | where ProcessName in ("useradd", "adduser", "usermod", "passwd") or (ProcessName has "vi" and SyslogMessage has_any ("/etc/passwd", "/etc/shadow"))
+        | project TimeGenerated, DetectionMethod="Persistence - Linux User Mgmt", ThreatReason="Suspicious user management activity on Linux host", SourceIP="N/A", DestinationIP="N/A", DestinationHostName="N/A", DeviceName=Computer, User=ActorUsername, AdditionalInfo=SyslogMessage
+    ),
+    (
+        // Detection Method 4: DNS Queries for domains registered with ProtonMail
+        // This is a conceptual detection. A full implementation requires a Threat Intelligence feed with WHOIS data.
+        DnsEvents
+        | where Name has_any (salt_typhoon_domains)
+        | extend DetectionMethod="WHOIS TTP (Conceptual)", ThreatReason="DNS query for domain potentially registered with ProtonMail (Salt Typhoon TTP)"
+        | project TimeGenerated, DetectionMethod, ThreatReason, SourceIP=ClientIP, DestinationIP=IPAddresses, DestinationHostName=Name, DeviceName, User="N/A", AdditionalInfo="This detection is conceptual. Integrate a TI feed with WHOIS registrant emails for full implementation."
+    ),
+    (
+        // Detection Method 5: Exfiltration of configuration files over unencrypted protocols
+        // This may be noisy. Consider filtering by source/destination or baselining normal admin activity.
+        CommonSecurityLog
+        | where Protocol in ("ftp", "tftp") and (Activity has "STOR" or Activity has "PUT") and (Activity has ".conf" or Activity has ".cfg" or Activity has "config")
+        | project TimeGenerated, DetectionMethod="Exfiltration", ThreatReason="Potential exfiltration of configuration file via FTP/TFTP", SourceIP, DestinationIP, DestinationHostName, DeviceName=Computer, User=InitiatingProcessAccount, AdditionalInfo=Activity
+    ),
+    (
+        // Detection Method 6: Salt Typhoon Malware Families detected
+        // Requires EDR/AV logs, such as from Microsoft Defender for Endpoint.
+        SecurityAlert
+        | where ProviderName has "Microsoft Defender" and AlertName has_any (salt_typhoon_malware)
+        | extend ThreatName = tostring(parse_json(Entities)[0].Name)
+        | project TimeGenerated, DetectionMethod="Malware Detection", ThreatReason="Malware associated with Salt Typhoon detected", SourceIP="N/A", DestinationIP=tostring(parse_json(Entities)[0].Address), DestinationHostName="N/A", DeviceName, User=tostring(parse_json(Entities)[0].AccountName), AdditionalInfo=ThreatName
+    ),
+    (
+        // Detection Method 7: PowerShell Downgrade Attacks
+        // Requires PowerShell script block logging or process command line logging.
+        DeviceProcessEvents
+        | where (ProcessCommandLine has_all ("powershell", "-version", "2") and (ProcessCommandLine has "-enc" or ProcessCommandLine has "-command"))
+            or ProcessCommandLine has "[System.Management.Automation.AMSIUtils]"
+            or ProcessCommandLine has "Set-MpPreference -DisableRealtimeMonitoring"
+        | project TimeGenerated, DetectionMethod="Defense Evasion", ThreatReason="PowerShell downgrade attack or AMSI bypass detected (Salt Typhoon TTP)", SourceIP="N/A", DestinationIP=RemoteIP, DestinationHostName=RemoteUrl, DeviceName, User=InitiatingProcessAccountName, AdditionalInfo=ProcessCommandLine
+    ),
+    (
+        // Detection Method 8: C2/Exfil via Public Cloud/Communication Services
+        // This is a broad search and may generate false positives. Tune by baselining normal traffic and focusing on sensitive systems.
+        DeviceNetworkEvents
+        | where RemoteUrl has_any (c2_exfil_services) and (TotalBytesSent > 1000000 or InitiatingProcessFileName in ("powershell.exe", "cmd.exe", "rundll32.exe"))
+        // To reduce FPs, consider adding filters for legitimate applications, e.g., `and not InitiatingProcessFolderPath endswith "\\teams.exe"`
+        | project TimeGenerated, DetectionMethod="C2/Exfil", ThreatReason="Potential C2 or exfiltration to public service (Salt Typhoon TTP)", SourceIP=LocalIP, DestinationIP=RemoteIP, DestinationHostName=RemoteUrl, DeviceName, User=InitiatingProcessAccountName, AdditionalInfo=strcat("Process: ", InitiatingProcessFileName, ", Bytes Sent: ", TotalBytesSent)
+    )
+)
+// Final aggregation of results from all detection methods
+| summarize
+    FirstSeen=min(TimeGenerated),
+    LastSeen=max(TimeGenerated),
+    DetectionMethods=make_set(DetectionMethod),
+    ThreatReasons=make_set(ThreatReason),
+    AdditionalInfos=make_set(AdditionalInfo, 5)
+    by SourceIP, DestinationIP, DestinationHostName, DeviceName, User
+| order by FirstSeen asc

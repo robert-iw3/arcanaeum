@@ -1,0 +1,82 @@
+{
+  "rule_id": "azure_web_vuln_ioc_detection",
+  "name": "Azure, Web, and Vulnerability IOC/TTP Detection",
+  "description": "Detects suspicious activity in Azure (Entra Connect, App/SP creation), potential cloud data exfiltration, web shell execution, and known vulnerabilities (e.g., CVEs). The rule identifies tactics such as Valid Accounts and Impact, covering multiple cloud and web-based threat vectors.",
+  "severity": "medium",
+  "enabled": true,
+  "language": "kuery",
+  "query": "(/* Anomalous Entra Connect Activity */ ((user.name:/\\*AAD_\\*\\/ OR user.name:/\\*MSOL_\\*\\/) AND event.category:\"signin\") OR (event.action:\"Reset user password\" AND event.outcome:\"success\" AND (event.initiated_by.user.userPrincipalName:/\\*AAD_\\*\\/ OR event.initiated_by.user.userPrincipalName:/\\*MSOL_\\*\\/))) OR /* Suspicious App/Service Principal creation */ (event.category:\"ApplicationManagement\" AND (event.action:\"Add service principal\" OR event.action:\"Add OAuth2 permission grant\" OR event.action:\"Add owner to service principal\" OR event.action:\"Update application - Certificates and secrets management\")) OR /* Potential Cloud Data Exfiltration */ (event.action:(\"MailItemsAccessed\" OR \"FileDownloaded\")) OR /* Web Shell execution */ (winlog.event_id:1 AND process.parent.name:(\"*\\\\w3wp.exe\" OR \"*\\\\httpd.exe\" OR \"*\\\\nginx.exe\" OR \"*\\\\tomcat*.exe\") AND process.name:(\"*\\\\cmd.exe\" OR \"*\\\\powershell.exe\" OR \"*\\\\pwsh.exe\" OR \"*\\\\sh\" OR \"*\\\\bash\")) OR /* Known Vulnerabilities */ (vulnerability.id:(\"CVE-2025-0282\" OR \"CVE-2024-3400\" OR \"CVE-2023-3519\" OR \"CVE-2021-26855\" OR \"CVE-2021-26857\" OR \"CVE-2021-26858\" OR \"CVE-2021-27065\"))",
+  "type": "query",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0004",
+        "name": "Privilege Escalation",
+        "reference": "https://attack.mitre.org/tactics/TA0004/"
+      },
+      "technique": [
+        {
+          "id": "T1078.004",
+          "name": "Valid Accounts: Cloud Accounts",
+          "reference": "https://attack.mitre.org/techniques/T1078/004/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0003",
+        "name": "Persistence",
+        "reference": "https://attack.mitre.org/tactics/TA0003/"
+      },
+      "technique": [
+        {
+          "id": "T1078.004",
+          "name": "Valid Accounts: Cloud Accounts",
+          "reference": "https://attack.mitre.org/techniques/T1078/004/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0040",
+        "name": "Impact",
+        "reference": "https://attack.mitre.org/tactics/TA0040/"
+      },
+      "technique": [
+        {
+          "id": "T1499",
+          "name": "Endpoint Denial of Service",
+          "reference": "https://attack.mitre.org/techniques/T1499/"
+        }
+      ]
+    }
+  ],
+  "interval": "5m",
+  "from": "now-5m",
+  "max_signals": 100,
+  "risk_score": 70,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://docs.microsoft.com/en-us/azure/active-directory/hybrid/concept-aad-connect-sync-account",
+    "https://attack.mitre.org/techniques/T1078/004/",
+    "https://docs.microsoft.com/en-us/office365/securityandcompliance/search-the-audit-log-in-the-compliance-center"
+  ],
+  "tags": [
+    "Azure",
+    "Microsoft 365",
+    "Cloud Security",
+    "Web Shell",
+    "Vulnerability Scan",
+    "Data Exfiltration",
+    "Threat Detection"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "user.name, process.name, vulnerability.id"
+}

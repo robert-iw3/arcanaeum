@@ -1,0 +1,73 @@
+// Name: AMSI Ghosting Technique
+// Author: RW
+// Date: 2025-08-12
+// Description: Detects multiple indicators associated with the "AMSI Ghosting" bypass technique.
+//              This rule combines several patterns, including suspicious PowerShell P/Invoke calls,
+//              direct patching of rpcrt4.dll, and specific AMSI failure events, to provide comprehensive coverage against this threat.
+// False Positive Sensitivity: Medium
+
+(union isfuzzy=true
+    (
+        // Pattern 1: Detects PowerShell using P/Invoke to call memory manipulation functions.
+        DeviceEvents
+        | where ActionType == "PowerShellCommand"
+        | extend ScriptBlockText = tostring(AdditionalFields.ScriptBlockText)
+        | where ScriptBlockText has "Add-Type" and ScriptBlockText has "DllImport" and ScriptBlockText has "kernel32.dll"
+            and (
+                ScriptBlockText has "GetProcAddress" or
+                ScriptBlockText has "LoadLibrary" or
+                ScriptBlockText has "VirtualProtect" or
+                ScriptBlockText has "VirtualAlloc" or
+                ScriptBlockText has "FlushInstructionCache"
+            )
+        | project
+            Timestamp,
+            DeviceName,
+            InitiatingProcessFileName,
+            InitiatingProcessCommandLine,
+            InitiatingProcessAccountName,
+            DetectionPattern = "PowerShell P/Invoke for In-Memory Evasion",
+            Details = substring(ScriptBlockText, 0, 1024), // Truncate for readability
+            ReportId
+    ),
+    (
+        // Pattern 2: Detects memory protection change on rpcrt4.dll, a prerequisite for patching NdrClientCall3.
+        DeviceEvents
+        | where ActionType == "VirtualProtectApiCall"
+        | where FileName endswith "\\rpcrt4.dll" and VirtualProtectNewProtection == "ExecuteReadWrite"
+        | where InitiatingProcessFileName in~ ("powershell.exe", "powershell_ise.exe", "pwsh.exe", "cscript.exe", "wscript.exe", "mshta.exe")
+        | project
+            Timestamp,
+            DeviceName,
+            InitiatingProcessFileName,
+            InitiatingProcessCommandLine,
+            InitiatingProcessAccountName,
+            DetectionPattern = "NdrClientCall3 Hooking via VirtualProtect",
+            Details = strcat("rpcrt4.dll memory protection changed to ", VirtualProtectNewProtection),
+            ReportId
+    ),
+    (
+        // Pattern 3: Detects the specific AMSI ETW event that indicates the bypass is active.
+        DeviceEvents
+        | where ActionType == "WindowsEvent"
+        | extend EventData = todynamic(AdditionalFields)
+        | where EventData.ProviderName == "Microsoft-Antimalware-Scan-Interface" and EventData.EventId == 1101
+        | extend
+            AmsiScanStatus = toint(EventData.scanStatus),
+            AmsiResult = tolong(EventData.result)
+        | where AmsiScanStatus == 2 and AmsiResult == 0x80070002
+        | project
+            Timestamp,
+            DeviceName,
+            InitiatingProcessFileName,
+            InitiatingProcessCommandLine,
+            InitiatingProcessAccountName,
+            DetectionPattern = "AMSI Fallback Path Exploitation",
+            Details = strcat("ScanStatus: ", AmsiScanStatus, ", Result: ", AmsiResult, ", App: ", tostring(EventData.appName)),
+            ReportId
+    )
+)
+// FP Tuning: This is a combined rule. Review alerts to see which pattern is matching.
+// For PowerShell P/Invoke, exclude known good administrative scripts.
+// For VirtualProtect, exclude legitimate software like debuggers or security tools.
+// The AMSI Fallback event is high-fidelity and should have few false positives.

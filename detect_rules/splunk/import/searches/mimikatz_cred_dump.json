@@ -1,0 +1,17 @@
+[
+  {
+    "name": "Mimikatz and Credential Dumping Detection",
+    "description": "Detects various command-line arguments and module names associated with Mimikatz and other credential dumping tools, indicating potential credential theft activity.",
+    "search": "index=* source=\"WinEventLog:*\" AND ((CommandLine=\"*DumpCreds*\" OR CommandLine=\"*mimikatz*\") OR (CommandLine=\"*::aadcookie*\" OR CommandLine=\"::detours*\" OR CommandLine=\"::memssp*\" OR CommandLine=\"::mflt*\" OR CommandLine=\"::ncroutemon*\" OR CommandLine=\"::ngcsign*\" OR CommandLine=\"::printnightmare*\" OR CommandLine=\"::skeleton*\" OR CommandLine=\"::preshutdown*\" OR CommandLine=\"::mstsc*\" OR CommandLine=\"::multirdp*\") OR (CommandLine=\"*rpc::*\" OR CommandLine=\"*token::*\" OR CommandLine=\"*crypto::*\" OR CommandLine=\"*dpapi::*\" OR CommandLine=\"*sekurlsa::*\" OR CommandLine=\"*kerberos::*\" OR CommandLine=\"*lsadump::*\" OR CommandLine=\"*privilege::*\" OR CommandLine=\"*process::*\" OR CommandLine=\"*vault::*\"))",
+    "is_scheduled": 1,
+    "disabled": 0,
+    "cron_schedule": "*/30 * * * *",
+    "dispatch.earliest_time": "-24h",
+    "dispatch.latest_time": "now",
+    "sharing": "global",
+    "acl": {
+      "read": ["power", "admin"],
+      "write": ["admin"]
+    }
+  }
+]

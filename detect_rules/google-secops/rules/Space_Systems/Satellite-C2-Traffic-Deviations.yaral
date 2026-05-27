@@ -1,0 +1,63 @@
+rule satellite_c2_traffic_deviations {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects deviations from normal satellite command and control (C2) traffic baselines. Such deviations, like anomalous command volumes, high failure rates, or commands from new sources, can indicate a cyberattack where an adversary attempts to corrupt data or seize control (T1070.006, T1070.007). This rule requires a custom UDM event type (e.g., SATELLITE_C2_LOG) and a reference list of known C2 source IPs."
+    tactic = "TA0005"
+    technique = "T1070.006, T1070.007"
+    severity = "High"
+    tags = "Space, Satellite, C2, Anomaly, Defense Evasion"
+    false_positives = "Legitimate administrative activity from a new IP, network testing, or poorly tuned thresholds for volume and failure rates can cause false positives. The reference list of known C2 source IPs must be actively maintained to reduce noise from new, legitimate sources."
+
+  events:
+    // This rule requires a custom UDM event type for satellite C2 logs. 'SATELLITE_C2_LOG' is a placeholder.
+    // The UDM mapping should include:
+    // - target.resource.name: The ID of the satellite receiving the command.
+    // - principal.ip: The source IP of the C2 command.
+    // - security_result.action: The status of the command, e.g., "ALLOW" for success, "BLOCK" for failure.
+    $c2.metadata.event_type = "SATELLITE_C2_LOG"
+    $c2.target.resource.name = $satellite_id
+    $c2.principal.ip = $source_ip
+
+  match:
+    // Correlate events by the satellite ID over a 1-hour window.
+    $satellite_id over 1h
+
+  outcome:
+    // --- Thresholds for Anomaly Detection ---
+    // FP Risk: These thresholds are placeholders and must be tuned based on operational baselines for each satellite system.
+    // Threshold for what constitutes an anomalous volume of commands in one hour.
+    $volume_threshold = 100
+    // Threshold for an anomalous rate of failed commands.
+    $failure_rate_threshold = 0.50 // 50%
+    // Minimum number of failed commands to consider the failure rate significant.
+    $min_failed_commands_threshold = 5
+
+    // --- Anomaly Calculations ---
+    // Anomaly 1: Commands from a new source IP. Requires an externally maintained reference list named '%known_satellite_c2_ips'.
+    $new_source_ips = array_distinct($c2.principal.ip, not $c2.principal.ip in %known_satellite_c2_ips)
+    $is_new_source_anomaly = arrays.len($new_source_ips) > 0
+
+    // Anomaly 2: Significant spike in command volume.
+    $total_commands = count_distinct($c2.metadata.id)
+    $is_volume_anomaly = $total_commands > $volume_threshold
+
+    // Anomaly 3: Unusually high rate of failed C2 commands.
+    $failed_commands = count_distinct($c2.metadata.id, $c2.security_result.action = "BLOCK")
+    $failure_rate = if($total_commands > 0, $failed_commands / $total_commands, 0)
+    $is_failure_anomaly = $failure_rate >= $failure_rate_threshold and $failed_commands >= $min_failed_commands_threshold
+
+    // --- Alerting and Enrichment ---
+    $risk_score = if($is_new_source_anomaly, 40, 0) + if($is_volume_anomaly, 30, 0) + if($is_failure_anomaly, 30, 0)
+    $target_resource_name = $satellite_id
+    $principal_ip = array_distinct($source_ip)
+    $detection_methods = array_distinct(
+        if($is_new_source_anomaly, "New C2 Source IP", ""),
+        if($is_volume_anomaly, "Anomalous C2 Command Volume", ""),
+        if($is_failure_anomaly, "High C2 Command Failure Rate", "")
+    )
+
+  condition:
+    // Trigger a detection if any of the anomalous conditions are met.
+    $is_new_source_anomaly or $is_volume_anomaly or $is_failure_anomaly
+}

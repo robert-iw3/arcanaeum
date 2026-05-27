@@ -1,0 +1,65 @@
+rule SuspiciousTLSCertificateUsage {
+  meta:
+    name = "Suspicious TLS Certificate Usage"
+    author = "RW"
+    description = "Detects potential C2 communications by identifying connections using self-signed TLS certificates or certificates from non-trusted Certificate Authorities (CAs)."
+    tags = "T1071.001, T1588.004"
+    severity = "MEDIUM"
+    false_positives = "Legitimate internal services using internal CAs, smaller online services, developer environments. Tuning allowlists is critical."
+
+  events:
+    // This detection requires SSL/TLS inspection logs (e.g., from Firewall, Proxy).
+    // Adjust `metadata.log_type` based on your log source mapping (e.g., "FIREWALL_SSL_PROXY", "NETWORK_PROXY").
+    $e.metadata.log_type = "NETWORK_TLS" // Assuming a UDM event type that includes TLS details
+    $e.network.tls.server_certificate.issuer != ""  // Ensure Issuer is present
+    $e.network.tls.server_certificate.subject != "" // Ensure Subject is present
+
+    // Filter out traffic to private/internal IP spaces
+    not $e.target.ip in %private_ip_ranges // Use a Chronicle reference list for private IPs
+
+    // Exclude known allowed destinations, subjects, or issuers using Chronicle Reference Lists.
+    not strings.extract_domain($e.target.hostname) in %destination_domain_allowlist
+    not $e.target.ip in %destination_ip_allowlist
+    not $e.network.tls.server_certificate.subject in %subject_issuer_allowlist
+    not $e.network.tls.server_certificate.issuer in %subject_issuer_allowlist
+
+  match:
+    // Group by key certificate and network details to summarize findings.
+    $e.target.ip, strings.extract_domain($e.target.hostname), $e.target.port, $e.network.tls.server_certificate.issuer, $e.network.tls.server_certificate.subject
+    group by $e.target.ip, strings.extract_domain($e.target.hostname), $e.target.port, $e.network.tls.server_certificate.issuer, $e.network.tls.server_certificate.subject
+
+  outcome:
+    $start_time = min($e.metadata.event_timestamp)
+    $end_time = max($e.metadata.event_timestamp)
+    $event_count = count($e.metadata.event_id)
+    $distinct_sources = count_distinct($e.principal.ip)
+    $destination_ip = $e.target.ip
+    $destination_hostname = strings.extract_domain($e.target.hostname)
+    $destination_port = $e.target.port
+    $certificate_issuer = $e.network.tls.server_certificate.issuer
+    $certificate_subject = $e.network.tls.server_certificate.subject
+
+    // Flag 1: Self-signed certificate (Issuer and Subject are the same).
+    $is_self_signed_flag = ($certificate_issuer = $certificate_subject)
+
+    // Flag 2: Certificate is issued by a non-standard or less common CA.
+    $is_untrusted_ca_flag = not ($certificate_issuer in %trusted_ca_list)
+
+    $sample_request_urls = array_distinct($e.network.http.request_url) limit 5 // Assuming HTTP context might be available
+
+  condition:
+    // Trigger an alert if the certificate is self-signed OR from an untrusted CA.
+    $is_self_signed_flag or $is_untrusted_ca_flag
+}
+
+// Reference Lists (to be created in Chronicle):
+// 1.  **trusted_ca_list:** Create a Chronicle Reference List named `trusted_ca_list` and populate it with:
+//     DigiCert, Sectigo, GoDaddy, GlobalSign, Let's Encrypt, Entrust,
+//     VeriSign, Thawte, Comodo, Microsoft, Google, Amazon, Cloudflare
+// 2.  **subject_issuer_allowlist:** Create a Chronicle Reference List named `subject_issuer_allowlist` and populate it with allowed subjects/issuers (e.g., internal CAs).
+//     myinternalapp.local (add your organization's internal CA names or specific subject names here)
+// 3.  **destination_domain_allowlist:** Create a Chronicle Reference List named `destination_domain_allowlist` and populate it with allowed destination domains (e.g., known services using specific certs).
+//     (add your domains here)
+// 4.  **destination_ip_allowlist:** Create a Chronicle Reference List named `destination_ip_allowlist` and populate it with allowed destination IPs (e.g., known services using specific certs).
+//     (add your IPs here)
+// 5.  **private_ip_ranges:** Create a Chronicle Reference List named `private_ip_ranges` and populate it with CIDR ranges for private IPs (e.g., 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16).

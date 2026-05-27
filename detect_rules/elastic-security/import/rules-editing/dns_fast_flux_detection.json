@@ -1,0 +1,52 @@
+{
+  "rule_id": "dns_fast_flux_detection",
+  "name": "DNS Fast Flux Detection",
+  "description": "Detects Fast Flux DNS activity by identifying domains that resolve to a high number of unique public IP addresses within a short timeframe. This behavior can be indicative of malicious infrastructure.",
+  "severity": "high",
+  "enabled": true,
+  "language": "esql",
+  "query": "from network_resolution | where event.dataset == 'dns' and dns.question.type in ('A', 'AAAA') | stats distinct_ip_count = COUNT_DISTINCT(dns.answers.address), resolved_ips = ARRAY_AGG(dns.answers.address) BY dns.question.name | where distinct_ip_count > 3 and dns.answers.address IS NOT NULL and NOT (dns.answers.address like '10.%' or dns.answers.address like '172.1[6-9].%' or dns.answers.address like '172.2[0-9].%' or dns.answers.address like '172.3[0-1].%' or dns.answers.address like '192.168.%' or dns.answers.address == '127.0.0.1') and NOT (dns.question.name like '%.google.com' or dns.question.name like '%.googleapis.com' or dns.question.name like '%.microsoft.com' or dns.question.name like '%.windowsupdate.com' or dns.question.name like '%.apple.com' or dns.question.name like '%.icloud.com' or dns.question.name like '%.amazonaws.com' or dns.question.name like '%.cloudfront.net' or dns.question.name like '%.akamaitechnologies.com' or dns.question.name like '%.akamai.net' or dns.question.name like '%.cloudflare.com' or dns.question.name like '%.fastly.net' or dns.question.name like '%.office365.com') | keep dns.question.name, distinct_ip_count, resolved_ips",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0011",
+        "name": "Command and Control",
+        "reference": "https://attack.mitre.org/tactics/TA0011/"
+      },
+      "technique": [
+        {
+          "id": "T1568",
+          "name": "Dynamic Resolution",
+          "reference": "https://attack.mitre.org/techniques/T1568/"
+        },
+        {
+          "id": "T1568.001",
+          "name": "Fast Flux DNS",
+          "reference": "https://attack.mitre.org/techniques/T1568/001/"
+        }
+      ]
+    }
+  ],
+  "interval": "1h",
+  "from": "now-1h",
+  "max_signals": 100,
+  "risk_score": 85,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://www.cisa.gov/news-events/cybersecurity-advisories/aa25-093a",
+    "https://www.elastic.co/guide/en/security/current/fast-flux-network-activity-detected.html"
+  ],
+  "tags": [
+    "DNS",
+    "Fast Flux",
+    "Command and Control"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "dns.question.name"
+}

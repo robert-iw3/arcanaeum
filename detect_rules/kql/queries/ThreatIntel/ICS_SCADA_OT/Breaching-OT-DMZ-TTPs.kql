@@ -1,0 +1,113 @@
+// Name: OT DMZ Breach Techniques
+// Author: RW
+// Date: 2025-08-17
+// Description: This rule combines multiple detection patterns based on intelligence regarding OT DMZ breaches.
+// It detects credential harvesting, various forms of RDP abuse (hijacking, shadowing, hVNC), and sensitive group modifications.
+// Each detection pattern is designed to identify specific adversary TTPs observed in attacks targeting OT environments.
+// MITRE ATT&CK: T1003, T1563, T1563.002, T1098
+// References: https://attack.mitre.org/techniques/T1563/002/
+// https://github.com/WKL-Sec/HiddenDesktop?tab=readme-ov-file
+// https://attack.mitre.org/techniques/T1098/
+// https://attack.mitre.org/techniques/T1003/
+// https://attack.mitre.org/techniques/T1563/
+// False Positive Sensitivity: Medium
+
+union isfuzzy=true
+(
+    // Detection for credential harvesting tools execution
+    DeviceProcessEvents
+    | where FileName in~ ("LaZagne.exe", "mimikatz.exe", "Seatbelt.exe", "SharpDPAPI.exe")
+    // FP Mitigation: Exclude known security team accounts or hosts used for legitimate testing.
+    // Example: | where not(InitiatingProcessAccountName in~ ("redteam_user1", "pentest_svc"))
+    | project
+        Timestamp,
+        DetectionName = "Credential Harvesting Tool Execution",
+        MITRE_TTP = "T1003",
+        DeviceName,
+        AccountName = InitiatingProcessAccountName,
+        Details = strcat("Tool executed: ", FileName, ", Command line: ", ProcessCommandLine),
+        DataSource = "DeviceProcessEvents",
+        ReportId,
+        DeviceId
+),
+(
+    // Detection for RDP session hijacking via tscon.exe
+    DeviceProcessEvents
+    | where FileName =~ "tscon.exe"
+    // Look for command lines specifying a session ID or destination like 'console'
+    | where ProcessCommandLine matches regex @"\s(\d+|/dest:\w+)"
+    // Focus on execution by SYSTEM, a common pattern for this attack
+    | where InitiatingProcessAccountSid == "S-1-5-18" // NT AUTHORITY\SYSTEM
+    // FP Mitigation: Exclude legitimate admin/helpdesk accounts if they use this functionality.
+    // Example: | where not(InitiatingProcessAccountName in~ ("helpdesk_admin1"))
+    | project
+        Timestamp,
+        DetectionName = "RDP Session Hijacking via tscon.exe",
+        MITRE_TTP = "T1563.002",
+        DeviceName,
+        AccountName = InitiatingProcessAccountName,
+        Details = strcat("tscon.exe executed by SYSTEM with command line: ", ProcessCommandLine),
+        DataSource = "DeviceProcessEvents",
+        ReportId,
+        DeviceId
+),
+(
+    // Detection for RDP shadowing activity
+    DeviceProcessEvents
+    | where ((FileName =~ "mstsc.exe" and ProcessCommandLine has "/shadow") or (FileName =~ "shadow.exe"))
+    // Filter for flags that bypass user consent or grant control
+    | where ProcessCommandLine has_any ("/noConsentPrompt", "/control")
+    // FP Mitigation: Exclude known administrative or support accounts.
+    // Example: | where not(InitiatingProcessAccountName in~ ("helpdesk_user1", "authorized_support_group"))
+    | project
+        Timestamp,
+        DetectionName = "RDP Shadowing Activity",
+        MITRE_TTP = "T1563.002",
+        DeviceName,
+        AccountName = InitiatingProcessAccountName,
+        Details = strcat("RDP Shadowing tool executed: ", FileName, ", Command line: ", ProcessCommandLine),
+        DataSource = "DeviceProcessEvents",
+        ReportId,
+        DeviceId
+),
+(
+    // Detection for Hidden Desktop (hVNC) abuse
+    let gui_processes = dynamic(["explorer.exe", "iexplore.exe", "chrome.exe", "firefox.exe", "msedge.exe", "winword.exe", "excel.exe", "powerpnt.exe", "outlook.exe", "mstsc.exe", "cmd.exe", "powershell.exe"]);
+    let suspicious_parents = dynamic(["services.exe", "svchost.exe", "lsass.exe", "wininit.exe", "wmiprvse.exe", "wmiadap.exe"]);
+    DeviceProcessEvents
+    // Look for GUI processes launched by non-interactive system processes or SYSTEM
+    | where FileName in~ (gui_processes) and (InitiatingProcessFileName in~ (suspicious_parents) or InitiatingProcessAccountSid == "S-1-5-18")
+    // FP Mitigation: Exclude known legitimate software that runs as SYSTEM and launches GUI processes (e.g., remote assistance tools).
+    // Example: | where not (InitiatingProcessFileName =~ "svchost.exe" and FileName =~ "mstsc.exe" and ProcessCommandLine has "RemoteApp")
+    | project
+        Timestamp,
+        DetectionName = "Hidden Desktop (hVNC) Abuse",
+        MITRE_TTP = "T1563",
+        DeviceName,
+        AccountName = InitiatingProcessAccountName,
+        Details = strcat("GUI process '", FileName, "' launched by suspicious parent '", InitiatingProcessFileName, "'"),
+        DataSource = "DeviceProcessEvents",
+        ReportId,
+        DeviceId
+),
+(
+    // Detection for sensitive group membership modification
+    SecurityEvent
+    // 4728: Member added to security-enabled global group
+    // 4756: Member added to security-enabled universal group
+    | where EventID in (4728, 4756)
+    // Filter for the specific sensitive group mentioned in the intelligence
+    | where TargetUserName == "OT Remote Access Users"
+    // FP Mitigation: Exclude changes made by authorized admin or identity management service accounts.
+    // Example: | where not(SubjectAccountName in~ ("authorized_admin1", "IDM_service_account$"))
+    | project
+        Timestamp,
+        DetectionName = "Group Membership Modification to Sensitive OT Group",
+        MITRE_TTP = "T1098",
+        DeviceName = Computer,
+        AccountName = SubjectAccountName,
+        Details = strcat("User '", MemberName, "' added to sensitive group '", TargetUserName, "' by '", SubjectAccountName, "'"),
+        DataSource = "SecurityEvent",
+        ReportId = tostring(EventID),
+        DeviceId = "" // No DeviceId in SecurityEvent
+)

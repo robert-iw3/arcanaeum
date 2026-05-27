@@ -1,0 +1,30 @@
+title: AWS EKS Access Granted to External Principal
+description: Detects when an access entry is created in an EKS cluster for an AWS principal belonging to an external AWS account. This could be an indicator of unauthorized cross-account access, misconfiguration, or a potential data exfiltration setup.
+references:
+    - https://securitylabs.datadoghq.com/articles/eks-cluster-access-management-deep-dive/
+author: RW
+date: 2025-08-19
+tags:
+    - attack.initial_access
+    - attack.persistence
+    - attack.t1199
+    - cloud
+    - aws
+    - eks
+logsource:
+    product: aws
+    service: cloudtrail
+detection:
+    selection:
+        eventName: 'CreateAccessEntry'
+    # This rule requires correlation logic to compare the account ID of the principal being granted access
+    # with the account ID where the EKS cluster resides.
+    # The logic should be: extract the account ID from `requestParameters.principalArn` and alert if it does not match `recipientAccountId`.
+    # Example: principalArn: "arn:aws:iam::999988887777:role/ExternalRole", recipientAccountId: "111122223333" -> Alert
+    condition: selection
+fields:
+    - recipientAccountId
+    - requestParameters.principalArn
+falsepositives:
+    - Legitimate and approved cross-account access for shared services, third-party integrations, or centralized management accounts. Consider excluding known external account IDs.
+level: medium

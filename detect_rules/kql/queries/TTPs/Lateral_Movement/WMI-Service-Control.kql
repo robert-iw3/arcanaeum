@@ -1,0 +1,44 @@
+// Name: WMI for Remote Registry Service Control
+// Author: RW
+// Date: 2025-08-06
+// Description: Detects the use of Windows Management Instrumentation (WMI) via command-line tools like wmic.exe or powershell.exe to start or modify the 'RemoteRegistry' service. The BitLockMove tool enables this service to perform remote registry modifications as part of a lateral movement technique.
+// Tactic: Lateral Movement, Defense Evasion
+// Technique: T1047 - Windows Management Instrumentation
+// False Positive Sensitivity: Medium
+
+DeviceProcessEvents
+// Look for command-line evidence of WMI being used to modify the Remote Registry service.
+| where
+    // Detect wmic.exe usage to start or change the RemoteRegistry service.
+    (ProcessFileName =~ "wmic.exe" and
+     ProcessCommandLine has "service" and
+     ProcessCommandLine has "RemoteRegistry" and
+     ProcessCommandLine has "call" and
+     ProcessCommandLine has_any("ChangeStartMode", "StartService")
+    )
+    or
+    // Detect PowerShell usage to start or change the RemoteRegistry service.
+    (ProcessFileName in~ ("powershell.exe", "pwsh.exe") and
+     ProcessCommandLine has "RemoteRegistry" and
+     (
+        // Covers direct service manipulation cmdlets like Set-Service or Start-Service.
+        ProcessCommandLine has_any("Set-Service", "Start-Service") or
+        // Covers WMI/CIM cmdlets used to invoke service methods.
+        (ProcessCommandLine has_any("Get-WmiObject", "Get-CimInstance") and ProcessCommandLine has "Win32_Service" and ProcessCommandLine has_any("Invoke-WmiMethod", "Invoke-CimMethod", ".StartService()", ".ChangeStartMode()"))
+     )
+    )
+// FP Tuning: Legitimate remote administration may use these commands. If this is common in your environment,
+// consider excluding known administrative accounts or scripts. This detection is focused on command-line tools;
+// custom tools making direct API calls (like BitLockMove) are better detected by monitoring the service state change itself.
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    Tactic = "Lateral Movement, Defense Evasion",
+    Technique = "T1047",
+    Description = "WMI used via command-line to start or modify the Remote Registry service.",
+    ProcessFileName,
+    ProcessCommandLine,
+    InitiatingProcessAccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine

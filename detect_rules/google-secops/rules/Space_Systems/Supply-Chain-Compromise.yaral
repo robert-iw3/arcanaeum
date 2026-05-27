@@ -1,0 +1,63 @@
+rule supply_chain_compromise_unsigned_process_network_activity {
+
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects when a process, which is either unsigned or signed by a non-standard publisher, is launched from a trusted software directory and subsequently makes an external network connection. This could indicate a supply chain compromise where a legitimate software component has been replaced with a malicious one."
+    reference = "id-76c7b8b0b6d27f004dcbec4248f3eaded30e1641a5a37b59d97465c08c28876d"
+    tactic = "TA0001"
+    technique = "T1195"
+    false_positives = "Newly installed legitimate software that is not yet in the trusted publisher list, or ad-hoc tools used by administrators. Tuning the 'trusted_software_publishers' and 'process_path_exclusions' lists is critical to reduce noise."
+    severity = "HIGH"
+
+  events:
+    // Event for a process launch that is either unsigned or not from a trusted publisher.
+    $process.metadata.event_type = "PROCESS_LAUNCH"
+    $process.principal.hostname = $hostname
+    $process.target.process.pid = $pid
+    // Focus on standard installation directories to reduce scope.
+    re.regex($process.target.process.file.path, `(?i)(C:\\Program Files\\|C:\\Program Files \(x86\)\\|/usr/bin/|/opt/)`)
+    // Exclude common noisy processes like browsers or updaters that might be unsigned.
+    // The '%process_path_exclusions' list should be populated with full paths to known-good but noisy executables.
+    not $process.target.process.file.full_path in %process_path_exclusions
+    (
+      // Condition 1: The executable is explicitly marked as not trusted or is unsigned.
+      $process.target.process.file.signature.trusted = false or
+      // Condition 2: The publisher is not in a pre-approved list of vendors.
+      // The '%trusted_software_publishers' list is key to tuning this rule.
+      not $process.target.process.file.signature.publisher in %trusted_software_publishers
+    )
+
+    // Event for a subsequent network connection from that same process.
+    $network.metadata.event_type = "NETWORK_CONNECTION"
+    $network.principal.hostname = $hostname
+    $network.principal.process.pid = $pid
+    // Filter out connections to private IP space to focus on external C2 traffic.
+    not net.ip_in_range_cidr($network.target.ip, %private_ip_ranges)
+
+  match:
+    // Correlate the process launch and network connection on the same host and PID within 2 minutes.
+    $hostname, $pid over 2m
+
+  outcome:
+    // Set a high risk score due to the strong indication of a supply chain attack.
+    $risk_score = 70
+    $principal_hostname = array_distinct($hostname)
+    $event_count = count_distinct($process.metadata.id) + count_distinct($network.metadata.id)
+
+    // Capture details about the suspicious process.
+    $process_command_line = array_distinct($process.target.process.command_line)
+    $process_sha256 = array_distinct($process.target.process.file.sha256)
+    $process_path = array_distinct($process.target.process.file.full_path)
+    $process_signature_trusted = array_distinct($process.target.process.file.signature.trusted)
+    $process_publisher = array_distinct($process.target.process.file.signature.publisher)
+
+    // Capture details about the network connection.
+    $destination_ip = array_distinct($network.target.ip)
+    $destination_port = array_distinct($network.target.port)
+    $destination_domain = array_distinct($network.target.domain.name)
+
+  condition:
+    // Trigger the alert if both the suspicious process launch and the network connection are observed.
+    $process and $network
+}

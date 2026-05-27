@@ -1,0 +1,81 @@
+name: rustunnel
+
+networks:
+  rustunnel:
+    driver: bridge
+
+volumes:
+  rustunnel-data:  {}   # SQLite database + ACME state
+  prometheus-data: {}
+  grafana-data:    {}
+
+services:
+
+  # ── server ─────────────────────────────────────────────────────────────────
+  rustunnel-server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: rustunnel-server:latest
+    container_name: rustunnel-server
+    restart: unless-stopped
+    networks:
+      - rustunnel
+    ports:
+      - "80:80"       # HTTP edge (tunnel ingress + ACME challenge)
+      - "443:443"     # HTTPS edge (tunnel ingress)
+      - "4040:4040"   # Control-plane WebSocket
+      - "8443:8443"   # Dashboard UI / API
+      # TCP tunnel port range — must match tcp_port_range in server.toml
+      - "20000-20099:20000-20099"
+    volumes:
+      # Mount your config file here before starting.
+      - ./server.toml:/etc/rustunnel/server.toml:ro
+      # Let's Encrypt certs and SQLite state persist across restarts.
+      - rustunnel-data:/var/lib/rustunnel
+    environment:
+      RUST_LOG: "rustunnel_server=info,warn"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8443/api/status || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── prometheus  (opt-in: docker compose --profile monitoring up) ───────────
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    container_name: rustunnel-prometheus
+    restart: unless-stopped
+    profiles: [monitoring]
+    networks:
+      - rustunnel
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+
+  # ── grafana  (opt-in: docker compose --profile monitoring up) ─────────────
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: rustunnel-grafana
+    restart: unless-stopped
+    profiles: [monitoring]
+    networks:
+      - rustunnel
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD:-changeme}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    depends_on:
+      - prometheus

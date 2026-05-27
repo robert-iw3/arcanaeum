@@ -1,0 +1,17 @@
+[
+  {
+    "name": "AD Attack Detection (Kerberoasting, DCSync, AdminSDHolder)",
+    "search": "`wineventlog_security` | where (EventCode=4769 Status=\"0x0\" Ticket_Encryption_Type=\"0x17\" NOT match(Service_Name, \"\\$$\")) OR (EventCode=4768 Status=\"0x0\" Service_Name=\"krbtgt\" Pre_Authentication_Type=\"0\" NOT match(Target_User_Name, \"\\$$\")) OR (EventCode=4662 Object_Server=\"DS\" Object_Type=\"{19195a5b-6da0-11d0-afd3-00c04fd930c9}\" (like(Properties, \"%1131f6aa-9c07-11d1-f79f-00c04fc2dcd2%\") OR like(Properties, \"%1131f6ad-9c07-11d1-f79f-00c04fc2dcd2%\")) NOT match(Subject_Account_Name, \"\\$$\")) OR (EventCode=5136 LDAP_Display_Name=\"nTSecurityDescriptor\" like(Object_DN, \"%CN=AdminSDHolder,CN=System,%\") Subject_User_Sid!=\"S-1-5-18\") OR (EventCode=5136 LDAP_Display_Name=\"nTSecurityDescriptor\" (like(Value, \"%(A;;GA;;;%)\") OR like(Value, \"%(A;;WD;;;%)\") OR like(Value, \"%(A;;WO;;;%)\")) Subject_User_Sid!=\"S-1-5-18\") | eval rule_name = case(EventCode=5136 AND like(Object_DN, \"%CN=AdminSDHolder,CN=System,%\"), \"AdminSDHolder DACL Modification\", EventCode=5136, \"Malicious AD DACL Modification\", EventCode=4769, \"Potential Kerberoasting (RC4)\", EventCode=4768, \"Potential AS-REP Roasting\", EventCode=4662, \"Potential DCSync Attack\", true(), \"Unknown\") | eval Target_Object = coalesce(Service_Name, Target_User_Name, Object_Name, Object_DN) | eval Description = case(rule_name==\"AdminSDHolder DACL Modification\", \"Account \" + Subject_Account_Name + \" modified the DACL of the AdminSDHolder object.\", rule_name==\"Malicious AD DACL Modification\", \"Account \" + Subject_Account_Name + \" granted high-privilege rights on object: \" + Target_Object, rule_name==\"Potential Kerberoasting (RC4)\", \"Account \" + Subject_Account_Name + \" requested an RC4-encrypted service ticket for SPN: \" + Target_Object, rule_name==\"Potential AS-REP Roasting\", \"TGT requested for account \" + Target_Object + \" which has pre-authentication disabled.\", rule_name==\"Potential DCSync Attack\", \"Account \" + Subject_Account_Name + \" attempted a DCSync-style attack to replicate directory changes.\", true(), \"N/A\") | table _time, host, rule_name, Subject_Account_Name, Target_Object, Description",
+    "description": "Detects various Active Directory attacks including Kerberoasting, AS-REP Roasting, DCSync, and malicious DACL modifications to AdminSDHolder objects. Filters for specific Windows Event Codes and properties related to these attack vectors.",
+    "is_scheduled": 1,
+    "disabled": 0,
+    "cron_schedule": "*/30 * * * *",
+    "dispatch.earliest_time": "-24h",
+    "dispatch.latest_time": "now",
+    "sharing": "global",
+    "acl": {
+      "read": ["power", "admin"],
+      "write": ["admin"]
+    }
+  }
+]

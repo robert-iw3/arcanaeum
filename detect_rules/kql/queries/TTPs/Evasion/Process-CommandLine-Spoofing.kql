@@ -1,0 +1,43 @@
+// Name: Process CommandLine Spoofing via Symbolic Link
+// Author: RW
+// Date: 2025-08-23
+// Tactic: Defense Evasion
+// Technique: T1036.004
+// Description: Detects instances where the process image path (the actual file on disk) differs from the executable path specified in the command line.
+// This can indicate command line spoofing techniques, such as the one using symbolic links to evade defenses and mislead analysts.
+
+DeviceProcessEvents
+// Extract the executable path from the command line. This handles both quoted and unquoted paths.
+| extend RawCommandLinePath = extract(@"^(""[^""]+""|\S+)", 1, ProcessCommandLine)
+| extend CommandLineExecutable = trim('"', RawCommandLinePath)
+// The core detection logic: find where the resolved image path (FolderPath) differs from the path in the command line.
+| where isnotempty(FolderPath) and isnotempty(CommandLineExecutable) and tolower(FolderPath) != tolower(CommandLineExecutable)
+// To reduce false positives, ensure we are comparing the same executable name, just with different paths.
+// This filters out legitimate launchers executing other programs.
+| where tolower(FileName) == tolower(tostring(split(CommandLineExecutable, '\\')[-1]))
+// FP Filtering: Exclude common legitimate processes and paths.
+// This list may need to be tuned for your environment as some installers or legitimate software may exhibit this behavior.
+| where not (
+    InitiatingProcessFileName in~ ("services.exe", "svchost.exe", "WmiPrvSE.exe", "msiexec.exe", "TiWorker.exe") or
+    FolderPath has_any (
+        @"C:\Windows\System32\",
+        @"C:\Windows\SysWOW64\",
+        @"C:\Program Files\",
+        @"C:\Program Files (x86)\",
+        @"\AppData\Local\Temp\",
+        @"\Windows\Temp\",
+        @"\Windows\servicing\"
+        )
+)
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    FileName,
+    ProcessCommandLine,
+    FolderPath, // The actual path of the executable resolved by the OS/EDR.
+    CommandLineExecutable, // The path as specified in the command line, which may be spoofed.
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    ProcessId,
+    ParentProcessId

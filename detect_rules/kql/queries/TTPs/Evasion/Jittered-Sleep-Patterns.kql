@@ -1,0 +1,56 @@
+// Name: Process with Jittered Sleep Pattern
+// Author: RW
+// Date: 2025-08-02
+// Description: Detects processes that execute multiple sleep calls with varying durations, a technique
+//              known as "jittered sleep" used to evade time-based behavioral analysis and sandbox environments.
+// Tactic: Defense Evasion
+// Technique: T1497.003
+// False Positive Sensitivity: Medium. Some legitimate applications may use variable sleep timers for polling or backoff mechanisms.
+// Tuning by excluding known legitimate processes is recommended.
+//
+// NOTE: This detection is conceptual and depends on telemetry that logs sleep API calls and their durations (e.g., Sleep, NtDelayExecution).
+// Standard EDR logs may not provide this data. The fields 'ActionType == "SleepApiCall"' and 'AdditionalFields.SleepDuration' are placeholders
+// and must be adapted to your specific logging schema if this data is available.
+
+// Define the time window to analyze process behavior.
+let TimeFrame = 10m;
+// Define the sleep duration range based on the threat intel (1000ms to 7000ms).
+let MinSleepTime = 1000;
+let MaxSleepTime = 7000;
+// Define the minimum number of sleep calls to observe to establish a pattern.
+let MinSleepCount = 3;
+
+DeviceEvents
+| where Timestamp > ago(TimeFrame)
+// Placeholder: Filter for events that log sleep API calls. This ActionType is conceptual.
+| where ActionType == "SleepApiCall"
+// Placeholder: Extract the sleep duration. Assumes duration is in milliseconds.
+| extend SleepDuration = tolong(AdditionalFields.SleepDuration)
+// Filter for sleep calls within the suspicious duration range identified in the intel.
+| where isnotempty(SleepDuration) and SleepDuration between (MinSleepTime .. MaxSleepTime)
+// Aggregate sleep events by the initiating process.
+| summarize
+    StartTime = min(Timestamp),
+    EndTime = max(Timestamp),
+    SleepCount = count(),
+    UniqueSleepDurations = dcount(SleepDuration),
+    SleepDurations = make_set(SleepDuration),
+    MinDuration = min(SleepDuration),
+    MaxDuration = max(SleepDuration)
+    by DeviceId, DeviceName, InitiatingProcessId, InitiatingProcessFileName, InitiatingProcessCommandLine
+// The core logic for jitter: multiple sleep calls with at least 2 different durations.
+| where SleepCount >= MinSleepCount and UniqueSleepDurations > 1
+// Further tuning: Exclude legitimate software known to use variable sleep timers.
+// | where InitiatingProcessFileName !in ("legit_app1.exe", "updater.exe")
+| project
+    StartTime,
+    EndTime,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessId,
+    SleepCount,
+    UniqueSleepDurations,
+    MinDuration,
+    MaxDuration,
+    SleepDurations

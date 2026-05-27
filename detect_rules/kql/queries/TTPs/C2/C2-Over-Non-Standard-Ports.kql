@@ -1,0 +1,75 @@
+// name C2 Communication Over Non-Standard Port
+// author RW
+// description
+//   This rule detects outbound network connections from endpoints to non-standard ports.
+//   Threat actors often use custom or non-standard ports for C2 communication to bypass
+//   simple, port-based firewall rules that allow only common traffic like HTTP/S. This
+//   rule identifies such connections, excluding a list of common application ports and
+//   processes, to flag potentially malicious activity.
+// tags
+// - T1571
+// - T1071
+// severity Medium
+// false_positives
+// - Peer-to-peer (P2P) applications, online games, and some legitimate remote administration or collaboration tools may use custom ports for communication.
+// - It is important to tune the 'CommonPorts' and 'ProcessAllowList' to include legitimate applications specific to your environment to reduce false positives.
+// datasources
+// - DeviceNetworkEvents
+//
+// Define a list of common ports to exclude from the detection.
+// This list is critical for reducing false positives and should be tuned for the environment.
+
+let CommonPorts = dynamic([
+    20, 21, 22, 23, 25, 53, 80, 110, 123, 135, 137, 138, 139, 143,
+    443, 445, 465, 587, 993, 995, 1433, 1521, 3306, 3389, 5060, 5061,
+    5900, 8080, 8443
+]);
+
+// Define an allowlist for processes that are known to make legitimate connections on various ports.
+// This helps to filter out noise from common applications like browsers or system components.
+let ProcessAllowList = dynamic([
+    "msedge.exe", "chrome.exe", "firefox.exe", "iexplore.exe",
+    "svchost.exe", "teams.exe", "outlook.exe", "zoom.exe",
+    "onedrive.exe", "dropbox.exe", "ms-teamsupdate.exe"
+]);
+
+DeviceNetworkEvents
+| where TimeGenerated > ago(1d)
+// Focus on successful outbound connections initiated by a process.
+| where ActionType == "ConnectionSuccess" and isnotempty(InitiatingProcessFileName)
+// Filter out connections to private, loopback, or multicast IP addresses.
+| where not(ipv4_is_private(RemoteIP)) and RemoteIP !in ("127.0.0.1", "::1")
+// The core detection logic: find connections to ports that are NOT in the common list.
+| where RemotePort !in (CommonPorts)
+// Exclude common processes that are expected to make diverse network connections.
+| where InitiatingProcessFileName !in~ (ProcessAllowList)
+// Summarize to create a concise alert for each unique connection pattern.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    EventCount = count(),
+    TotalBytesSent = sum(TotalBytesSent),
+    TotalBytesReceived = sum(TotalBytesReceived),
+    ReportId = any(ReportId),
+    DeviceName = any(DeviceName)
+    by
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessParentFileName,
+    RemoteIP,
+    RemotePort
+// Add a final filter to remove low-volume noise, which might be transient errors or scanners.
+| where EventCount > 2
+| project-reorder
+    StartTime,
+    EndTime,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessParentFileName,
+    RemoteIP,
+    RemotePort,
+    EventCount,
+    TotalBytesSent,
+    TotalBytesReceived,
+    ReportId

@@ -1,0 +1,26 @@
+// Name: Netsh Portproxy Add for Persistence or Defense Evasion
+// Author: RW
+// Date: 2025-08-08
+// Description: Detects the use of netsh.exe to add a port proxy rule. This technique is used by threat actors,
+//              to proxy network traffic, which can be used for persistence, defense evasion, or lateral movement.
+// False Positive Sensitivity: Medium
+// Tactics: Defense Evasion, Persistence
+// Techniques: T1090
+
+DeviceProcessEvents
+// Identifies the execution of netsh.exe
+| where FileName =~ "netsh.exe" or ProcessVersionInfoOriginalFileName =~ "netsh.exe"
+// Looks for command-line arguments used to add a port proxy
+| where ProcessCommandLine has_all ("interface", "portproxy", "add")
+// FP Tuning: Legitimate use by administrators is possible, though uncommon.
+// Consider filtering for execution from non-interactive sessions or by non-admin accounts if this is noisy.
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    ProcessCommandLine,
+    InitiatingProcessCommandLine,
+    InitiatingProcessFileName,
+    ReportId,
+    ProcessId,
+    InitiatingProcessId

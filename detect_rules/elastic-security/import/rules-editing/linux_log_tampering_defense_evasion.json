@@ -1,0 +1,65 @@
+{
+  "rule_id": "linux_log_tampering_defense_evasion",
+  "name": "Linux Log Tampering - Defense Evasion",
+  "description": "Detects log tampering techniques on Linux systems, including timestomping with `touch`, disabling bash history, sanitizing WTMP logs, and modifying/deleting critical log files.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "FROM logs-endpoint.events-* | WHERE @timestamp IS NOT NULL AND ((process.name == 'touch' AND process.command_line LIKE '%-r %') OR (process.command_line LIKE '%HISTFILE=/dev/null%') OR (process.command_line LIKE '%utmpdump%|%sed%') OR (event.category == 'file' AND event.action IN ('deleted', 'modified') AND file.path IN ('/var/log/wtmp', '/var/log/auth.log', '/var/log/btmp', '%/.bash_history'))) | EVAL threat_name = CASE(process.name == 'touch', 'Timestomping with Touch', process.command_line LIKE '%HISTFILE=/dev/null%', 'Bash History Disabling Attempt', process.command_line LIKE '%utmpdump%|%sed%', 'WTMP Log Sanitization Attempt', event.category == 'file', CONCAT('Sensitive Log File Tampering (', event.action, ')'), NULL), process_name = COALESCE(process.name, 'File System Event'), process = COALESCE(process.command_line, file.path) | STATS count = COUNT(*) BY host.name AS host, user.name AS user, threat_name, process_name, process | KEEP host, user, threat_name, process_name, process, count",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0005",
+        "name": "Defense Evasion",
+        "reference": "https://attack.mitre.org/tactics/TA0005/"
+      },
+      "technique": [
+        {
+          "id": "T1070",
+          "name": "Indicator Removal on Host",
+          "reference": "https://attack.mitre.org/techniques/T1070/"
+        },
+        {
+          "id": "T1070.003",
+          "name": "Clear Command History",
+          "reference": "https://attack.mitre.org/techniques/T1070/003/"
+        },
+        {
+          "id": "T1070.002",
+          "name": "Clear OS Log",
+          "reference": "https://attack.mitre.org/techniques/T1070/002/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0003",
+        "name": "Persistence",
+        "reference": "https://attack.mitre.org/tactics/TA0003/"
+      }
+    }
+  ],
+  "interval": "15m",
+  "from": "now-15m",
+  "max_signals": 100,
+  "risk_score": 90,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://www.elastic.co/guide/en/security/current/linux-log-tampering-defense-evasion.html",
+    "https://attack.mitre.org/techniques/T1070/"
+  ],
+  "tags": [
+    "Linux",
+    "Log Tampering",
+    "Defense Evasion"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "host, user, threat_name, process_name"
+}

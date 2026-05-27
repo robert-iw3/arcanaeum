@@ -1,0 +1,42 @@
+// Name: Unsigned Driver Loaded
+// Author: RW
+// Date: 2025-08-03
+// Description: Detects the loading of an unsigned kernel driver (.sys file). Rootkits like "Hells Hollow"
+//              require kernel-mode execution, often achieved by loading a malicious driver. While some
+//              legitimate drivers (especially for testing or specific hardware) may be unsigned, the
+//              loading of an unsigned driver warrants investigation as it can indicate rootkit installation
+//              or other malicious activity.
+// False Positive Sensitivity: Medium.
+// This detection may trigger on legitimate test-signed drivers, drivers for specific hardware/VM tools, or in development environments.
+// To reduce false positives, consider excluding known legitimate unsigned drivers by their file names (FileName) or hashes (SHA1).
+
+DeviceImageLoadEvents
+// Filter for kernel driver load events.
+| where FileName endswith ".sys"
+// The core detection logic: identify drivers that are not signed.
+| where SignatureStatus == "Unsigned"
+// FP Tuning: Exclude drivers from common legitimate software that may be unsigned.
+// Example: | where FileName !in ("vboxdrv.sys", "vmci.sys")
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    EventCount = count(),
+    InitiatingProcesses = make_set(InitiatingProcessFileName, 10)
+    by
+    Timestamp = bin(TimeGenerated, 1h), // Group alerts to reduce noise.
+    DeviceName,
+    DeviceId,
+    FileName,
+    FolderPath,
+    SHA1,
+    MD5
+| project-reorder
+    Timestamp,
+    DeviceName,
+    FileName,
+    FolderPath,
+    EventCount,
+    InitiatingProcesses,
+    SHA1,
+    MD5,
+    DeviceId

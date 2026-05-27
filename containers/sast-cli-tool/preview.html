@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Static Code Analyzer Preview</title>
+    <meta http-equiv="X-Frame-Options" content="DENY">
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';">
+    <style>
+        /* Inlined CSS inspired by TailwindCSS */
+        :root {
+            --bg-gradient: linear-gradient(to bottom right, #f9fafb, #e5e7eb);
+            --bg-color: #f9fafb;
+            --text-color: #1f2937;
+            --section-bg: #ffffff;
+            --border-color: #e5e7eb;
+            --th-bg: #f3f4f6;
+            --th-text: #4b5563;
+            --severity-critical: #dc2626;
+            --severity-high: #ca8a04;
+            --primary: #3b82f6;
+            --hover-bg: #f3f4f6;
+        }
+        [data-theme="dark"] {
+            --bg-gradient: linear-gradient(to bottom right, #1f2937, #111827);
+            --bg-color: #1f2937;
+            --text-color: #e5e7eb;
+            --section-bg: #374151;
+            --border-color: #4b5563;
+            --th-bg: #4b5563;
+            --th-text: #d1d5db;
+            --severity-critical: #f87171;
+            --severity-high: #eab308;
+            --primary: #60a5fa;
+            --hover-bg: #4b5563;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: var(--bg-gradient);
+            color: var(--text-color);
+            min-height: 100vh;
+            transition: all 0.3s ease;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+        .header {
+            font-size: 36px;
+            font-weight: 800;
+            letter-spacing: -0.025em;
+            margin-bottom: 24px;
+        }
+        .theme-toggle {
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .theme-toggle input[type="checkbox"] {
+            display: none;
+        }
+        .theme-toggle label {
+            display: flex;
+            align-items: center;
+            width: 56px;
+            height: 28px;
+            background-color: var(--section-bg);
+            border-radius: 9999px;
+            position: relative;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        .theme-toggle label::before {
+            content: '';
+            width: 22px;
+            height: 22px;
+            background-color: var(--primary);
+            border-radius: 50%;
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            transition: transform 0.3s ease;
+        }
+        .theme-toggle input:checked + label {
+            background-color: var(--primary);
+        }
+        .theme-toggle input:checked + label::before {
+            transform: translateX(28px);
+        }
+        .theme-toggle span {
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .section {
+            background-color: var(--section-bg);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 24px;
+            transition: transform 0.2s ease;
+        }
+        .section:hover {
+            transform: scale(1.01);
+        }
+        .section-title {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 16px;
+        }
+        .table-container {
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 16px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+        th {
+            background-color: var(--th-bg);
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--th-text);
+        }
+        td {
+            font-size: 14px;
+        }
+        tr:hover {
+            background-color: var(--hover-bg);
+            transition: background-color 0.2s ease;
+        }
+        .severity-critical {
+            color: var(--severity-critical);
+            font-weight: 500;
+        }
+        .severity-high {
+            color: var(--severity-high);
+            font-weight: 500;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+        }
+        .summary-item, .cve-item {
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        .cve-item {
+            margin-bottom: 16px;
+        }
+        .cve-item p:first-child {
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="theme-toggle">
+            <input type="checkbox" id="theme-toggle" onchange="document.documentElement.setAttribute('data-theme', this.checked ? 'dark' : 'light')">
+            <label for="theme-toggle"></label>
+            <span>Toggle {document.documentElement.getAttribute('data-theme') === 'dark' ? 'Light' : 'Dark'} Mode</span>
+        </div>
+        <h1 class="header">Static Code Analyzer</h1>
+        <div class="section">
+            <h2 class="section-title">Vulnerabilities</h2>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>File</th>
+                            <th>Line</th>
+                            <th>Function</th>
+                            <th>Description</th>
+                            <th>Severity</th>
+                            <th>OWASP Category</th>
+                            <th>Language</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>test_large.js</td>
+                            <td>1</td>
+                            <td>eval()</td>
+                            <td>Use of eval can lead to code injection</td>
+                            <td class="severity-critical">Critical</td>
+                            <td>A03:2021</td>
+                            <td>JavaScript</td>
+                        </tr>
+                        <tr>
+                            <td>test_large.py</td>
+                            <td>2</td>
+                            <td>eval()</td>
+                            <td>Eval can execute arbitrary code</td>
+                            <td class="severity-critical">Critical</td>
+                            <td>A03:2021</td>
+                            <td>Python</td>
+                        </tr>
+                        <tr>
+                            <td>test_large.java</td>
+                            <td>4</td>
+                            <td>Runtime.getRuntime().exec()</td>
+                            <td>Executing system commands is dangerous</td>
+                            <td class="severity-high">High</td>
+                            <td>A01:2021</td>
+                            <td>Java</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="grid">
+            <div class="section">
+                <h2 class="section-title">Summary</h2>
+                <p class="summary-item">Total Files: 3</p>
+                <p class="summary-item">Files Scanned: 3</p>
+                <p class="summary-item">Vulnerabilities: 3</p>
+                <p class="summary-item">Scan Start: 2025-09-04T11:59:00Z</p>
+                <p class="summary-item">Scan End: 2025-09-04T12:00:03Z</p>
+            </div>
+            <div class="section">
+                <h2 class="section-title">CVE Matches</h2>
+                <div class="cve-item">
+                    <p>CVE: CVE-2021-23337</p>
+                    <p>Dependency: lodash@4.17.20</p>
+                    <p>Severity: High</p>
+                    <p>Description: Prototype pollution in lodash</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

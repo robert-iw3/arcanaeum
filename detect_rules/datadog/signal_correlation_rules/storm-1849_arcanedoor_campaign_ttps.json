@@ -1,0 +1,62 @@
+{
+  "data": {
+    "type": "signal_correlation",
+    "attributes": {
+      "name": "ArcaneDoor Campaign Detection",
+      "enabled": true,
+      "cases": [
+        {
+          "name": "ArcaneDoor C2 IPs",
+          "status": "critical",
+          "query": "source:network @network.destination.ip:(192.36.57.181 OR 185.167.60.85 OR 185.227.111.17 OR 176.31.18.153 OR 172.105.90.154 OR 185.244.210.120 OR 45.86.163.224 OR 172.105.94.93 OR 213.156.138.77 OR 89.44.198.189 OR 45.77.52.253 OR 103.114.200.230 OR 212.193.2.48 OR 51.15.145.37 OR 89.44.198.196 OR 131.196.252.148 OR 213.156.138.78 OR 121.227.168.69 OR 213.156.138.68 OR 194.4.49.6 OR 185.244.210.65 OR 216.238.75.155 OR 5.183.95.95 OR 45.63.119.131 OR 45.76.118.87 OR 45.77.54.14 OR 45.86.163.244 OR 45.128.134.189 OR 89.44.198.16 OR 96.44.159.46 OR 103.20.222.218 OR 103.27.132.69 OR 103.51.140.101 OR 103.119.3.230 OR 103.125.218.198 OR 104.156.232.22 OR 107.148.19.88 OR 107.172.16.208 OR 107.173.140.111 OR 121.37.174.139 OR 139.162.135.12 OR 149.28.166.244 OR 152.70.83.47 OR 154.22.235.13 OR 154.22.235.17 OR 154.39.142.47 OR 172.233.245.241 OR 185.123.101.250 OR 192.210.137.35 OR 194.32.78.183 OR 205.234.232.196 OR 207.148.74.250 OR 216.155.157.136 OR 216.238.66.251 OR 216.238.71.49 OR 216.238.72.201 OR 216.238.74.95 OR 216.238.81.149 OR 216.238.85.220 OR 216.238.86.24)"
+        },
+        {
+          "name": "Line Dancer Memory Artifacts",
+          "status": "high",
+          "query": "source:cisco @sourcetype:(cisco:asa OR cisco:ftd) @process.path:/asa/bin/lina @memory.permissions:r-xp | parse mem_start='[a-f0-9]+-[a-f0-9]+' as mem_start, mem_end='[a-f0-9]+-[a-f0-9]+' as mem_end | eval region_size=tonumber(@mem_end, 16) - tonumber(@mem_start, 16) | groupby @host count as executable_region_count | filter executable_region_count > 1 OR region_size = 4096"
+        },
+        {
+          "name": "Line Runner Persistence",
+          "status": "high",
+          "query": "source:cisco @file.name:client_bundle*.zip -@file.name:client_bundle.zip"
+        },
+        {
+          "name": "Suspicious HTTP POST to ASA",
+          "status": "high",
+          "query": "source:web @http.method:POST @form_data:*host-scan-reply* | parse host_scan_reply_payload='host-scan-reply=[^&]+' as host_scan_reply_payload | eval payload_len=len(@host_scan_reply_payload) | filter payload_len > 500 (@user:NULL OR @user:-)"
+        },
+        {
+          "name": "ASA Configuration Tampering",
+          "status": "high",
+          "query": "source:cisco @sourcetype:(cisco:asa OR cisco:ftd) (@message:%ASA-6-110002 OR (@message:%ASA-5-111008 AND (@message:*no\\ logging\\ enable* OR @message:*write\\ memory*))) | parse user='Executed by \\S+' as user | eval reason=case(like(@message, '%ASA-6-110002'), 'Device Reboot/Startup Detected', like(@message, '%no logging enable%'), 'Syslog Logging Disabled', like(@message, '%write memory%'), 'Configuration Saved to Memory')"
+        }
+      ],
+      "group_by_fields": ["@host", "@network.source.ip", "@user"],
+      "distinct_fields": ["case_id"],
+      "correlation": {
+        "expression": "distinct_count >= 2",
+        "timeframe": "1h"
+      },
+      "message": "ArcaneDoor Campaign Detection: {distinct_count} distinct TTPs detected on host {@host}, source IP {@network.source.ip}, or user {@user}. Techniques: {case_names}. Details: {@network.destination.ip OR @file.name OR @host_scan_reply_payload OR @reason OR @process.path}. Timeframe: {first_activity} to {last_activity}",
+      "severity": "high",
+      "tags": [
+        "security:attack",
+        "tactic:TA0003",
+        "tactic:TA0005",
+        "tactic:TA0011",
+        "technique:T1190",
+        "technique:T1133",
+        "technique:T1562.003",
+        "technique:T1070.004",
+        "technique:T1556",
+        "technique:T1040",
+        "technique:T1653",
+        "technique:T1055",
+        "technique:T1014"
+      ],
+      "options": {
+        "evaluation_window": "1h"
+      }
+    }
+  }
+}

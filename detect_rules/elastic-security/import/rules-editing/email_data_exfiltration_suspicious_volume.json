@@ -1,0 +1,80 @@
+{
+  "rule_id": "email_data_exfiltration_suspicious_volume",
+  "name": "Suspicious Email Data Exfiltration Attempt",
+  "description": "Detects potential data exfiltration via email by monitoring outbound traffic for high volume, large attachments, emails to numerous external domains, or sensitive keywords in the subject line.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "from logs-email-* | where email.direction == 'outbound' and email.from.address in (SELECT email_address from internal_users where is_internal = true) and email.to.domain not in (SELECT domain from internal_domains) | eval is_personal_domain = case(email.to.domain RLIKE '(?i).*(gmail\\.com|yahoo\\.com|outlook\\.com|hotmail\\.com|aol\\.com|protonmail\\.com|icloud\\.com)', 1, 0), has_sensitive_subject = case(email.subject RLIKE '(?i).*(confidential|secret|internal use only|proprietary|private)', 1, 0) | stats email_count = COUNT(*), total_bytes_sent = SUM(email.message_size), distinct_recipient_domains = COUNT_DISTINCT(email.to.domain), recipient_domains = ARRAY_AGG(email.to.domain), personal_email_count = SUM(is_personal_domain), sensitive_subject_count = SUM(has_sensitive_subject) BY DATE_TRUNC('1 day', @timestamp) AS time_window_start, email.from.address | where (email_count > 100 and total_bytes_sent > 52428800) or personal_email_count > 20 or sensitive_subject_count > 5",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0010",
+        "name": "Exfiltration",
+        "reference": "https://attack.mitre.org/tactics/TA0010/"
+      },
+      "technique": [
+        {
+          "id": "T1048",
+          "name": "Exfiltration Over Alternative Protocol",
+          "reference": "https://attack.mitre.org/techniques/T1048/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0011",
+        "name": "Command and Control",
+        "reference": "https://attack.mitre.org/tactics/TA0011/"
+      }
+    }
+  ],
+  "interval": "1d",
+  "from": "now-1d",
+  "max_signals": 100,
+  "risk_score": 90,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [],
+  "tags": [
+    "Email",
+    "Exfiltration",
+    "Data Loss Prevention"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "exemptions": [
+    {
+      "name": "internal_users_exemption",
+      "description": "Exempts internal users based on email address.",
+      "conditions": [
+        {
+          "field": "email.from.address",
+          "operator": "included",
+          "type": "list",
+          "list_id": "internal_users"
+        }
+      ],
+      "enabled": true
+    },
+    {
+      "name": "internal_domains_exemption",
+      "description": "Exempts internal domains from the recipient domain check.",
+      "conditions": [
+        {
+          "field": "email.to.domain",
+          "operator": "included",
+          "type": "list",
+          "list_id": "internal_domains"
+        }
+      ],
+      "enabled": true
+    }
+  ],
+  "custom_query_fields": [],
+  "event_group": "email.from.address, time_window_start"
+}

@@ -1,0 +1,17 @@
+[
+  {
+    "name": "Encoded PowerShell Command Decryption",
+    "description": "Detects and decodes obfuscated PowerShell commands, indicating potential malicious activity. This search focuses on `EncodedCommand` and similar keywords, extracting and decrypting the command for analysis.",
+    "search": "index=windows LogName=Security TaskCategory=\"Process Creation\" new_process_name IN (\"powershell.exe\",\"pwsh.exe\") OR Creator_Process_Name IN (\"*powershell.exe\",\"*pwsh.exe\") Process_Command_Line IN (\"*EncodedCommand*\",\"*-E *\",\"*-Enc*\",\"*-enco *\",\"*-encod *\", \"*frombase64string*\", \"*gnirtS46esaBmorF*\") | rex field=Process_Command_Line \".+-EncodedCommand(?P<EncodedCommand>.+)\" | rex field=EncodedCommand \"(?<check>^.{0,300})\" | stats values(host) as host values(Account_Name) AS user values(Creator_Process_Name) AS parent_process values(new_process_name) AS process_name values(EncodedCommand) as EncodedCommand by check, _time | eval EncodedCommand = mvindex(EncodedCommand, 0) | stats latest(_time) as time values(user) as user by host parent_process process_name EncodedCommand | decrypt field=EncodedCommand b64 emit('decrypted_command') | eval time=strftime(time, \"%d-%m-%Y %X\") | table time host user parent_process process_name decrypted_command EncodedCommand",
+    "is_scheduled": 1,
+    "disabled": 0,
+    "cron_schedule": "*/30 * * * *",
+    "dispatch.earliest_time": "-24h",
+    "dispatch.latest_time": "now",
+    "sharing": "global",
+    "acl": {
+      "read": ["power", "admin"],
+      "write": ["admin"]
+    }
+  }
+]

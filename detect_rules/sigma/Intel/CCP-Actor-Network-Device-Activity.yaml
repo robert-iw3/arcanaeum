@@ -1,0 +1,63 @@
+title: Chinese State-Sponsored Network Device Activity
+id: 4098a02d-ddbf-4315-a28b-fc49527c3298
+status: experimental
+description: >-
+  Detects various TTPs associated with Chinese state-sponsored actors targeting network infrastructure.
+  This includes enabling backdoors, modifying ACLs, creating users, and capturing traffic as described in the joint cybersecurity advisory.
+references:
+  - https://www.cisa.gov/news-events/cybersecurity-advisories/aa25-239a
+author: RW
+date: 2025-08-29
+tags:
+  - attack.persistence
+  - attack.defense_evasion
+  - attack.credential_access
+  - attack.collection
+  - attack.t1021.004
+  - attack.t1562.004
+  - attack.t1136.001
+  - attack.t1040
+  - attack.t1059.008
+  - attack.t1571
+logsource:
+    # This rule combines command/log events and network connection events.
+    # The logsource is defined broadly to be applicable across different data sources.
+    # Please adjust the category and product fields to match your environment.
+  category:
+    - network_connection
+    - process_creation
+    - firewall
+  product:
+    - linux
+    - cisco
+    - generic
+detection:
+    # Selection for suspicious commands, filenames, and configuration changes found in logs or command line fields.
+  selection_log:
+    keywords:
+      - 'service sshd_operns start'
+      - 'access-list 10'
+      - 'access-list 20'
+      - 'access-list 50'
+      - 'useradd cisco'
+      - 'vi /etc/sudoers'
+      - 'monitor capture'
+      - 'mycap.pcap'
+      - 'tac.pcap'
+      - '1.pcap'
+      - 'span'
+      - 'erspan'
+
+    # Selection for network connections to the specific IOS XR backdoor port.
+  selection_net_backdoor:
+    DestinationPort: 57722
+
+    # Selection for the actor's pattern of using high ports ending in '22' for SSH.
+  selection_net_pattern:
+    DestinationPort|re: '^\d{3,5}22$'
+
+  condition: 1 of them
+falsepositives:
+  - Legitimate administrative activity on network devices may trigger the 'selection_log' keywords.
+  - The high-port SSH pattern ('xxx22') in 'selection_net_pattern' may be noisy and could match legitimate services. It is recommended to baseline normal activity and filter known good source or destination IPs.
+level: high

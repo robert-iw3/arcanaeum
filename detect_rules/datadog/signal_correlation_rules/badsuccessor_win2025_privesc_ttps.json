@@ -1,0 +1,57 @@
+{
+  "data": {
+    "type": "signal_correlation",
+    "attributes": {
+      "name": "BadSuccessor Privilege Escalation in Windows Server 2025 Detection",
+      "enabled": true,
+      "cases": [
+        {
+          "name": "dMSA Object Creation",
+          "status": "high",
+          "query": "source:windows @event.code:5137 @object.class:msDS-DelegatedManagedServiceAccount -@user:(*admin* OR svc_* OR *_svc OR *$)"
+        },
+        {
+          "name": "dMSA Attribute Modification",
+          "status": "high",
+          "query": "source:windows @event.code:5136 @object.class:msDS-DelegatedManagedServiceAccount @attribute.ldap_display_name:msDS-ManagedAccountPrecededByLink -@user:(*admin* OR svc_* OR *_svc OR *$)"
+        },
+        {
+          "name": "dMSA State Change",
+          "status": "high",
+          "query": "source:windows @event.code:5136 @object.class:msDS-DelegatedManagedServiceAccount @attribute.ldap_display_name:msDS-DelegatedMSAState @attribute.value:2 -@user:(*admin* OR svc_* OR *_svc OR *$)"
+        },
+        {
+          "name": "KDS Root Key Creation",
+          "status": "high",
+          "query": "source:windows @event.code:5137 @object.class:msKds-ProvRootKey"
+        },
+        {
+          "name": "Kerberos TGT Requests with KERB-DMSA-KEY-PACKAGE",
+          "status": "high",
+          "query": "source:directory_service @event.code:2946 @account.name:*$ KERB-DMSA-KEY-PACKAGE"
+        }
+      ],
+      "group_by_fields": ["@host", "@user", "@client.address"],
+      "distinct_fields": ["case_id"],
+      "correlation": {
+        "expression": "distinct_count >= 2",
+        "timeframe": "1h"
+      },
+      "message": "BadSuccessor Privilege Escalation Detection: {distinct_count} distinct TTPs detected on host {@host}, user {@user}, or client IP {@client.address}. Techniques: {case_names}. Details: {@object.dn OR @attribute.value OR @account.name}. Timeframe: {first_activity} to {last_activity}",
+      "severity": "high",
+      "tags": [
+        "security:attack",
+        "tactic:TA0004",
+        "technique:T1548",
+        "technique:T1552.004",
+        "environment:windows",
+        "service:active_directory",
+        "vulnerability:badsuccessor",
+        "cve:CVE-2025-53779"
+      ],
+      "options": {
+        "evaluation_window": "1h"
+      }
+    }
+  }
+}

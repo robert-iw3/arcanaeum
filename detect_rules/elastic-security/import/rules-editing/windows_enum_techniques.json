@@ -1,0 +1,18 @@
+{
+  "type": "detection-engine.rule",
+  "id": "windows-enumeration-techniques",
+  "attributes": {
+    "risk_score": 75,
+    "enabled": true,
+    "name": "Suspicious Command Line Activity - Enumeration",
+    "description": "Detects suspicious command-line activity indicative of reconnaissance and enumeration techniques on Windows systems, leveraging data from Security and System logs.",
+    "rule_id": "windows_enumeration_techniques",
+    "index": ["win_logs*", "winlogbeat-*"],
+    "language": "kuery",
+    "query": "(winlog.channel:\"Security%\" OR winlog.channel:\"System%\") AND (process.command_line:\"*ipconfig /all*\" OR process.command_line:\"*netsh interface show interface*\" OR process.command_line:\"*netsh interface firewall show all*\" OR process.command_line:\"*arp -a*\" OR process.command_line:\"*nbtstat -n*\" OR process.command_line:\"*net config*\" OR process.command_line:\"*net group /dom*\" OR process.command_line:\"*net group \\\"Domain Admins\\\" /dom*\" OR process.command_line:\"*route print*\" OR process.command_line:\"*curl www.ip-api.com*\" OR process.command_line:\"*dnscmd*\" OR process.command_line:\"*ldifde.exe -f c:\\\\windows\\\\temp\\\\*.txt -p subtree*\" OR process.command_line:\"*netlocalgroup*\" OR process.command_line:\"*netsh interface portproxy show*\" OR process.command_line:\"*netstat -ano*\" OR process.command_line:\"*reg query hklm\\\\software\\\\*\" OR process.command_line:\"*systeminfo*\" OR process.command_line:\"*tasklist /v *\" OR process.command_line:\"*wmic volume list brief*\" OR process.command_line:\"*wmic service brief*\" OR process.command_line:\"*wmic product list brief*\" OR process.command_line:\"*wmic baseboard list brief*\" OR process.command_line:\"*wevtutil qe security /rd:true /f:text /q:%[System[(EventID=4624)]%*\")",
+    "interval": "10m",
+    "severity": "medium",
+    "type": "query",
+    "version": "1"
+  }
+}

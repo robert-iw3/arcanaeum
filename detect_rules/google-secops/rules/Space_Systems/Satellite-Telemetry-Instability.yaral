@@ -1,0 +1,63 @@
+rule satellite_telemetry_instability_detected {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects a rapid increase in satellite telemetry values, such as reaction wheel speed or angular velocity, within a short time frame. This pattern indicates potential satellite instability, which could be caused by an ADCS (Attitude Determination and Control System) attack as described in the Hack-A-Sat competition. The rule looks for a normal telemetry reading followed by a critical reading for the same satellite."
+    false_positives = "Legitimate and rapid operational maneuvers, telemetry sensor errors, or data parsing issues. The thresholds for 'normal' and 'critical' ranges are based on assumptions and must be tuned for a specific satellite's operational parameters."
+    tactic = "TA0040"
+    technique = "T1499"
+    tags = "SATELLITE, ICS, ADCS, IMPACT, TELEMETRY"
+
+  events:
+    // This rule assumes satellite telemetry is ingested as GENERIC_LOG. Adjust event_type and field names as needed.
+    // It also assumes a log source identifier like metadata.product_log_name exists to isolate telemetry data.
+    // Event 1: A telemetry reading within a normal or moderately elevated range.
+    $normal_reading.metadata.event_type = "GENERIC_LOG"
+    $normal_reading.metadata.product_log_name = "satellite_telemetry"
+    $normal_reading.target.hostname = $satellite_id // Use hostname as the satellite identifier.
+
+    // Check for either wheel speed or angular velocity in a moderate range.
+    // These regex thresholds are examples and should be tuned.
+    (
+      // Wheel Speed: e.g., 1000-4999 RPM
+      re.regex($normal_reading.about.message, `(?i)wheel speed\s*:\s*[1-4]\d{3}`) or
+      // Angular Velocity: e.g., 1.0-9.9 deg/s
+      re.regex($normal_reading.about.message, `(?i)angular velocity\s*:\s*[1-9]\.\d+`)
+    )
+
+    // Event 2: A subsequent telemetry reading in a critical or saturated range.
+    $critical_reading.metadata.event_type = "GENERIC_LOG"
+    $critical_reading.metadata.product_log_name = "satellite_telemetry"
+    $critical_reading.target.hostname = $satellite_id
+
+    // Check for either wheel speed or angular velocity in a critical range.
+    (
+      // Wheel Speed: e.g., > 8000 RPM, indicating saturation is imminent.
+      re.regex($critical_reading.about.message, `(?i)wheel speed\s*:\s*([89]\d{3}|[1-9]\d{4,})`) or
+      // Angular Velocity: e.g., > 10 deg/s, indicating a rapid tumble.
+      re.regex($critical_reading.about.message, `(?i)angular velocity\s*:\s*[1-9]\d{1,}\.\d+`)
+    )
+
+  match:
+    // Correlate readings for the same satellite over a 6 minute window.
+    // This timeframe is based on the mitigation opportunity noted in the reference article.
+    $satellite_id over 6m
+    // Ensure the normal reading occurs before the critical one to establish the rate of change.
+    $normal_reading before $critical_reading
+
+  outcome:
+    // A medium risk score is assigned as this is a strong indicator but could be a legitimate maneuver.
+    $risk_score = 50
+    $satellite_id = array_distinct($satellite_id)
+    $first_event_time = min($normal_reading.metadata.event_time)
+    $last_event_time = max($critical_reading.metadata.event_time)
+    // Capture the logs for analyst review.
+    $normal_telemetry_logs = array_distinct($normal_reading.about.message)
+    $critical_telemetry_logs = array_distinct($critical_reading.about.message)
+    $principal_ip = array_distinct($normal_reading.principal.ip)
+    $target_hostname = array_distinct($satellite_id)
+
+  condition:
+    // Trigger if both a normal and a subsequent critical reading are found for the same satellite.
+    $normal_reading and $critical_reading
+}

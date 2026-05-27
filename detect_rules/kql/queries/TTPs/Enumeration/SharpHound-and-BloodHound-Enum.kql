@@ -1,0 +1,140 @@
+// Name: SharpHound and BloodHound Activity Detection
+// Author: RW
+// Date: 2025-08-07
+// Description: This query combines multiple detection patterns to identify reconnaissance and data collection activities associated
+//              with SharpHound and BloodHound. It looks for session enumeration via named pipes (NetSessionEnum, NetWkstaUserEnum),
+//              LDAP enumeration followed by SMB scanning, session enumeration API proxying, and the final data export stage.
+// False Positives: Legitimate administrative tools, asset management systems, or vulnerability scanners may exhibit similar behaviors.
+//                  Tune the thresholds and add legitimate processes/IPs to the 'approved_*' lists to reduce noise.
+// MITRE ATT&CK: T1087.002, T1018
+
+let timeframe = 1h;
+let smb_target_threshold = 10; // Minimum number of distinct hosts scanned to be considered widespread reconnaissance.
+let approved_processes = dynamic(["svchost.exe", "services.exe", "lsass.exe", "explorer.exe", "wmiprvse.exe", "mmc.exe"]); // Legitimate processes to exclude.
+let approved_source_ips = dynamic([]); // IP addresses of approved scanners or admin workstations.
+
+// Pattern 1: Session Enumeration via Named Pipes (NetSessionEnum/NetWkstaUserEnum)
+// Detects access to wkssvc or srvsvc named pipes across multiple hosts from a single source.
+let named_pipe_enum =
+SecurityEvent
+| where TimeGenerated > ago(timeframe)
+| where EventID == 5145 // A network share object was checked for access
+| where ShareName == "\\\\*\\IPC$" and RelativeTargetName has_any ("wkssvc", "srvsvc")
+| where AccessList has_any ("ReadData", "WriteData", "Execute")
+| where IpAddress !in (approved_source_ips)
+| summarize
+    StartTime = min(TimeGenerated),
+    TargetComputerCount = dcount(Computer),
+    TargetComputers = make_set(Computer, 100),
+    PipesAccessed = make_set(RelativeTargetName)
+    by InitiatingAccount = SubjectAccount, SourceIp = IpAddress
+| where TargetComputerCount > smb_target_threshold
+| project
+    timestamp = StartTime,
+    DetectionPattern = "Session Enumeration via Named Pipe",
+    HostName = "", // Source HostName is not available in SecurityEvent
+    ProcessName = "", // ProcessName is not available in SecurityEvent
+    CommandLine = "", // CommandLine is not available in SecurityEvent
+    SourceIp,
+    InitiatingAccount,
+    Details = pack("PipesAccessed", PipesAccessed, "TargetComputerCount", TargetComputerCount, "TargetComputers", TargetComputers)
+;
+// Pattern 2: LDAP Enumeration followed by widespread SMB Scanning
+// Detects the classic SharpHound pattern of discovering hosts via LDAP then scanning them over SMB.
+let ldap_then_smb_scan =
+let ldap_activity =
+DeviceNetworkEvents
+| where TimeGenerated > ago(timeframe)
+| where RemotePort in (389, 636)
+| where InitiatingProcessFileName !in~ (approved_processes)
+| summarize LdapQueryStartTime = min(TimeGenerated) by DeviceId, DeviceName, InitiatingProcessId, InitiatingProcessFileName, InitiatingProcessCommandLine;
+let smb_activity =
+DeviceNetworkEvents
+| where TimeGenerated > ago(timeframe)
+| where RemotePort == 445 and ActionType == "ConnectionSuccess"
+| summarize
+    SmbScanStartTime = min(TimeGenerated),
+    TargetComputerCount = dcount(RemoteIP),
+    TargetComputers = make_set(RemoteIP, 100)
+    by DeviceId, InitiatingProcessId
+| where TargetComputerCount > smb_target_threshold;
+ldap_activity
+| join kind=inner (smb_activity) on DeviceId, InitiatingProcessId
+| where SmbScanStartTime >= LdapQueryStartTime
+| project
+    timestamp = SmbScanStartTime,
+    DetectionPattern = "LDAP Enumeration followed by SMB Scan",
+    HostName = DeviceName,
+    ProcessName = InitiatingProcessFileName,
+    CommandLine = InitiatingProcessCommandLine,
+    SourceIp = "", // Source IP is on the host, not in the event here
+    InitiatingAccount = "", // Not directly available
+    Details = pack("LdapQueryStartTime", LdapQueryStartTime, "TargetComputerCount", TargetComputerCount, "TargetComputers", TargetComputers)
+;
+// Pattern 3: Session Enumeration via API Proxies
+// Detects a process loading session enumeration DLLs then making many SMB connections.
+let api_proxy_enum =
+let dll_loaders =
+DeviceImageLoadEvents
+| where TimeGenerated > ago(timeframe)
+| where FileName has_any ("netapi32.dll", "srvcli.dll")
+| where InitiatingProcessFileName !in~ (approved_processes)
+| project DllLoadTime = TimeGenerated, DeviceId, DeviceName, InitiatingProcessId, InitiatingProcessFileName, InitiatingProcessCommandLine, DllFileName = FileName;
+DeviceNetworkEvents
+| where TimeGenerated > ago(timeframe)
+| where RemotePort == 445 and ActionType == "ConnectionSuccess"
+| join kind=inner (dll_loaders) on DeviceId, InitiatingProcessId
+| where TimeGenerated between (DllLoadTime .. (DllLoadTime + 5m))
+| summarize
+    StartTime = min(DllLoadTime),
+    TargetComputerCount = dcount(RemoteIP),
+    TargetComputers = make_set(RemoteIP, 100),
+    LoadedDlls = make_set(DllFileName)
+    by HostName = DeviceName, ProcessName = InitiatingProcessFileName, CommandLine = InitiatingProcessCommandLine
+| where TargetComputerCount > smb_target_threshold
+| project
+    timestamp = StartTime,
+    DetectionPattern = "Session Enumeration via API Proxy",
+    HostName,
+    ProcessName,
+    CommandLine,
+    SourceIp = "",
+    InitiatingAccount = "",
+    Details = pack("LoadedDlls", LoadedDlls, "TargetComputerCount", TargetComputerCount, "TargetComputers", TargetComputers)
+;
+// Pattern 4: SharpHound Data Export
+// Detects the creation of a BloodHound zip archive after widespread SMB scanning.
+let data_export =
+let enumeration_processes =
+DeviceNetworkEvents
+| where TimeGenerated > ago(timeframe)
+| where RemotePort == 445 and ActionType == "ConnectionSuccess"
+| where InitiatingProcessFileName !in~ (approved_processes)
+| summarize
+    EnumerationEndTime = max(TimeGenerated),
+    TargetComputerCount = dcount(RemoteIP)
+    by DeviceId, DeviceName, InitiatingProcessId, InitiatingProcessFileName, InitiatingProcessCommandLine
+| where TargetComputerCount > smb_target_threshold;
+DeviceFileEvents
+| where TimeGenerated > ago(timeframe)
+| where ActionType == "FileCreated" and FileName has "_BloodHound.zip"
+| join kind=inner (enumeration_processes) on DeviceId, InitiatingProcessId
+| where TimeGenerated > EnumerationEndTime
+| project
+    timestamp = TimeGenerated,
+    DetectionPattern = "SharpHound Data Export",
+    HostName = DeviceName,
+    ProcessName = InitiatingProcessFileName,
+    CommandLine = InitiatingProcessCommandLine,
+    SourceIp = "",
+    InitiatingAccount = "",
+    Details = pack("ZipFileName", FileName, "TargetComputerCount", TargetComputerCount)
+;
+// Union all detection patterns into a single result set.
+union isouter=true named_pipe_enum, ldap_then_smb_scan, api_proxy_enum, data_export
+| extend
+    HostCustomEntity = HostName,
+    ProcessCustomEntity = ProcessName,
+    CommandLineCustomEntity = CommandLine,
+    AccountCustomEntity = InitiatingAccount,
+    IpCustomEntity = SourceIp

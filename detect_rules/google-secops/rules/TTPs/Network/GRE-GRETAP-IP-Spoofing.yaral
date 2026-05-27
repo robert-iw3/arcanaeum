@@ -1,0 +1,47 @@
+rule gre_gretap_ip_spoofing {
+  meta:
+    description = "Detects potential GRE/GRETAP IP spoofing attacks. Attackers exploit these tunnels with spoofed IPs for initial access and evasion. This rule looks for GRE traffic where the source IP is an internal, private IP address, but the traffic is observed communicating with a public IP address, which is a strong indicator of IP spoofing."
+    author = "RW"
+    date = "2025-08-13"
+    reference = "https://www.kb.cert.org/vuls/id/199397, https://www.securityweek.com/millions-of-internet-hosts-vulnerable-to-attacks-due-to-tunneling-protocol-flaws/"
+    tags = "NETWORK, TUNNEL, GRE, GRETAP, SPOOFING"
+    tactic = "TA0001, TA0007"
+    technique = "T1595.002, T1090.002"
+    false_positives = "Network misconfigurations could potentially lead to false positives. It's recommended to baseline normal GRE traffic and add exceptions for known, legitimate internal source IPs seen on external interfaces if necessary."
+
+  events:
+    $gre_traffic.metadata.event_type = "NETWORK_CONNECTION"
+    // Detects GRE traffic (protocol number 47). GRETAP is a Layer 2 variant but often uses the same protocol number.
+    $gre_traffic.network.ip.protocol = "GRE"
+
+    // The source IP is a private (RFC1918) address.
+    // This traffic should not be routable on the public internet.
+    (
+      net.ip_in_range_cidr($gre_traffic.principal.ip, "10.0.0.0/8") or
+      net.ip_in_range_cidr($gre_traffic.principal.ip, "172.16.0.0/12") or
+      net.ip_in_range_cidr($gre_traffic.principal.ip, "192.168.0.0/16")
+    )
+
+    // The destination IP is a public address.
+    // This indicates the private source is attempting to communicate externally, which is anomalous.
+    not (
+      net.ip_in_range_cidr($gre_traffic.target.ip, "10.0.0.0/8") or
+      net.ip_in_range_cidr($gre_traffic.target.ip, "172.16.0.0/12") or
+      net.ip_in_range_cidr($gre_traffic.target.ip, "192.168.0.0/16") or
+      net.ip_in_range_cidr($gre_traffic.target.ip, "127.0.0.0/8") or // Exclude localhost
+      net.ip_in_range_cidr($gre_traffic.target.ip, "169.254.0.0/16") // Exclude link-local
+    )
+
+  outcome:
+    // A risk score of 60 is assigned due to the high likelihood of spoofing or a significant network misconfiguration.
+    $risk_score = 60
+    $principal_ip = array_distinct($gre_traffic.principal.ip)
+    $target_ip = array_distinct($gre_traffic.target.ip)
+    $target_port = array_distinct($gre_traffic.target.port)
+    $network_protocol = array_distinct($gre_traffic.network.ip.protocol)
+    $principal_hostname = array_distinct($gre_traffic.principal.hostname)
+    $target_hostname = array_distinct($gre_traffic.target.hostname)
+
+  condition:
+    $gre_traffic
+}

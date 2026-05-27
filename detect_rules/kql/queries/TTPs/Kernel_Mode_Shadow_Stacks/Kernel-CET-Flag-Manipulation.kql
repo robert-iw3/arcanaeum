@@ -1,0 +1,42 @@
+//
+//Title: Kernel CET Flag Manipulation via Registry Modification
+//Description:  Detects attempts to disable or weaken Kernel-mode Hardware-enforced Stack Protection (CET) or its prerequisite,
+//              Hypervisor-Enforced Code Integrity (HVCI), by modifying their configuration in the registry. These changes, //
+//              which take effect on reboot, are a proxy for manipulating the `nt!KiKernelCetEnabled` flag to bypass exploit mitigations.
+//Author: RW
+//Date: 2025-08-03
+MITRE ATT&CK:
+- T1562.001: Impair Defenses: Disable or Modify Tools
+- T1562.006: Impair Defenses: Indicator Blocking
+
+// Define the registry keys that control Kernel CET and its prerequisite, HVCI.
+let target_keys = dynamic([
+    @"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\KernelShadowStacks",
+    @"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity"
+]);
+DeviceRegistryEvents
+// Look for modifications to the specific 'Enabled' value within the target keys.
+| where RegistryKey has_any (target_keys) and RegistryValueName == "Enabled"
+// An attacker would likely set the 'Enabled' value to 0 or delete it to disable the feature.
+| where (ActionType == "RegistryValueSet" and RegistryValueData == "0") or (ActionType == "RegistryValueDeleted")
+// FP-MITIGATION: Exclude known system processes associated with Windows Updates.
+// Administrative tools (e.g., reg.exe, powershell.exe) might be used for legitimate changes and should be investigated for context.
+| where not(InitiatingProcessFileName in~ ("TiWorker.exe", "TrustedInstaller.exe"))
+| extend
+    timestamp = TimeGenerated,
+    HostName = DeviceName,
+    Account = InitiatingProcessAccountName
+| project
+    timestamp,
+    HostName,
+    Account,
+    ActionType,
+    RegistryKey,
+    RegistryValueName,
+    RegistryValueData,
+    PreviousRegistryValueData,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine
+| extend
+    HostCustomEntity = HostName,
+    AccountCustomEntity = Account

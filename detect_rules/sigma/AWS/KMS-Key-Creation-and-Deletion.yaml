@@ -1,0 +1,31 @@
+title: AWS KMS Key Created and Scheduled for Deletion by Same Identity
+id: 2c087e7e-c7b1-45ca-a79a-898beedf644c
+status: experimental
+description: >-
+  Detects when a single AWS identity creates a KMS key and then schedules a key for deletion within a short period. This pattern can be indicative of a ransomware attack, where an attacker creates a key to encrypt data and then schedules its deletion to prevent recovery.
+references:
+  - https://rhinosecuritylabs.com/aws/s3-ransomware-part-1-attack-vector/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.impact
+  - attack.t1486
+logsource:
+  product: aws
+  service: kms
+detection:
+  # Detects a sequence of events where a key is created and then another is scheduled for deletion
+  sequence:
+    - create:
+        eventName: 'CreateKey'
+    - delete:
+        eventName: 'ScheduleKeyDeletion'
+  # The events must be performed by the same user/role identity
+  by: userIdentity.arn
+  # The sequence must occur within a 1-hour timeframe to be considered suspicious
+  timeframe: 1h
+  condition: sequence
+falsepositives:
+  - Legitimate administrative scripts that perform key lifecycle management, although creating and deleting keys in such a short timeframe by the same identity is uncommon for production keys.
+  - Could occur in CI/CD or testing environments during infrastructure setup and teardown.
+level: high

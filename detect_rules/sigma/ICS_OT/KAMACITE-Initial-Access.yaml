@@ -1,0 +1,50 @@
+title: KAMACITE Credential Harvesting TTPs
+description: >-
+  Detects credential harvesting techniques, such as LSASS memory dumping and registry hive dumping, commonly
+  used by threat actors like KAMACITE (APT44) during initial access phases. KAMACITE is known to infiltrate
+  IT networks that bridge to OT/ICS environments, making the detection of these credential access attempts
+  critical to preventing deeper compromise.
+references:
+  - https://attack.mitre.org/techniques/T1003/001/
+  - https://attack.mitre.org/techniques/T1003/002/
+author: RW
+date: 2025-08-18
+tags:
+  - attack.credential_access
+  - attack.t1003.001
+  - attack.t1003.002
+  - os.windows
+  - ot.credential_access
+logsource:
+  product: windows
+  category: process_creation
+detection:
+  # T1003.001: LSASS Memory Dumping via common tools
+  lsass_dump:
+    selection_procdump:
+      Image|endswith: '\procdump.exe'
+      CommandLine|contains|all:
+        - '-ma'
+        - 'lsass.exe'
+    selection_comsvcs:
+      Image|endswith: '\rundll32.exe'
+      CommandLine|contains|all:
+        - 'comsvcs.dll'
+        - 'MiniDump'
+    condition: 1 of them
+
+  # T1003.002: Registry Hive Dumping for offline credential extraction
+  registry_dump:
+    Image|endswith: '\reg.exe'
+    CommandLine|contains: 'save'
+    CommandLine|contains:
+      - 'hklm\sam'
+      - 'hklm\security'
+      - 'hklm\system'
+
+  condition: lsass_dump or registry_dump
+falsepositives:
+  - Legitimate administrative scripts or backup solutions.
+  - Security software or penetration testing tools.
+  - It is recommended to scope this rule to assets where such activity is not expected, particularly servers bridging IT and OT networks, and to whitelist known administrative activity.
+level: high

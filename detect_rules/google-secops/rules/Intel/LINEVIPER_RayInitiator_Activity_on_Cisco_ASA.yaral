@@ -1,0 +1,62 @@
+rule line_viper_and_rayinitiator_activity_on_cisco_asa {
+  meta:
+    author = "RW"
+    date = "2025-09-27"
+    description = "Detects multiple indicators of compromise (IOCs) and tactics, techniques, and procedures (TTPs) associated with the LINE VIPER and RayInitiator malware on Cisco ASA devices, as detailed in the NCSC report. This rule combines detections for covert packet captures, anti-forensic commands, unexpected reboots, potential AAA bypass, malware delivery vectors, and C2 indicators."
+    reference = "https://www.ncsc.gov.uk/static-assets/documents/malware-analysis-reports/RayInitiator-LINE-VIPER/ncsc-mar-rayinitiator-line-viper.pdf"
+    false_positives = "Legitimate administrative activity may trigger parts of this rule. The 'capture' command, in particular, can be used for valid troubleshooting. Device reboots are common during planned maintenance. The WebVPN patterns could be triggered by misconfigured or non-standard clients. The C2 indicators are general and may occur during normal operations."
+    severity = "HIGH"
+    tactic = "TA0006, TA0011, TA0005, TA0040"
+    technique = "T1040, T1071.001, T1202, T1562, T1529"
+    tags = "attack.credential_access, attack.t1040, attack.command_and_control, attack.t1071.001, attack.defense_evasion, attack.t1202, attack.t1562, attack.impact, attack.t1529, malware.line_viper, malware.rayinitiator"
+
+  events:
+    // This rule targets Cisco ASA logs. The UDM product field should match your parser configuration.
+    $e.metadata.product = "Cisco ASA"
+
+    (
+      // selection_cli_commands: Corresponds to command harvesting, covert packet captures, and anti-forensic techniques.
+      // FP Risk: 'capture' is a common troubleshooting command. Consider tuning with user allowlists if noisy.
+      (
+        ($e.security_result.rule_id = "111008" or $e.security_result.rule_id = "111009")
+        and re.regex($e.security_result.summary, `capture |copy system:/text|verify`) nocase
+      )
+      or
+      // selection_reboot: Corresponds to the anti-forensic reboot capability.
+      // FP Risk: Reboots are common for maintenance. Correlate with change management data.
+      (
+        $e.security_result.rule_id = "199001" or
+        $e.security_result.rule_id = "199002" or
+        $e.security_result.rule_id = "104001"
+      )
+      or
+      // selection_aaa_bypass: Detects a WebVPN XML pattern used for AAA bypass.
+      // FP Risk: Could be triggered by non-standard or misconfigured clients.
+      re.regex($e.security_result.summary, `<device-id computer-name="" device-type=""`)
+      or
+      // selection_webvpn_delivery: Detects WebVPN XML patterns used for malware delivery.
+      // FP Risk: Could be triggered by non-standard or misconfigured clients.
+      re.regex($e.security_result.summary, `<client-cert cert-format="pkcs7">|<client-cert-auth-signature`) nocase
+      or
+      // selection_c2_indicators: Syslog messages related to C2 activity that LINE VIPER may attempt to suppress.
+      // FP Risk: These are general logs. The absence of these logs is more indicative of the threat actor's TTP, which requires separate analysis.
+      (
+        $e.security_result.rule_id = "302013" or
+        $e.security_result.rule_id = "302014" or
+        $e.security_result.rule_id = "609002" or
+        $e.security_result.rule_id = "710005"
+      )
+    )
+
+  outcome:
+    // Risk score is set to High based on the potential impact of the detected activity.
+    $risk_score = 75
+    $principal_hostname = array_distinct($e.principal.hostname)
+    $principal_ip = array_distinct($e.principal.ip)
+    $event_summary = array_distinct($e.security_result.summary)
+    $rule_id = array_distinct($e.security_result.rule_id)
+    $user = array_distinct($e.principal.user.userid)
+
+  condition:
+    $e
+}

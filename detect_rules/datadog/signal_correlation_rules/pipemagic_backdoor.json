@@ -1,0 +1,108 @@
+{
+  "name": "PipeMagic Backdoor Activity",
+  "type": "signal_correlation",
+  "message": "PipeMagic Activity: {{distinct_count}} clause(s) on host {{host}} by user {{usr}}: {{case_names}}",
+  "is_enabled": true,
+  "options": {
+    "detection_method": "signal_correlation",
+    "correlation_rule": {
+      "correlated_by_fields": [
+        "host",
+        "usr"
+      ],
+      "distinct_fields": [
+        "case_id"
+      ],
+      "correlation_expression": "distinct_count >= 1",
+      "correlation_time_frame": 3600
+    },
+    "evaluation_window": 3600,
+    "keep_alive": 3600,
+    "max_signal_duration": 3600
+  },
+  "queries": [
+    {
+      "name": "pipemagic_file_hash_ioc",
+      "query": "@file.hash:(dc54117b965674bad3d7cd203ecf5e7fc822423a3f692895cf5e96e83fb88f6a OR 4843429e2e8871847bc1e97a0f12fa1f4166baa4735dff585cb3b4736e3fe49e OR 297ea881aa2b39461997baf75d83b390f2c36a9a0a4815c81b5cf8be42840fd1)",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "pipemagic_named_pipe",
+      "query": "@winlog.event_id:17 AND @winlog.event_data.PipeName:\\\\.\\\\pipe\\\\1\\\\.[0-9a-fA-F]{32}",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "pipemagic_c2_connection",
+      "query": "@winlog.event_id:3 AND (@network.destination.domain:aaaaabbbbbbb.eastus.cloudapp.azure.com OR @network.destination.ip:127.0.0.1) AND @network.destination.port:(443 OR 8082)",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "pipemagic_c2_http_pattern",
+      "query": "@url:*.*/[a-fA-F0-9]{16} AND @http.headers:(*Upgrade:\\\\ websocket* AND *Connection:\\\\ Upgrade*)",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "pipemagic_certutil_download",
+      "query": "@winlog.event_id:1 AND @process.name:certutil.exe AND @process.cmdline:*-urlcache* AND @process.cmdline:*-f* AND (@process.cmdline:*.tmp* OR @process.cmdline:*.dat* OR @process.cmdline:*.msbuild*)",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "pipemagic_msbuild_execution",
+      "query": "@winlog.event_id:1 AND @process.parent.name:msbuild.exe AND @process.cmdline:*.mshi*",
+      "data_source": "logs",
+      "aggregation": "count"
+    },
+    {
+      "name": "pipemagic_lsass_access",
+      "query": "@winlog.event_id:10 AND @winlog.event_data.TargetImage:*\\\\lsass.exe AND @winlog.event_data.SourceImage:*\\\\dllhost.exe",
+      "data_source": "logs",
+      "aggregation": "count"
+    }
+  ],
+  "cases": [
+    {
+      "name": "PipeMagic File Hash IOC",
+      "status": "high",
+      "condition": "pipemagic_file_hash_ioc >= 1"
+    },
+    {
+      "name": "PipeMagic Named Pipe",
+      "status": "medium",
+      "condition": "pipemagic_named_pipe >= 1"
+    },
+    {
+      "name": "PipeMagic C2 Connection",
+      "status": "high",
+      "condition": "pipemagic_c2_connection >= 1"
+    },
+    {
+      "name": "PipeMagic C2 HTTP Pattern",
+      "status": "high",
+      "condition": "pipemagic_c2_http_pattern >= 1"
+    },
+    {
+      "name": "PipeMagic Certutil Download",
+      "status": "medium",
+      "condition": "pipemagic_certutil_download >= 1"
+    },
+    {
+      "name": "PipeMagic MSBuild Execution",
+      "status": "medium",
+      "condition": "pipemagic_msbuild_execution >= 1"
+    },
+    {
+      "name": "PipeMagic LSASS Access",
+      "status": "high",
+      "condition": "pipemagic_lsass_access >= 1"
+    }
+  ],
+  "tags": [
+    "rule_id:pipemagic_correlation",
+    "severity:high"
+  ]
+}

@@ -1,0 +1,60 @@
+- type: expert
+  name: Detect AUTHENTIC ANTICS COM Hijacking Persistence
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "**" }
+       }
+       Target {
+          Match REGISTRY {
+             Include OBJECT_NAME { -v "HKEY_LOCAL_MACHINE\\Software\\Classes\\CLSID\\{1299CF18-C4F5-4B6A-BB0F-2299F0398E27}\\InprocServer32" }
+             Include -access "WRITE,CREATE"
+             Include -value_data "*Microsoft.Identity64.dll*"
+             Exclude -value_data "*npmproxy.dll*"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects writes to the specific CLSID\\InprocServer32 key redirecting to malicious Microsoft.Identity64.dll — core persistence mechanism of AUTHENTIC ANTICS (APT28/GRU malware, NCSC 2025). Excludes legitimate npmproxy.dll. Highly specific; very low FP rate; tune only for confirmed false positives."
+- type: firewall
+  name: Detect AUTHENTIC ANTICS Outlook Forced Authentication
+  application: outlook.exe
+  direction: out
+  protocol: TCP
+  port: "443"
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects outbound HTTPS from outlook.exe potentially to login.microsoftonline.com or similar — used by AUTHENTIC ANTICS for forced authentication and credential theft. Tune for legitimate OAuth flows."
+- type: firewall
+  name: Detect AUTHENTIC ANTICS Hidden Email Exfiltration
+  application: outlook.exe
+  direction: out
+  protocol: TCP
+  port: "443"
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects outbound HTTPS from outlook.exe to outlook.office.com — used by AUTHENTIC ANTICS for hidden email exfiltration (victim's account sends data to attacker mailbox; SaveToSentItems: false). Blends with normal traffic. Use Web Control/proxy for path (/me/sendMail) and param detection; tune for heavy Outlook users."
+- type: expert
+  name: Detect AUTHENTIC ANTICS Execution Frequency Control
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "**" }
+       }
+       Target {
+          Match REGISTRY {
+             Include OBJECT_NAME { -v "HKEY_CURRENT_USER\\Software\\Microsoft\\Office\\16.0\\Outlook\\Logging\\Counter" }
+             Include -access "WRITE,CREATE"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects writes to HKCU\\...\\Outlook\\Logging\\Counter — AUTHENTIC ANTICS uses this for execution frequency throttling (limits prompts/activity). Highly specific; low FP likelihood. Tune for third-party Outlook add-ins that modify logging counters."

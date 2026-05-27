@@ -1,0 +1,50 @@
+// Name: CIP Communication with Internet-Facing Device
+// Author: RW
+// Date: 2025-08-17
+// Description: Detects Common Industrial Protocol (CIP) traffic between an internal, private IP address (assumed ICS device)
+// and a public, internet-routable IP address. Exposing ICS devices and protocols directly to the internet is a significant
+// security risk and a common vector for exploitation.
+// False Positive Sensitivity: Medium
+// Tags: ICS, CIP, EtherNet/IP, TTPs, Initial Access, Internet-Exposed
+
+let TimeFrame = 1h;
+// This allowlist is critical for reducing false positives from legitimate, authorized connections (e.g., vendor support, cloud services).
+// Populate this list with public IP addresses that are permitted to communicate with your internal ICS assets on CIP-related ports.
+let AuthorizedPublicIps = dynamic([
+    "203.0.113.5", // Placeholder for a known vendor support IP
+    "198.51.100.10" // Placeholder for a required cloud service IP
+]);
+
+// This rule assumes network connection logs are available in a table like DeviceNetworkEvents.
+// You may need to change the table name and field names (e.g., LocalIP -> SourceIp, RemoteIP -> DestinationIp) to match your data source.
+DeviceNetworkEvents
+| where TimeGenerated > ago(TimeFrame)
+// Filter for EtherNet/IP, the most common CIP implementation over TCP/IP, which uses port 44818 for explicit messaging.
+| where RemotePort == 44818 or LocalPort == 44818
+// Identify connections between a private (internal) IP and a public (internet) IP.
+| where (ipv4_is_private(LocalIP) and not(ipv4_is_private(RemoteIP))) or (not(ipv4_is_private(LocalIP)) and ipv4_is_private(RemoteIP))
+// Assign IPs to clear roles for readability and define the connection direction.
+| extend IcsDeviceIp = iif(ipv4_is_private(LocalIP), LocalIP, RemoteIP)
+| extend PublicIp = iif(ipv4_is_private(LocalIP), RemoteIP, LocalIP)
+| extend ConnectionDirection = iif(RemotePort == 44818, "Inbound to ICS", "Outbound from ICS")
+// Exclude traffic to/from authorized public IPs to reduce noise.
+| where PublicIp !in (AuthorizedPublicIps)
+// Summarize the events to create a single alert per unique connection.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    EventCount = count(),
+    ReportedDeviceName = take_any(DeviceName)
+    by IcsDeviceIp, PublicIp, ConnectionDirection
+// Potential False Positives:
+// - Legitimate but unlisted remote access or cloud integration services.
+// - Misconfigurations in network address translation (NAT) or logging that obscure the true source/destination.
+// - Regular maintenance of the 'AuthorizedPublicIps' allowlist is essential for accuracy.
+| project
+    StartTime,
+    EndTime,
+    IcsDeviceIp,
+    PublicIp,
+    ConnectionDirection,
+    EventCount,
+    ReportedDeviceName

@@ -1,0 +1,49 @@
+// name: AMSI Bypass via VEH2
+// id: 4e8c1a9b-3d7f-4e2a-8b6c-9f0a1b2c3d4e
+// version: 1
+// date: 2025-07-31
+// author: RW
+// description: Detects the VEH2 AMSI bypass technique, where an adversary registers multiple Vectored Exception Handlers (VEHs) and uses a `DebugBreak` call to trigger an exception chain. This allows setting a hardware breakpoint on `AmsiScanBuffer` and manipulating the execution flow to bypass AMSI scanning without calling the easily monitored `NtSetContextThread` API.
+// data_source:
+// - EDR API Monitoring
+// - EDR Module Loads
+// how_to_implement: To successfully implement this detection, you need to be ingesting EDR data from sources like Microsoft Defender for Endpoint into the `DeviceEvents` table. The query requires logs for API calls (specifically `AddVectoredExceptionHandler` and `DebugBreak`) and module loads (for `amsi.dll`).
+// known_false_positives: Legitimate software, such as debuggers (e.g., WinDbg, x64dbg), reverse engineering tools, and some advanced security or anti-cheat software, may use multiple exception handlers and debug breaks as part of their normal operation. It is crucial to investigate the context of the process and filter out known benign applications.
+// references:
+// mitre_attack_id:
+// - T1562.001
+// - T1055
+// analytic_story:
+// - AMSI Bypass
+
+let timeframe = 1h;
+DeviceEvents
+| where TimeGenerated > ago(timeframe)
+// Medium comment: Filter for the key events of the VEH2 technique: registering an exception handler, triggering a debug break, and the presence of the target DLL.
+| where
+    (ActionType == "ApiCall" and ApiFunction in ("AddVectoredExceptionHandler", "DebugBreak")) or
+    (ActionType == "ModuleLoaded" and FileName endswith "\\amsi.dll")
+// Medium comment: Correlate these distinct events to a single process instance within the timeframe.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    veh_registration_count = countif(ApiFunction == "AddVectoredExceptionHandler"),
+    debug_break_count = countif(ApiFunction == "DebugBreak"),
+    amsi_load_count = countif(ActionType == "ModuleLoaded" and FileName endswith "\\amsi.dll")
+    by DeviceId, DeviceName, InitiatingProcessId, InitiatingProcessGuid, InitiatingProcessFileName, InitiatingProcessCommandLine, InitiatingProcessParentFileName
+// Medium comment: The core detection logic looks for more than one VEH registration, at least one debug break, and the loading of amsi.dll.
+| where veh_registration_count > 1 and debug_break_count > 0 and amsi_load_count > 0
+// Medium comment: Consider filtering for common legitimate processes that may exhibit this behavior.
+// | where InitiatingProcessFileName !in~ ("windbg.exe", "x64dbg.exe", "ida.exe", "legit_tool.exe")
+| project
+    TimeGenerated = StartTime,
+    EndTime,
+    DeviceName,
+    ProcessName = InitiatingProcessFileName,
+    ParentProcessName = InitiatingProcessParentFileName,
+    ProcessCommandLine = InitiatingProcessCommandLine,
+    ProcessId = InitiatingProcessId,
+    ProcessGuid = InitiatingProcessGuid,
+    VEHRegistrations = veh_registration_count,
+    DebugBreaks = debug_break_count,
+    AmsiLoaded = amsi_load_count

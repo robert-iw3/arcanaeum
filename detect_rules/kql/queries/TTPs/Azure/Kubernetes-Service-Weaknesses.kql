@@ -1,0 +1,73 @@
+// Name: Azure Kubernetes Service (AKS) Suspicious Activity
+// Author: RW
+// Date: 2025-08-31
+// Description: Detects suspicious activities in Azure Kubernetes Service (AKS) that could indicate misconfigurations being
+// exploited for privilege escalation or execution. This includes anonymous API access, cluster-admin role bindings, and
+// interactive shells being created in pods.
+// Tactic: Privilege Escalation, Execution
+// Technique: T1609
+
+let lookback = 1d;
+
+// Define a list of trusted users, service principals, or IPs that perform routine administrative tasks.
+// This is crucial for tuning the 'Interactive Shell' detection.
+let trustedEntities = dynamic([]); // e.g., dynamic(["admin@example.com", "cluster-automation-sa", "192.168.1.100"])
+
+// Base query for AKS audit logs
+let KubeAudit = AzureDiagnostics
+| where TimeGenerated > ago(lookback)
+| where Category in ("kube-audit", "kube-audit-admin")
+| extend log = todynamic(log_s)
+| extend
+    verb = tostring(log.verb),
+    resource = tostring(log.objectRef.resource),
+    subresource = tostring(log.objectRef.subresource),
+    requestURI = tostring(log.requestURI),
+    responseCode = toint(log.responseStatus.code),
+    user = tostring(log.user.username),
+    userAgent = tostring(log.userAgent),
+    sourceIP = tostring(log.sourceIPs[0]),
+    requestBody = todynamic(log.requestObject),
+    resourceName = tostring(log.objectRef.name),
+    resourceNamespace = tostring(log.objectRef.namespace);
+
+// Pattern 1: Detects successful anonymous access to the K8s API server.
+// This indicates a misconfiguration where the API server is exposed to unauthenticated users.
+let AnonymousApiAccess = KubeAudit
+| where user == "system:anonymous" and (responseCode >= 200 and responseCode < 300)
+// Exclude common health checks which are often legitimately exposed.
+| where requestURI !has_any ("/healthz", "/livez", "/readyz")
+| extend
+    Activity = "Successful Anonymous K8s API Access",
+    Tactic = "Privilege Escalation",
+    Details = strcat("Successful anonymous request to: ", requestURI)
+| project TimeGenerated, Activity, Tactic, Technique="T1609", user, sourceIP, userAgent, Details, ResourceId=_ResourceId, CorrelationId=log.auditID;
+
+// Pattern 2: Detects the creation of a binding to the highly-privileged 'cluster-admin' role.
+// This is a key indicator of a privilege escalation attempt.
+let ClusterAdminBinding = KubeAudit
+| where verb == "create" and resource in ("clusterrolebindings", "rolebindings")
+| where tostring(requestBody.roleRef.name) == "cluster-admin"
+| extend
+    SubjectKind = tostring(requestBody.subjects[0].kind),
+    SubjectName = tostring(requestBody.subjects[0].name),
+    Activity = "Cluster-Admin Role Binding Created",
+    Tactic = "Privilege Escalation",
+    Details = strcat("User '", user, "' created a cluster-admin binding for '", SubjectName, "' (Kind: '", SubjectKind, "').")
+| project TimeGenerated, Activity, Tactic, Technique="T1609", user, sourceIP, userAgent, Details, ResourceId=_ResourceId, CorrelationId=log.auditID;
+
+// Pattern 3: Detects an interactive shell (exec) being created in a pod.
+// This is a common administrative action but can also be used by attackers for execution.
+let InteractiveShell = KubeAudit
+| where verb == "create" and resource == "pods" and subresource == "exec"
+| where (responseCode >= 200 and responseCode < 300)
+// False Positive Tuning: Exclude trusted users, service accounts, or source IPs that perform legitimate 'exec' operations.
+| where user !in (trustedEntities) and sourceIP !in (trustedEntities)
+| extend
+    Activity = "Interactive Shell in Container (exec)",
+    Tactic = "Execution",
+    Details = strcat("User '", user, "' initiated an interactive shell in pod '", resourceName, "' in namespace '", resourceNamespace, "'.")
+| project TimeGenerated, Activity, Tactic, Technique="T1609", user, sourceIP, userAgent, Details, ResourceId=_ResourceId, CorrelationId=log.auditID;
+
+// Combine all patterns
+union AnonymousApiAccess, ClusterAdminBinding, InteractiveShell

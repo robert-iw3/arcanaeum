@@ -1,0 +1,25 @@
+title: Enable AWS Service Access for Organization
+id: 4a25a66a-4790-4b52-9b64-ad9c5b44f7a6
+status: experimental
+description: >-
+  Detects the enabling of trusted access for an AWS service within an AWS Organization. An attacker who has compromised the management account could enable trusted access for services like IAM Access Analyzer or IAM Identity Center to enumerate or gain access to other member accounts.
+references:
+  - https://hackingthe.cloud/aws/general-knowledge/aws_organizations_defaults/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.t1098
+  - attack.t1531
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    # Event from AWS Organizations
+    eventSource: 'organizations.amazonaws.com'
+    # API call to enable trusted access for a service
+    eventName: 'EnableAWSServiceAccess'
+  condition: selection
+falsepositives:
+  - This is a legitimate action performed by administrators when integrating an AWS service (e.g., GuardDuty, IAM Access Analyzer, AWS Config) with the entire organization. It should be correlated with change management records.
+level: medium

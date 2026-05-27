@@ -1,0 +1,57 @@
+// Name: Suspicious Blob-Triggered Workflow Created
+// Author: RW
+// Date: 2025-10-26
+// Description: Detects the creation of an Azure Event Grid subscription that triggers on blob creation and is configured in a suspicious manner. This could indicate an attacker setting up a mechanism for lateral movement, data exfiltration, or persistence by executing a workflow (e.g., Azure Function, Logic App, or external WebHook) when a file is uploaded to a storage container.
+// Tactics: Lateral Movement, Persistence, Exfiltration
+// Techniques: T1021.007
+// References: https://www.microsoft.com/en-us/security/blog/2025/10/20/inside-the-attack-chain-threat-activity-targeting-azure-blob-storage/
+// False Positive Sensitivity: Medium
+
+let timeframe = 1d;
+// Placeholder for trusted user accounts or service principals that normally create these resources.
+// Tune this list to your environment to reduce false positives from legitimate automation or administrative accounts.
+let trustedCallers = dynamic([]);
+// Placeholder for trusted IP ranges (e.g., corporate network, VPN, Azure DevOps service tags).
+let trustedIpRanges = dynamic([]);
+// Placeholder for expected webhook domains. Triggers pointing to other domains will be flagged as suspicious.
+let trustedWebhookDomains = dynamic(["azure.com", "azure.net", "logic.azure.com"]);
+
+AzureActivity
+| where TimeGenerated > ago(timeframe)
+// Filter for the creation or update of an Event Grid subscription.
+| where OperationNameValue =~ "MICROSOFT.EVENTGRID/EVENTSUBSCRIPTIONS/WRITE"
+| where ActivityStatusValue == "Success"
+// Parse the request body to inspect the subscription's properties.
+| extend requestbody = todynamic(Properties).requestbody
+| extend
+    sourceResource = tostring(requestbody.properties.topic),
+    eventTypes = requestbody.properties.filter.includedEventTypes,
+    destinationType = tostring(requestbody.properties.destination.endpointType),
+    destinationUrl = tostring(requestbody.properties.destination.properties.endpointUrl),
+    destinationResourceId = tostring(requestbody.properties.destination.properties.resourceId)
+// Focus on subscriptions that trigger on blob creation events in a storage account.
+| where sourceResource has "/providers/Microsoft.Storage/storageAccounts/" and tostring(eventTypes) has "Microsoft.Storage.BlobCreated"
+// Identify suspicious conditions.
+| extend
+    // Condition 1: The destination is a WebHook pointing to a non-trusted, potentially external, domain.
+    destinationDomain = tostring(parse_url(destinationUrl).Host),
+    isSuspiciousWebhook = destinationType == "WebHook" and not(destinationDomain has_any (trustedWebhookDomains)),
+    // Condition 2: The action is performed by a non-trusted caller or from a non-trusted IP.
+    isUntrustedCaller = not(Caller in (trustedCallers) or ipv4_is_in_any_range(CallerIpAddress, trustedIpRanges))
+// Alert if a blob trigger is created by an untrusted caller OR if it points to a suspicious webhook.
+// Legitimate but infrequent administrative actions might trigger this. Review and add to allowlists as needed.
+| where isUntrustedCaller or isSuspiciousWebhook
+| project
+    TimeGenerated,
+    Caller,
+    CallerIpAddress,
+    OperationName,
+    SubscriptionId,
+    ResourceGroup,
+    StorageAccountName = tostring(split(sourceResource, '/')[-1]),
+    DestinationType = destinationType,
+    Destination = iff(isnotempty(destinationUrl), destinationUrl, destinationResourceId),
+    IsSuspiciousWebhook = isSuspiciousWebhook,
+    IsUntrustedCaller = isUntrustedCaller,
+    CorrelationId,
+    ResourceId

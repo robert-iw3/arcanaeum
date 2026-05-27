@@ -1,0 +1,118 @@
+// Name: Linux Rootkit and Anti-Forensic Activity (DPRK Stealth Rootkit)
+// Author: RW
+// Date: 2025-08-14
+// References:
+// - https://sandflysecurity.com/blog/leaked-north-korean-linux-stealth-rootkit-analysis
+// - https://www.kernel.org/doc/html/latest/admin-guide/tainted-kernels.html
+// MITRE TTPs: T1564.001, T1547.006, T1070.004, T1070.006, T1562.003
+
+// Define IOCs and patterns from the North Korean rootkit analysis.
+let maliciousPaths = dynamic([
+    "/usr/lib64/tracker-fs",
+    "/usr/include/tracker-fs/tracker-efs",
+    "/etc/init.d/tracker-fs",
+    "/etc/rc2.d/S55tracker-fs",
+    "/etc/rc3.d/S55tracker-fs",
+    "/etc/rc5.d/S55tracker-fs",
+    "/proc/acpi/pcicard"
+]);
+let antiForensicStrings = dynamic([
+    "--noprofile",
+    "--norc",
+    "HISTFILE=/dev/null",
+    "HISTORY=/dev/null",
+    "BASH_HISTORY=/dev/null",
+    "unset HISTFILE",
+    "unset HISTORY",
+    "TMOUT=0"
+]);
+let shellProcesses = dynamic(["sh", "bash", "dash", "zsh", "ksh", "csh", "tcsh"]);
+let historyFiles = dynamic([".bash_history", ".zsh_history", ".zhistory", ".history", ".sh_history"]);
+// FP Tuning: Add legitimate, unsigned kernel modules to this list to prevent FPs from the Kernel Taint detection.
+let known_good_modules = dynamic(["nvidia", "vboxdrv", "zfs"]);
+
+union isfuzzy=true (
+    // Pattern 1: Hidden Rootkit Artifacts (IOCs)
+    // Detects file or process events related to known malicious paths from the rootkit.
+    (union isfuzzy=true DeviceProcessEvents, DeviceFileEvents
+    | where
+        (TableName == "DeviceProcessEvents" and (FolderPath in (maliciousPaths) or ProcessCommandLine has_any (maliciousPaths))) or
+        (TableName == "DeviceFileEvents" and FolderPath in (maliciousPaths))
+    // FP Tuning: These paths are highly specific to the analyzed rootkit. FPs are unlikely but attackers can change these IOCs.
+    | extend
+        DetectionPattern = "Hidden Rootkit Artifact Detected",
+        Details = case(
+            TableName == "DeviceProcessEvents", ProcessCommandLine,
+            TableName == "DeviceFileEvents", strcat(ActionType, " file: ", FolderPath),
+            "N/A"
+        ),
+        AccountName = case(isnotempty(InitiatingProcessAccountName), InitiatingProcessAccountName, AccountName, "N/A"),
+        SuspiciousProcess = FileName,
+        SuspiciousCommandLine = ProcessCommandLine,
+        ParentProcess = InitiatingProcessCommandLine,
+        HostName = DeviceName
+    ),
+    // Pattern 2: Kernel Tainted by Unsigned Module
+    // Detects when the Linux kernel is tainted, often by an unsigned or out-of-tree kernel module.
+    (Syslog
+    | where ProcessName == "kernel" and SyslogMessage has "tainting kernel"
+    | where not(SyslogMessage has_any (known_good_modules))
+    | extend
+        DetectionPattern = "Kernel Tainted by Unsigned Module",
+        Details = SyslogMessage,
+        AccountName = "N/A",
+        SuspiciousProcess = ProcessName,
+        SuspiciousCommandLine = "N/A",
+        ParentProcess = "N/A",
+        HostName = Computer
+    ),
+    // Pattern 3: Network Connection Without Associated Process
+    // Detects network activity without a corresponding process, a key sign of a process-hiding rootkit.
+    (DeviceNetworkEvents
+    | where DeviceOSPlatform == "Linux"
+    | where ActionType in ("ConnectionSuccess", "InboundConnectionAccepted", "ListenSuccess")
+    | where isempty(InitiatingProcessFileName) and InitiatingProcessId == 0
+    // FP Tuning: Some legitimate low-level kernel or container networking tasks might trigger this. Exclude known ports/IPs if needed.
+    | where not(ipv4_is_loopback(RemoteIP) or ipv4_is_private(RemoteIP))
+    | extend
+        DetectionPattern = "Network Connection Without Associated Process",
+        Details = strcat("Action: ", ActionType, ", LocalPort: ", LocalPort, ", RemoteIP: ", RemoteIP, ", RemotePort: ", RemotePort),
+        AccountName = "N/A",
+        SuspiciousProcess = "Unknown (Hidden)",
+        SuspiciousCommandLine = "N/A",
+        ParentProcess = "N/A",
+        HostName = DeviceName
+    ),
+    // Pattern 4: Anti-Forensic History Disabling
+    // Detects attempts to disable shell command history logging.
+    (
+        (DeviceProcessEvents
+        | where DeviceOSPlatform == "Linux"
+        | where FileName in (shellProcesses) and ProcessCommandLine has_any (antiForensicStrings)
+        // FP Tuning: Legitimate scripts may use --noprofile or --norc. Exclude known benign parent processes if they cause noise.
+        )
+        | union isfuzzy=true
+        (DeviceProcessEvents
+        | where DeviceOSPlatform == "Linux"
+        | where FileName == "ln"
+        | where ProcessCommandLine has_all ("-sf", "/dev/null") and ProcessCommandLine has_any (historyFiles)
+        )
+        | extend
+            DetectionPattern = "Anti-Forensic History Disabling",
+            Details = ProcessCommandLine,
+            AccountName = InitiatingProcessAccountName,
+            SuspiciousProcess = FileName,
+            SuspiciousCommandLine = ProcessCommandLine,
+            ParentProcess = InitiatingProcessCommandLine,
+            HostName = DeviceName
+    )
+)
+| project
+    TimeGenerated,
+    DetectionPattern,
+    HostName,
+    AccountName,
+    SuspiciousProcess,
+    SuspiciousCommandLine,
+    ParentProcess,
+    Details

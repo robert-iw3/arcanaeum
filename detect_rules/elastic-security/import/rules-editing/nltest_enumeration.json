@@ -1,0 +1,18 @@
+{
+  "type": "detection-engine.rule",
+  "id": "nltest-enumeration",
+  "attributes": {
+    "risk_score": 75,
+    "enabled": true,
+    "name": "Suspicious nltest.exe Enumeration",
+    "description": "Detects suspicious use of nltest.exe for domain enumeration. This command-line utility can be abused by attackers for reconnaissance of Active Directory domain trusts.",
+    "rule_id": "nltest_enumeration_detection",
+    "index": ["win_logs*", "winlogbeat-*"],
+    "language": "kuery",
+    "query": "(winlog.channel:\"Security%\" OR winlog.channel:\"System%\") AND (process.executable:\"*\\\\nltest.exe\" OR winlog.event_data.OriginalFileName:\"nltestrk.exe\") AND (process.command_line:\"%\\/server%\" AND process.command_line:\"%\\/query%\" OR process.command_line:\"%\\/dclist:%\" OR process.command_line:\"%\\/parentdomain%\" OR process.command_line:\"%\\/domain_trusts%\" OR process.command_line:\"%\\/all_trusts%\" OR process.command_line:\"%\\/trusted_domains%\" OR process.command_line:\"%\\/user%\")",
+    "interval": "10m",
+    "severity": "medium",
+    "type": "query",
+    "version": "1"
+  }
+}

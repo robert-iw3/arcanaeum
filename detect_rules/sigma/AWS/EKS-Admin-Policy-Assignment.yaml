@@ -1,0 +1,29 @@
+title: AWS EKS Administrative Policy Assigned to a Principal
+id: dd5cb069-59b1-4986-843e-c08e93f96886
+status: experimental
+description: Detects when a highly privileged administrative policy is associated with a principal in an EKS cluster. This could indicate a privilege escalation attempt or an attacker granting themselves administrative access to the cluster.
+references:
+  - https://securitylabs.datadoghq.com/articles/eks-cluster-access-management-deep-dive/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.privilege_escalation
+  - attack.t1078
+  - cloud
+  - aws
+  - eks
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+        # Detects the association of a policy to a principal in EKS
+    eventName: 'AssociateAccessPolicy'
+        # Filters for highly privileged EKS administrative policies
+    requestParameters.policyArn:
+      - 'arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy'
+      - 'arn:aws:eks::aws:cluster-access-policy/AmazonEKSAdminPolicy'
+  condition: selection
+falsepositives:
+  - Legitimate administrative actions by authorized personnel to grant EKS cluster access. It's recommended to baseline the principals that are expected to perform this action and exclude them.
+level: medium

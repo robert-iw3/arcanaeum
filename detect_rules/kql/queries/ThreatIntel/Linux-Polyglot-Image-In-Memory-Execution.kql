@@ -1,0 +1,85 @@
+// Name: Linux Polyglot Image and In-Memory Execution
+// Author: RW
+// Date: 2025-08-24
+// Description: Detects multiple TTPs associated with the Koske malware and similar threats that leverage polyglot files, in-memory execution,
+// and common Linux persistence techniques.
+// False Positive Sensitivity: Medium
+// Tactic: Execution, Persistence, Privilege Escalation, Defense Evasion
+// Technique: T1059.004, T1204.002, T1574.006, T1546.004, T1053.003
+
+let timeframe = 1h;
+
+// Pattern 1: Execution of a script embedded in an image file (polyglot)
+let PolyglotExecution =
+DeviceProcessEvents
+| where TimeGenerated > ago(timeframe)
+// Looks for a shell being invoked via a pipe from a text processing utility like grep, which is used to extract a payload from a file.
+| where ProcessCommandLine has_all ("|", "grep", "-a") and ProcessCommandLine has_any ("sh", "bash") and ProcessCommandLine has_any (".jpg", ".jpeg", ".png", ".gif")
+| extend
+    DetectionPattern = "Polyglot Image Execution via Pipe",
+    Tactic = "Execution",
+    Technique = "Command and Scripting Interpreter",
+    SuspiciousEntity = ProcessCommandLine;
+
+// Pattern 2: In-memory execution or execution from temporary directories
+let InMemoryExecution =
+DeviceProcessEvents
+| where TimeGenerated > ago(timeframe)
+// Identifies scripts being executed from /tmp or /dev/shm, or via bash/sh -c, which are common fileless execution techniques.
+| where (InitiatingProcessFileName in ("sh", "bash") and FolderPath has_any ("/tmp/", "/dev/shm/")) or (ProcessCommandLine has_any ("bash -c", "sh -c", "sh -i", "bash -i"))
+// FP Tuning: Legitimate applications and installers may use these directories. Exclude known good processes or scripts.
+// | where InitiatingProcessCommandLine !contains "known_good_script.sh"
+| extend
+    DetectionPattern = "In-Memory or Temp Directory Execution",
+    Tactic = "Execution",
+    Technique = "Command and Scripting Interpreter",
+    SuspiciousEntity = ProcessCommandLine;
+
+// Pattern 3: LD_PRELOAD abuse for hijacking execution flow
+let LDPreloadAbuse =
+DeviceProcessEvents
+| where TimeGenerated > ago(timeframe)
+// Detects the use of the LD_PRELOAD environment variable to load a malicious shared object before others.
+| where ProcessCommandLine has "LD_PRELOAD="
+| extend
+    DetectionPattern = "LD_PRELOAD Abuse",
+    Tactic = "Defense Evasion",
+    Technique = "Hijack Execution Flow",
+    SuspiciousEntity = ProcessCommandLine;
+
+// Pattern 4: Persistence via shell configuration file modification
+let ShellConfigPersistence =
+DeviceFileEvents
+| where TimeGenerated > ago(timeframe)
+// Detects modification of common shell startup files to establish persistence.
+| where ActionType in ("FileCreated", "FileRenamed") and (FolderPath endswith "~" or FolderPath contains "/home/") and FileName has_any (".bashrc", ".bash_profile", ".bash_logout", ".profile", ".zshrc")
+| extend
+    DetectionPattern = "Shell Config Persistence",
+    Tactic = "Persistence",
+    Technique = "Event Triggered Execution",
+    SuspiciousEntity = InitiatingProcessCommandLine;
+
+// Pattern 5: Persistence via crontab
+let CronPersistence =
+DeviceProcessEvents
+| where TimeGenerated > ago(timeframe)
+// Detects the use of the 'crontab' utility to add or modify scheduled tasks.
+| where InitiatingProcessFileName == "crontab" and not(ProcessCommandLine matches regex @"crontab\s+-(l|r)\b") // Alert on edits or replacements, ignore list/remove
+| extend
+    DetectionPattern = "Cron Persistence",
+    Tactic = "Persistence",
+    Technique = "Scheduled Task/Job",
+    SuspiciousEntity = ProcessCommandLine;
+
+// Union all suspicious events
+union isfuzzy=true PolyglotExecution, InMemoryExecution, LDPreloadAbuse, ShellConfigPersistence, CronPersistence
+| project
+    TimeGenerated,
+    DeviceName,
+    DetectionPattern,
+    Tactic,
+    Technique,
+    SuspiciousEntity,
+    InitiatingProcessFileName,
+    ProcessFileName=coalesce(ProcessFileName, FileName),
+    FilePath=coalesce(FolderPath, FilePath)

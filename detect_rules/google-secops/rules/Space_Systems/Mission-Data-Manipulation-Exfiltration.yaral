@@ -1,0 +1,65 @@
+rule potential_mission_data_exfiltration {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects potential manipulation or exfiltration of mission-critical data from sensitive ground systems, a threat pattern highlighted in the Moonlight Defender exercise. The rule identifies two common attacker patterns: 1) The staging of data into large archive files (a precursor to exfiltration, T1074). 2) Unusually large outbound data transfers to external destinations (T1041, T1030). An alert is generated if either activity is observed on a designated critical system."
+    tactic = "TA0009, TA0010"
+    technique = "T1074, T1041, T1030, T1052"
+    tags = "SATELLITE, GROUND_SYSTEM, EXFILTRATION, COLLECTION, MOONLIGHT_DEFENDER, T1074, T1041, T1030, T1052"
+    false_positives = "Legitimate activities such as system backups, software distribution, or authorized large data transfers may trigger this rule. It is crucial to populate the %critical_ground_systems reference list, tune the data size thresholds, and whitelist known backup destinations or legitimate data sharing partner IPs."
+    reference = "https://attack.mitre.org/techniques/T1074/, https://attack.mitre.org/techniques/T1041/, https://attack.mitre.org/techniques/T1030/"
+
+  events:
+    // Event 1: Detects staging of data into large archive files on critical systems.
+    $staging.metadata.event_type = "FILE_CREATION"
+    $staging.principal.hostname = $hostname
+    // FP Tuning: This is the most important filter. Populate the %critical_ground_systems reference list with your critical hostnames.
+    $staging.principal.hostname in %critical_ground_systems
+    // Look for common archive file extensions.
+    re.regex($staging.target.file.path, `\.(zip|rar|7z|tar|gz|tgz)$`) nocase
+    // FP Tuning: Adjust this threshold based on normal activity. 50MB is a reasonable starting point.
+    $staging.target.file.size > 50000000
+
+    // Event 2: Detects large data egress from critical systems to external destinations.
+    $egress.metadata.event_type = "NETWORK_CONNECTION"
+    $egress.principal.hostname = $hostname
+    // FP Tuning: Ensure this list matches the one used for the staging event.
+    $egress.principal.hostname in %critical_ground_systems
+    // FP Tuning: Adjust this threshold based on normal activity. 100MB is a reasonable starting point.
+    $egress.network.sent_bytes > 100000000
+    // Filter for connections to external, non-private IP addresses.
+    not (
+      net.ip_in_range_cidr($egress.target.ip, "10.0.0.0/8") or
+      net.ip_in_range_cidr($egress.target.ip, "172.16.0.0/12") or
+      net.ip_in_range_cidr($egress.target.ip, "192.168.0.0/16") or
+      net.ip_in_range_cidr($egress.target.ip, "127.0.0.0/8")
+    )
+    // FP Tuning: Consider adding known good destinations to a reference list, e.g., not $egress.target.ip in %my_backup_servers
+
+  match:
+    // Correlate staging and egress events on the same host over a 2 hour window.
+    $hostname over 2h
+
+  outcome:
+    // A medium risk score is assigned, which should be raised if both staging and egress are observed.
+    $risk_score = if($staging and $egress, 75, 60)
+    $principal_hostname = array_distinct($hostname)
+
+    // Staging specific outcomes (will be empty if only egress is detected)
+    $staging_processes = array_distinct($staging.principal.process.file.full_path)
+    $staged_files = array_distinct($staging.target.file.path)
+    $total_staged_bytes = sum($staging.target.file.size)
+
+    // Egress specific outcomes (will be empty if only staging is detected)
+    $egress_processes = array_distinct($egress.principal.process.file.full_path)
+    $destination_ips = array_distinct($egress.target.ip)
+    $destination_ports = array_distinct($egress.target.port)
+    $total_bytes_exfiltrated = sum($egress.network.sent_bytes)
+
+    // Event counts to show which part of the rule triggered
+    $staging_event_count = count_distinct($staging.metadata.id)
+    $egress_event_count = count_distinct($egress.metadata.id)
+
+  condition:
+    $staging or $egress
+}

@@ -1,0 +1,62 @@
+{
+  "rule_id": "gcp_suspicious_ssh_key_injection",
+  "name": "GCP Suspicious SSH Key Injection",
+  "description": "Detects the injection of SSH public keys into GCP instance or project metadata from non-whitelisted users. This activity can indicate a backdoor being created for persistent access or a privilege escalation attempt.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "FROM logs-gcp.audit-* | WHERE event.provider == 'compute.googleapis.com' AND event.action IN ('v1.compute.instances.setMetadata', 'v1.compute.projects.setCommonInstanceMetadata') AND error.code IS NULL AND gcp.audit.request.metadata.items.key == 'ssh-keys' AND gcp.audit.authentication_info.principalEmail NOT LIKE '%admin@example.com' AND gcp.audit.authentication_info.principalEmail NOT LIKE '%automation-sa@%.iam.gserviceaccount.com' | eval user = gcp.audit.authentication_info.principalEmail, src_ip = source.ip, project_id = gcp.resource.labels.project_id, api_call = event.action, target_type = CASE(event.action == 'v1.compute.projects.setCommonInstanceMetadata', 'Project', 'Instance'), target_id = COALESCE(gcp.resource.labels.instance_id, gcp.resource.labels.project_id), ssh_key_value = gcp.audit.request.metadata.items.value | KEEP user, src_ip, project_id, api_call, target_type, target_id, ssh_key_value",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0003",
+        "name": "Persistence",
+        "reference": "https://attack.mitre.org/tactics/TA0003/"
+      },
+      "technique": [
+        {
+          "id": "T1098",
+          "name": "Account Manipulation",
+          "reference": "https://attack.mitre.org/techniques/T1098/"
+        },
+        {
+          "id": "T1098.004",
+          "name": "SSH Authorized Keys",
+          "reference": "https://attack.mitre.org/techniques/T1098/004/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0004",
+        "name": "Privilege Escalation",
+        "reference": "https://attack.mitre.org/tactics/TA0004/"
+      }
+    }
+  ],
+  "interval": "10m",
+  "from": "now-10m",
+  "max_signals": 100,
+  "risk_score": 90,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://cloud.google.com/compute/docs/connect/ssh-best-practices/auditing",
+    "https://cloud.google.com/blog/products/identity-security/gleaning-security-insights-from-audit-logs-with-log-analytics"
+  ],
+  "tags": [
+    "GCP",
+    "Compute Engine",
+    "SSH Key Injection",
+    "Persistence",
+    "Privilege Escalation"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "user, project_id, target_id, api_call"
+}

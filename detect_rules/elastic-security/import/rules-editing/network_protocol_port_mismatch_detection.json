@@ -1,0 +1,116 @@
+{
+  "rule_id": "network_protocol_port_mismatch_detection",
+  "name": "Network Protocol-Port Mismatch Detection",
+  "description": "Detects network traffic where the protocol does not match the port, which can indicate C2 activity, misconfiguration, or port scanning.",
+  "severity": "medium",
+  "enabled": true,
+  "language": "esql",
+  "query": "from network_traffic | where tags IN ('network', 'communicate') and ((network.application == 'dns' and destination.port != 53) or (network.application == 'smtp' and destination.port not in (25, 465, 587)) or (destination.port in (80, 443) and network.application not in ('http', 'ssl', 'https', 'quic', 'http-proxy', 'unknown', 'bittorrent'))) and source.ip not in ('10.0.0.0/8', '127.0.0.1', '169.254.0.0/16') and destination.ip not in ('224.0.0.0/4', '255.255.255.255', '169.254.0.0/16') | eval reason = CASE(destination.port in (80, 443), 'Non-Standard Protocol on Web Port', network.application == 'dns', 'DNS on Non-Standard Port', network.application == 'smtp', 'SMTP on Non-Standard Port', true, 'Unknown Anomaly'), signature = network.application | keep @timestamp, source.ip, destination.ip, destination.port, network.transport, signature, reason",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0011",
+        "name": "Command and Control",
+        "reference": "https://attack.mitre.org/tactics/TA0011/"
+      },
+      "technique": [
+        {
+          "id": "T1090",
+          "name": "Proxy",
+          "reference": "https://attack.mitre.org/techniques/T1090/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0007",
+        "name": "Discovery",
+        "reference": "https://attack.mitre.org/tactics/TA0007/"
+      },
+      "technique": [
+        {
+          "id": "T1046",
+          "name": "Network Service Scanning",
+          "reference": "https://attack.mitre.org/techniques/T1046/"
+        }
+      ]
+    }
+  ],
+  "interval": "10m",
+  "from": "now-10m",
+  "max_signals": 100,
+  "risk_score": 50,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [],
+  "tags": [
+    "Network",
+    "Protocol Mismatch",
+    "Scanning"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "source.ip, destination.ip, destination.port"
+}
+{
+  "rule_id": "network_icmp_tunneling_detection",
+  "name": "Potential ICMP Tunneling Detected",
+  "description": "Flags a high volume of ICMP traffic (high packet count and byte count) between two hosts. This can indicate data exfiltration or a Command and Control (C2) channel disguised as normal network traffic.",
+  "severity": "high",
+  "enabled": true,
+  "language": "esql",
+  "query": "from network_traffic | where tags in ('network', 'communicate') and network.transport == 'icmp' and source.ip not in ('10.0.0.0/8', '127.0.0.1', '169.254.0.0/16') and destination.ip not in ('224.0.0.0/4', '255.255.255.255', '169.254.0.0/16') | stats total_bytes = SUM(network.bytes), distinct_icmp_types = COUNT_DISTINCT(network.icmp.type), pkt_count = COUNT(*) BY source.ip, destination.ip, network.transport | where pkt_count > 100 and total_bytes > 20480 | eval reason = 'Potential ICMP Tunneling', signature = 'High Volume ICMP (' + TO_STRING(total_bytes) + ' bytes, ' + TO_STRING(pkt_count) + ' packets)' | keep @timestamp, source.ip, destination.ip, network.transport, signature, reason, total_bytes, pkt_count, distinct_icmp_types",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0011",
+        "name": "Command and Control",
+        "reference": "https://attack.mitre.org/tactics/TA0011/"
+      },
+      "technique": [
+        {
+          "id": "T1090",
+          "name": "Proxy",
+          "reference": "https://attack.mitre.org/techniques/T1090/"
+        },
+        {
+          "id": "T1090.003",
+          "name": "ICMP",
+          "reference": "https://attack.mitre.org/techniques/T1090/003/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0010",
+        "name": "Exfiltration",
+        "reference": "https://attack.mitre.org/tactics/TA0010/"
+      }
+    }
+  ],
+  "interval": "10m",
+  "from": "now-10m",
+  "max_signals": 100,
+  "risk_score": 85,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [],
+  "tags": [
+    "Network",
+    "ICMP Tunneling",
+    "Command and Control"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "source.ip, destination.ip"
+}

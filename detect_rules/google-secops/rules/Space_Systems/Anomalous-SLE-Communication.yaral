@@ -1,0 +1,63 @@
+rule anomalous_sle_communication_detected {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects a high frequency of Space Link Extension (SLE) control messages between two assets. A sudden spike in messages like CLTU-BIND, UNBIND, START, or STOP could indicate session manipulation, denial-of-service attempts, or unauthorized control, as described in the provided intelligence."
+    tactic = "TA0040, TA0001"
+    technique = "T1499.003, T1190"
+    false_positives = "Anomaly detection is sensitive to environmental changes. False positives can occur during scheduled maintenance, operational procedure changes, or initial learning periods. The threshold in the condition section must be tuned for your environment."
+
+  events:
+    // This rule requires Deep Packet Inspection (DPI) data in network connection events.
+    // The following event variables look for specific ASN.1 hex signatures for SLE messages.
+    // NOTE: Only CLTU-BIND ('bf64') is explicitly identified in the reference. The others are placeholders
+    // and MUST be verified against the SLE protocol specification for your environment.
+
+    // Detects CLTU-BIND messages.
+    ($sle.metadata.event_type = "NETWORK_CONNECTION"
+      and re.regex($sle.network.sent_bytes, /\xbf\x64/))
+    or
+    // Detects CLTU-UNBIND messages (placeholder signature).
+    ($sle.metadata.event_type = "NETWORK_CONNECTION"
+      and re.regex($sle.network.sent_bytes, /\xbf\x65/))
+    or
+    // Detects CLTU-START messages (placeholder signature).
+    ($sle.metadata.event_type = "NETWORK_CONNECTION"
+      and re.regex($sle.network.sent_bytes, /\xbf\x66/))
+    or
+    // Detects CLTU-STOP messages (placeholder signature).
+    ($sle.metadata.event_type = "NETWORK_CONNECTION"
+      and re.regex($sle.network.sent_bytes, /\xbf\x67/))
+
+    // To increase fidelity, filter for traffic involving critical assets like Mission Control Systems or Ground Stations.
+    // Example: $sle.principal.ip in %critical_space_assets or $sle.target.ip in %critical_space_assets
+
+    // Link events by the communication channel.
+    $sle.principal.ip = $src_ip
+    $sle.target.ip = $dest_ip
+
+  match:
+    // Group events by the source and destination IP over a 30 minute window.
+    $src_ip, $dest_ip over 30m
+
+  outcome:
+    // Risk score is set to medium, reflecting the need for tuning.
+    $risk_score = 55
+    $principal_ip = $src_ip
+    $target_ip = $dest_ip
+    $principal_hostname = array_distinct($sle.principal.hostname)
+    $target_hostname = array_distinct($sle.target.hostname)
+    $target_port = array_distinct($sle.target.port)
+
+    // Count distinct message types for analysis.
+    $bind_count = count_distinct(re.capture($sle.network.sent_bytes, /(\xbf\x64)/, 1))
+    $unbind_count = count_distinct(re.capture($sle.network.sent_bytes, /(\xbf\x65)/, 1))
+    $start_count = count_distinct(re.capture($sle.network.sent_bytes, /(\xbf\x66)/, 1))
+    $stop_count = count_distinct(re.capture($sle.network.sent_bytes, /(\xbf\x67)/, 1))
+    $total_control_messages = count($sle.metadata.id)
+
+  condition:
+    // Alert if the total number of control messages exceeds a threshold.
+    // This threshold should be tuned based on normal operational baselines.
+    #sle > 10
+}

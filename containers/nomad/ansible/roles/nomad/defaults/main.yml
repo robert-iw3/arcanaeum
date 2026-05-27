@@ -1,0 +1,57 @@
+---
+# Default variables for Nomad role
+nomad_version: "1.9.2"
+nomad_architecture: "{{ ansible_architecture | default('amd64') }}"
+nomad_download_url: "https://releases.hashicorp.com/nomad/{{ nomad_version }}/nomad_{{ nomad_version }}_linux_{{ nomad_architecture }}.zip"
+nomad_checksum_url: "https://releases.hashicorp.com/nomad/{{ nomad_version }}/nomad_{{ nomad_version }}_SHA256SUMS"
+nomad_install_dir: "/usr/local/bin"
+nomad_config_dir: "/etc/nomad.d"
+nomad_data_dir: "/opt/nomad/data"
+nomad_log_dir: "/var/log/nomad"
+nomad_user: "nomad"
+nomad_group: "nomad"
+nomad_bind_addr: "{{ ansible_default_ipv4.address | default('0.0.0.0') }}"
+nomad_region: "global"
+nomad_datacenter: "dc1"
+nomad_server_enabled: false
+nomad_client_enabled: false
+nomad_bootstrap_expect: 3
+nomad_acl_enabled: true
+nomad_tls_enabled: true
+nomad_tls_ca_file: "{{ nomad_config_dir }}/ca.pem"
+nomad_tls_cert_file: "{{ nomad_config_dir }}/nomad-cert.pem"
+nomad_tls_key_file: "{{ nomad_config_dir }}/nomad-key.pem"
+nomad_tls_generate: true
+nomad_tls_common_name: "{{ inventory_hostname }}"
+nomad_tls_sans: ["{{ nomad_bind_addr }}", "localhost", "127.0.0.1"]
+nomad_tls_days: 365
+nomad_gossip_encryption_enabled: true
+nomad_gossip_key: !vault | $ANSIBLE_VAULT;1.1;AES256;nomad
+  66386166336563363166393566376232653766353466396566386166396566386166396566386166
+nomad_consul_enabled: false
+nomad_consul_address: "127.0.0.1:8500"
+nomad_vault_enabled: false
+nomad_vault_version: "1.17.2"
+nomad_vault_download_url: "https://releases.hashicorp.com/vault/{{ nomad_vault_version }}/vault_{{ nomad_vault_version }}_linux_{{ nomad_architecture }}.zip"
+nomad_vault_checksum_url: "https://releases.hashicorp.com/vault/{{ nomad_vault_version }}/vault_{{ nomad_vault_version }}_SHA256SUMS"
+nomad_vault_address: "http://127.0.0.1:8200"
+nomad_vault_token: !vault | $ANSIBLE_VAULT;1.1;AES256;nomad
+  66386166336563363166393566376232653766353466396566386166396566386166396566386166
+nomad_podman_enabled: true
+nomad_podman_socket_path: "/run/user/{{ ansible_user_uid }}/podman/podman.sock"
+nomad_podman_volumes_enabled: true
+nomad_telemetry_enabled: true
+nomad_telemetry_prometheus: true
+nomad_service_discovery_enabled: true
+nomad_autoscaler_enabled: false
+nomad_service_name: "nomad"
+nomad_ulimits_nofile: 65536
+nomad_ulimits_nproc: 4096
+nomad_allowed_ips: ["127.0.0.1", "{{ nomad_bind_addr }}"]
+nomad_logrotate_maxsize: "100M"
+nomad_logrotate_rotate: 5
+nomad_subuid_start: 100000
+nomad_subuid_range: 65536
+nomad_subgid_start: 100000
+nomad_subgid_range: 65536
+nomad_minimum_podman_version: "4.0.0"

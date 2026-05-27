@@ -1,0 +1,56 @@
+title: Atomic Stealer (AMOS) Backdoor Persistence and C2
+id: a2b4063c-1344-4394-9d1c-1269af02c5ba
+status: experimental
+description: Detects the persistence mechanism and command and control (C2)
+  communication used by the Atomic macOS Stealer (AMOS) backdoor. This includes
+  the creation of a LaunchDaemon, download of a helper binary, and C2 task
+  polling.
+references:
+  - https://moonlock.com/amos-backdoor-persistent-access
+author:
+date: 2025-07-10
+tags:
+  - attack.persistence
+  - attack.t1543.004
+  - attack.command_and_control
+  - attack.t1071.001
+  - attack.execution
+  - malware.amos
+logsource:
+  product: macos
+  category: process_creation
+detection:
+  # Detects the creation of the malicious LaunchDaemon plist file
+  plist_creation:
+    Image|endswith: '/cp'
+    CommandLine|contains|all:
+      - '/tmp/starter'
+      - '/Library/LaunchDaemons/com.finder.helper.plist'
+  # Detects the loading of the malicious LaunchDaemon
+  launchctl_load:
+    Image|endswith: '/launchctl'
+    CommandLine|contains|all:
+      - 'load'
+      - '/Library/LaunchDaemons/com.finder.helper.plist'
+  # Detects the download of the backdoor binary from a known URL
+  helper_download:
+    Image|endswith: '/curl'
+    CommandLine|contains|all:
+      - '-o'
+      - '/.helper'
+      - 'isnimitz.com/zxc/app'
+  # Detects the execution of the agent script which launches the backdoor
+  agent_execution:
+    Image|endswith: '/bash'
+    CommandLine|contains: '/.agent' # The .agent script is created in the user's home directory to launch the .helper binary
+  # Detects C2 communication for tasking
+  c2_comm:
+    Image|endswith: '/curl'
+    CommandLine|contains|all:
+      - '/api/tasks/'
+      - '45.94.47.'
+  condition: 1 of them
+falsepositives:
+  - The filenames .helper and .agent could potentially be used by legitimate
+    software.
+level: high

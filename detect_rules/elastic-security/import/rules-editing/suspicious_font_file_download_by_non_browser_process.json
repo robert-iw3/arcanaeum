@@ -1,0 +1,62 @@
+{
+  "rule_id": "suspicious_font_file_download_by_non_browser_process",
+  "name": "Suspicious Font File Download by Non-Browser Process",
+  "description": "Detects outbound network connections to font files (.ttf) from processes that are not standard web browsers. This could indicate Command and Control (C2) communication or data exfiltration disguised as benign traffic.",
+  "severity": "high",
+  "enabled": true,
+  "language": "esql",
+  "query": "from logs-proxy*, logs-endpoint.events.* | where url MATCHES '(?i)/assets/fonts/[^/]+\\.ttf$' and process.name not in ('chrome.exe', 'firefox.exe', 'msedge.exe', 'iexplore.exe', 'browser.exe', 'opera.exe', 'safari.exe') | stats count = COUNT(*), urls = ARRAY_AGG(url), user_agents = ARRAY_AGG(http.user_agent) BY host.name, user.name, process.parent.name, process.name, process.executable | keep host.name, user.name, process.parent.name, process.name, process.executable, urls, user_agents, count",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0011",
+        "name": "Command and Control",
+        "reference": "https://attack.mitre.org/tactics/TA0011/"
+      },
+      "technique": [
+        {
+          "id": "T1071",
+          "name": "Application Layer Protocol",
+          "reference": "https://attack.mitre.org/techniques/T1071/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0005",
+        "name": "Defense Evasion",
+        "reference": "https://attack.mitre.org/tactics/TA0005/"
+      },
+      "technique": [
+        {
+          "id": "T1036",
+          "name": "Masquerading",
+          "reference": "https://attack.mitre.org/techniques/T1036/"
+        }
+      ]
+    }
+  ],
+  "interval": "15m",
+  "from": "now-15m",
+  "max_signals": 100,
+  "risk_score": 80,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://www.elastic.co/guide/en/security/current/unusual-network-activity-suspicious-font-downloads.html",
+    "https://www.galacticadvisors.com/research/the-importance-of-font-security/"
+  ],
+  "tags": [
+    "Font Downloads",
+    "Command and Control",
+    "Defense Evasion"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "host.name, user.name, process.name, process.executable"
+}

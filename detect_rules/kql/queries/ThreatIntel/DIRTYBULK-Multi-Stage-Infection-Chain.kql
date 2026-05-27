@@ -1,0 +1,73 @@
+// Name: DIRTYBULK Multi-Stage Infection Chain
+// Description: Detects a multi-stage DIRTYBULK infection chain involving initial access, defense evasion, persistence, and C2 communications.
+// This query correlates multiple TTPs associated with the DIRTYBULK campaign on a single host within a 24-hour window.
+// Author: RW
+// Tactic: Initial Access, Execution, Persistence, Defense Evasion, Command and Control
+// Technique: T1204.002, T1562.001, T1053.005, T1543.003, T1102
+// False Positives: Legitimate administrative activity may overlap with individual patterns.
+// The correlation of multiple stages significantly reduces the likelihood of false positives.
+
+let time_window = 24h;
+// Stage 1: Initial Access & Execution via DLL Side-loading
+let initial_access =
+    DeviceProcessEvents
+    | where Timestamp > ago(time_window)
+    // Detects the execution of printui.exe from the suspicious "Windows " directory created by the malware
+    | where ProcessCommandLine has_any ("\\Windows \\System32\\printui.exe", "/c start \"\" \"%SystemDrive%\\Windows \\System32\\printui.exe\"");
+// Stage 2: Defense Evasion
+let defense_evasion =
+    DeviceProcessEvents
+    | where Timestamp > ago(time_window)
+    // Detects PowerShell being used to add exclusions to Windows Defender for the malware's directories
+    | where FileName =~ "powershell.exe"
+        and ProcessCommandLine has "Add-MpPreference"
+        and ProcessCommandLine has "-ExclusionPath"
+        and ProcessCommandLine has_any ("C:\\Windows\\System32", "C:\\Windows \\System32");
+// Stage 3: Persistence via Scheduled Task
+let persistence_schtask =
+    DeviceProcessEvents
+    | where Timestamp > ago(time_window)
+    // Detects the creation of a scheduled task to run on logon with high privileges
+    | where FileName =~ "schtasks.exe"
+        and ProcessCommandLine has "/create"
+        and ProcessCommandLine has "/sc" and ProcessCommandLine has "onlogon"
+        and ProcessCommandLine has "/rl" and ProcessCommandLine has "highest";
+// Stage 4: Persistence via Windows Service
+let persistence_service =
+    DeviceProcessEvents
+    | where Timestamp > ago(time_window)
+    // Detects service creation pointing to svchost.exe with DcomLaunch or a ServiceDll registry modification
+    | where (FileName =~ "sc.exe" and ProcessCommandLine has "create" and ProcessCommandLine matches regex @"binPath=.*svchost\.exe\s-k\sDcomLaunch")
+        or (FileName =~ "reg.exe" and ProcessCommandLine has "add" and ProcessCommandLine matches regex @".*\\services\\.*\\Parameters" and ProcessCommandLine has "ServiceDll");
+// Stage 5: C2 Communication
+let c2_comms =
+    DeviceNetworkEvents
+    | where Timestamp > ago(time_window)
+    // Detects svchost.exe (DcomLaunch) making an outbound connection to port 5432 (PostgreSQL)
+    | where InitiatingProcessFileName =~ "svchost.exe"
+        and InitiatingProcessCommandLine has "DcomLaunch"
+        and RemotePort == 5432
+        and isnotempty(RemoteIP) and not(ipv4_is_private(RemoteIP));
+// Union all stages and find hosts with the initial access pattern plus at least one other malicious activity
+let all_stages =
+    union
+        (initial_access | extend Stage = "InitialAccess", Activity = ProcessCommandLine),
+        (defense_evasion | extend Stage = "DefenseEvasion", Activity = ProcessCommandLine),
+        (persistence_schtask | extend Stage = "Persistence", Activity = ProcessCommandLine),
+        (persistence_service | extend Stage = "Persistence", Activity = ProcessCommandLine),
+        (c2_comms | extend Stage = "C2", Activity = strcat("RemoteIP: ", RemoteIP, ", Process: ", InitiatingProcessCommandLine));
+all_stages
+| summarize
+    StartTime = min(Timestamp),
+    EndTime = max(Timestamp),
+    Stages = make_set(Stage),
+    AllActivities = make_list(Activity)
+    by DeviceName, bin(Timestamp, time_window)
+// The condition requires the specific initial access vector plus at least one other stage of the attack
+| where Stages has "InitialAccess" and array_length(Stages) > 1
+| project
+    StartTime,
+    EndTime,
+    DeviceName,
+    Stages,
+    AllActivities

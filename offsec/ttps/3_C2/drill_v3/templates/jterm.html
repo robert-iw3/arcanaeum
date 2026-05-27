@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Web Terminal</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.3.2/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.1.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/xterm@5.1.0/css/xterm.css"
+    />
+    {% if style == True %}
+    <style>
+      :root {
+        --background: white;
+        --color: rgba(0, 0, 0, 1);
+      }
+    </style>
+    {% else %}
+    <style>
+      :root {
+        --background: black;
+      }
+    </style>
+    {% endif %}
+  </head>
+  <body style="background: var(--background); color: var(--color);">
+    <div id="terminal"></div>
+
+    <script src="{{ url_for('static', filename='js/jterm.js') }}"></script>
+  </body>
+</html>

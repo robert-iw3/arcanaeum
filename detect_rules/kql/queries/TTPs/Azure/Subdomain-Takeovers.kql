@@ -1,0 +1,51 @@
+// Name: Potential Subdomain Takeover Precursor
+// Author: RW
+// Date: 2025-08-31
+// Description: Detects the deletion of Azure resources (e.g., App Services, Front Doors) that commonly have custom DNS records.
+// Deleting a resource without updating its corresponding DNS record can create a "dangling DNS" vulnerability, making the
+// subdomain vulnerable to takeover by an attacker.
+// Tactic: Resource Development
+// Technique: T1584.002
+
+// Set the lookback time for the detection.
+let lookback = 1d;
+
+// Define a list of operations for deleting resources that commonly have custom domains.
+let deletionOperations = dynamic([
+    "MICROSOFT.WEB/SITES/DELETE", // Web App deletion
+    "MICROSOFT.NETWORK/FRONTDOORS/DELETE", // Front Door deletion
+    "MICROSOFT.NETWORK/PUBLICIPADDRESSES/DELETE", // Public IP deletion
+    "MICROSOFT.NETWORK/TRAFFICMANAGERPROFILES/DELETE" // Traffic Manager deletion
+]);
+
+// Define a list of trusted users or service principals that are allowed to perform these actions.
+let trustedCallers = dynamic([]); // e.g. dynamic(["admin@example.com", "service-principal-guid"])
+
+AzureActivity
+| where TimeGenerated > ago(lookback)
+// Filter for deletion events of relevant resource types.
+| where OperationNameValue in (deletionOperations)
+| where ActivityStatusValue == "Succeeded"
+// Exclude trusted callers to reduce noise from legitimate administrative activity.
+| where Caller !in (trustedCallers)
+// False Positive Consideration: This detection is an indicator of risk, not a confirmation of a takeover.
+// Deleting these resources is a normal administrative action. An alert signifies that a manual review of public DNS records
+// associated with the deleted resource is required to ensure no dangling DNS entries were created.
+| extend
+    DeletedResourceName = tostring(split(_ResourceId, '/')[-1]),
+    ResourceType = ResourceProviderValue,
+    User = Caller,
+    UserIpAddress = CallerIpAddress,
+    Details = strcat("Resource '", DeletedResourceName, "' of type '", ResourceType, "' was deleted by '", User, "'. This may create a dangling DNS record if a custom domain points to this resource. Manual verification of DNS records is required to prevent a potential subdomain takeover.")
+| project
+    TimeGenerated,
+    Activity = "Potential Dangling DNS Precursor",
+    Tactic = "Resource Development",
+    Technique = "T1584.002",
+    User,
+    UserIpAddress,
+    DeletedResourceName,
+    ResourceType,
+    Details,
+    SubscriptionId,
+    CorrelationId

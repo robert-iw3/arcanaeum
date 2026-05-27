@@ -1,0 +1,29 @@
+rule Kerberos_TGT_Request_PKINIT_Privileged_Account {
+  meta:
+    author = "RW"
+    description = "Detects Kerberos TGT requests using certificates (PKINIT) for privileged accounts (Event ID 4768), indicating potential abuse of certificate-based authentication for privilege escalation."
+    severity = "HIGH"
+
+  events:
+    $e.metadata.event_type = "KERBEROS_TICKET_REQUEST" // UDM event type for Kerberos TGT requests.
+    $e.metadata.event_code = 4768 // Windows Security Event ID for TGT requested.
+
+    // Filter for Kerberos pre-authentication using a certificate (PKINIT).
+    $e.extensions.auth.pre_authentication_type in ("PA_PK_AS_REQ", "15", "16") // UDM field for pre-authentication type.
+
+    // Correlate the user account with a list of known privileged accounts.
+    // This requires a Chronicle Reference List named "privileged_accounts"
+    // containing the user IDs (including computer accounts ending with $) of your privileged accounts.
+    $e.principal.user.userid in %privileged_accounts // UDM field for the user requesting the TGT.
+
+  outcome:
+    $firstTime = $e.metadata.event_timestamp.epoch_seconds // UDM field for event timestamp.
+    $lastTime = $e.metadata.event_timestamp.epoch_seconds // For a single event, first and last are the same.
+    $user = $e.principal.user.userid // UDM field for the user requesting the TGT.
+    $source_address = $e.principal.ip // UDM field for the source IP of the request.
+    $device = $e.principal.hostname // UDM field for the device associated with the request (e.g., Domain Controller).
+    $pre_auth_type = $e.extensions.auth.pre_authentication_type // Pre-authentication type.
+
+  condition:
+    $e
+}

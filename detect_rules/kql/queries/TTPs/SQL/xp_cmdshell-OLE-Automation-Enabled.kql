@@ -1,0 +1,26 @@
+// Name: SQL Server High-Risk Procedure Enabled
+// Author: RW
+// Date: 2025-08-23
+
+Event
+// Look for SQL Server configuration change events (Event ID 15457)
+| where Provider == "MSSQLSERVER" and EventID == 15457
+| extend EventDataXml = parse_xml(EventData)
+// Extract configuration details from the event data
+| extend config_name = tostring(EventDataXml.EventData.Data[0])
+| extend new_value = tostring(EventDataXml.EventData.Data[1])
+| extend old_value = tostring(EventDataXml.EventData.Data[2])
+// Filter for the enabling of xp_cmdshell or OLE Automation, which are often abused by attackers for execution.
+| where config_name in ("xp_cmdshell", "Ole Automation Procedures") and new_value == "1" and old_value == "0"
+// FP Tuning: Legitimate administrative changes may trigger this alert.
+// Consider filtering by specific hosts or excluding known change management processes.
+| project-reorder
+    TimeGenerated,
+    Computer,
+    config_name,
+    old_value,
+    new_value,
+    RenderedDescription
+| extend
+    HostName = Computer,
+    timestamp = TimeGenerated

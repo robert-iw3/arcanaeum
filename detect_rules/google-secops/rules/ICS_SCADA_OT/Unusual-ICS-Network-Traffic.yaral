@@ -1,0 +1,48 @@
+rule unusual_network_traffic_to_ics_environment {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects network traffic originating from the public internet or internal corporate IT segments targeting critical ICS/OT subnets. This aligns with modern frameworks like MOSAICS (More Situational Awareness for Industrial Control Systems) which emphasize the need for continuous network monitoring. Such traffic is often indicative of unauthorized access attempts, lateral movement, or external reconnaissance against sensitive industrial control systems, such as those found in maritime or other critical infrastructure. Legitimate traffic to these zones should be strictly controlled and originate only from authorized jump hosts or management servers."
+    reference = "https://www.cisa.gov/topics/industrial-control-systems"
+    false_positives = "Legitimate administrative or vendor access from an IP address not included in the authorized sources list., Misconfiguration of the network subnet reference lists (e.g., critical_ics_subnets, it_corporate_subnets)., Network traffic from authorized vulnerability scanners."
+    tags = "attack.initial_access, attack.lateral_movement, attack.discovery, industry.ics, industry.maritime"
+    tactic = "TA0001, TA0007, TA0008"
+    technique = "T1190, T1021"
+
+  events:
+    // Rule looks for network flow events.
+    $flow.metadata.event_type = "NETWORK_FLOW"
+
+    // The destination is a critical ICS/OT asset.
+    // This reference list MUST be populated with the CIDR ranges of your OT environment (e.g., navigation, propulsion, safety systems).
+    $flow.target.ip in %critical_ics_subnets
+
+    // The source is either external (public IP) or from a non-OT internal network (e.g., corporate IT).
+    // This logic assumes that direct communication from these zones to OT is prohibited.
+    (
+      not net.is_private_ip($flow.principal.ip) or
+      $flow.principal.ip in %it_corporate_subnets // This reference list MUST be populated with corporate IT CIDR ranges.
+    )
+
+    // Exclude known-good traffic sources to reduce false positives.
+    // This reference list should contain IPs of jump hosts, management servers, scanners, etc.
+    not $flow.principal.ip in %authorized_ot_sources
+
+  outcome:
+    // Set a risk score for the detection.
+    $risk_score = 70
+
+    // Extract key fields for investigation and alert context.
+    $principal_ip = array_distinct($flow.principal.ip)
+    $target_ip = array_distinct($flow.target.ip)
+    $target_port = array_distinct($flow.target.port)
+    $network_protocol = array_distinct($flow.network.ip_protocol)
+    $user = array_distinct($flow.principal.user.userid)
+    $hostname = array_distinct($flow.principal.hostname)
+
+    // Add context about the source of the traffic for easier triage.
+    $source_location = if(net.is_private_ip($flow.principal.ip), "INTERNAL_IT", "EXTERNAL")
+
+  condition:
+    $flow
+}

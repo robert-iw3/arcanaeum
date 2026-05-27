@@ -1,0 +1,57 @@
+// Name: Potential Spacecraft Hijacking via Anomalous C2 Commands
+// Author: RW
+// Date: 2025-08-15
+// Description: Detects potentially malicious commands sent to spacecraft by identifying deviations from historical communication baselines.
+// The query establishes a baseline of "normal" command patterns (destination port and data size) from the Mission Control Center (MCC) to
+// spacecraft endpoints over a 30-day period. It then alerts on any new command patterns seen in the last day that do not match the
+// established baseline. This could indicate a compromised MCC asset being used for spacecraft hijacking, as described in research related to CVE-2025-46675.
+// False Positive Sensitivity: Medium
+// Tactic: Command and Control
+// Technique: T1059, T1071
+
+let baseline_period = 30d;
+let detection_period = 1d;
+
+// FP Tuning: Define the IP addresses of your Mission Control Center (MCC) servers. This is critical for accuracy.
+let MissionControlIPs = dynamic([]);
+// FP Tuning: Define the IP addresses of your spacecraft endpoints or their ground-based proxies.
+let SpacecraftEndpointIPs = dynamic([]);
+// FP Tuning: Define the specific destination ports used for Command and Control (C2) channels. If left empty, all ports will be monitored.
+let C2_Ports = dynamic([]);
+
+// Establish a baseline of known "commands" by creating a set of unique Port:TotalBytesSent strings from the last 30 days.
+let baselineCommands =
+    DeviceNetworkEvents
+    | where TimeGenerated between (ago(baseline_period) .. ago(detection_period))
+    | where ActionType == "ConnectionSuccess"
+    | where LocalIP in (MissionControlIPs) and RemoteIP in (SpacecraftEndpointIPs)
+    | where isempty(C2_Ports) or RemotePort in (C2_Ports)
+    | summarize make_set(strcat(RemotePort, ":", TotalBytesSent));
+
+// Search for recent commands that do not match the established baseline.
+DeviceNetworkEvents
+| where TimeGenerated > ago(detection_period)
+| where ActionType == "ConnectionSuccess"
+| where LocalIP in (MissionControlIPs) and RemoteIP in (SpacecraftEndpointIPs)
+| where isempty(C2_Ports) or RemotePort in (C2_Ports)
+// Create a string representation of the current command for comparison.
+| extend CurrentCommand = strcat(RemotePort, ":", TotalBytesSent)
+// The core logic: filter for commands not seen during the baseline period.
+| where CurrentCommand !in (baselineCommands)
+// FP Tuning: Legitimate new commands due to software updates or new mission phases will trigger this alert.
+// These events require correlation with operational change management logs.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    AnomalousCommandCount = count(),
+    UniqueAnomalousCommands = make_set(CurrentCommand, 10),
+    MCC_Processes = make_set(InitiatingProcessFileName, 5)
+    by SourceMCC_IP = LocalIP, DestinationSpacecraft_IP = RemoteIP
+| project
+    StartTime,
+    EndTime,
+    SourceMCC_IP,
+    DestinationSpacecraft_IP,
+    AnomalousCommandCount,
+    UniqueAnomalousCommands,
+    MCC_Processes

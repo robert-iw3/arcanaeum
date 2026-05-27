@@ -1,0 +1,83 @@
+rule darkcloud_stealer_ttps_and_iocs {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects multiple Tactics, Techniques, and Procedures (TTPs) and Indicators of Compromise (IOCs) associated with the DarkCloud Stealer malware. This rule identifies the infection chain involving suspicious script execution, process hollowing into RegAsm.exe, and network communications to known malicious infrastructure."
+    reference = "https://unit42.paloaltonetworks.com/new-darkcloud-stealer-infection-chain/"
+    false_positives = "Legitimate administrative scripts may download and execute PowerShell scripts, however, the combination of a script host launching PowerShell for network activity is suspicious. Legitimate use of RegAsm.exe is not common for most users."
+    tags = "CRIMEWARE, DARKCLOUD, INFOSTEALER, CONFUSEREX, POWERSHELL, REGASM, VBSCRIPT, JSCRIPT"
+    tactic = "TA0002, TA0005, TA0007, TA0011"
+    technique = "T1059.001, T1059.005, T1059.007, T1055.012, T1218.009, T1071.001"
+    severity = "HIGH"
+
+  events:
+    // Event 1: Detects a script host (wscript/cscript) launching PowerShell to download content.
+    $script_chain.metadata.event_type = "PROCESS_LAUNCH"
+    $script_chain.principal.process.name = /wscript\.exe|cscript\.exe/ nocase
+    $script_chain.target.process.name = "powershell.exe"
+    // This regex looks for PowerShell commands used to download remote files or strings.
+    re.regex($script_chain.target.process.command_line, `(?i)(New-Object.*Net\.WebClient).*(DownloadString|DownloadFile)`)
+
+    // Event 2: Detects process injection into the legitimate RegAsm.exe binary.
+    $hollowing.metadata.event_type = "PROCESS_INJECTION"
+    re.regex($hollowing.target.process.file.full_path, `\\RegAsm\.exe$`) nocase
+
+    // Event 3: Detects network connections to the known malware distribution IP.
+    $net_distro.metadata.event_type = "NETWORK_CONNECTION"
+    $net_distro.network.destination.ip = "176.65.142.190"
+
+    // Event 4: Detects C2 communication to the specific Telegram bot API URL.
+    $net_c2.metadata.event_type = "NETWORK_CONNECTION"
+    re.regex($net_c2.network.http.url, `api\.telegram\.org/bot7684022823:AAFw0jHSu-b4qs6N7yC88nUOR8ovPrCdIrs/`)
+
+    // Event 5: Detects known file hashes associated with DarkCloud Stealer components.
+    (
+      $file.metadata.event_type = "PROCESS_LAUNCH" or
+      $file.metadata.event_type = "FILE_CREATION"
+    ) and
+    (
+      $file.principal.file.sha256 in (
+        "bd8c0b0503741c17d75ce560a10eeeaa0cdd21dff323d9f1644c62b7b8eb43d9",
+        "9588c9a754574246d179c9fb05fea9dc5762c855a3a2a4823b402217f82a71c1",
+        "6b8a4c3d4a4a0a3aea50037744c5fec26a38d3fb6a596d006457f1c51bbc75c7",
+        "f6d9198bd707c49454b83687af926ccb8d13c7e43514f59eac1507467e8fb140",
+        "72d3de12a0aa8ce87a64a70807f0769c332816f27dcf8286b91e6819e2197aa8",
+        "fa598e761201582d41a73d174eb5edad10f709238d99e0bf698da1601c71d1ca",
+        "2bd43f839d5f77f22f619395461c1eeaee9234009b475231212b88bd510d00b7",
+        "24552408d849799b2cac983d499b1f32c88c10f88319339d0eec00fb01bb19b4",
+        "ce3a3e46ca65d779d687c7e58fb4a2eb784e5b1b4cebe33dbb2bf37cccb6f194"
+      ) or
+      $file.target.file.sha256 in (
+        "bd8c0b0503741c17d75ce560a10eeeaa0cdd21dff323d9f1644c62b7b8eb43d9",
+        "9588c9a754574246d179c9fb05fea9dc5762c855a3a2a4823b402217f82a71c1",
+        "6b8a4c3d4a4a0a3aea50037744c5fec26a38d3fb6a596d006457f1c51bbc75c7",
+        "f6d9198bd707c49454b83687af926ccb8d13c7e43514f59eac1507467e8fb140",
+        "72d3de12a0aa8ce87a64a70807f0769c332816f27dcf8286b91e6819e2197aa8",
+        "fa598e761201582d41a73d174eb5edad10f709238d99e0bf698da1601c71d1ca",
+        "2bd43f839d5f77f22f619395461c1eeaee9234009b475231212b88bd510d00b7",
+        "24552408d849799b2cac983d499b1f32c88c10f88319339d0eec00fb01bb19b4",
+        "ce3a3e46ca65d779d687c7e58fb4a2eb784e5b1b4cebe33dbb2bf37cccb6f194"
+      )
+    )
+
+  outcome:
+    // Risk score is elevated based on the detected behavior, with hollowing being the highest risk.
+    $risk_score = if($hollowing, 90, if($script_chain, 75, if($file, 70, 50)))
+
+    // A helper variable to select the correct event for enriching the detection.
+    $event = if($script_chain, $script_chain, if($hollowing, $hollowing, if($net_distro, $net_distro, if($net_c2, $net_c2, $file))))
+
+    // Key fields for investigation.
+    $principal_hostname = $event.principal.hostname
+    $principal_user_userid = $event.principal.user.userid
+    $principal_process_command_line = $event.principal.process.command_line
+    $principal_process_file_sha256 = $event.principal.file.sha256
+    $target_process_command_line = $event.target.process.command_line
+    $target_process_file_full_path = $event.target.process.file.full_path
+    $target_process_file_sha256 = $event.target.file.sha256
+    $network_destination_ip = if($net_distro, $net_distro.network.destination.ip, if($net_c2, $net_c2.network.destination.ip, ""))
+    $network_url = if($net_c2, $net_c2.network.http.url, "")
+
+  condition:
+    $script_chain or $hollowing or $net_distro or $net_c2 or $file
+}

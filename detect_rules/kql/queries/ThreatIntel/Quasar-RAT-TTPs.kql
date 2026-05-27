@@ -1,0 +1,90 @@
+// Title: Quasar RAT Associated TTPs
+// Description: Detects a combination of indicators and behaviors associated with Quasar RAT, as detailed in a Splunk Threat Research Team blog post.
+// This rule provides broad coverage by looking for specific process executions, file modifications, and network reconnaissance patterns characteristic of this malware.
+// References:
+//  - https://www.splunk.com/en_us/blog/security/image-steganography-quasar-rat-detection.html
+// Author: RW
+// Date: 2025-08-22
+// Tags:
+//  - attack.credential_access
+//  - attack.defense_evasion
+//  - attack.discovery
+//  - attack.execution
+//  - attack.impact
+//  - attack.persistence
+//  - attack.t1053.005
+//  - attack.t1082
+//  - attack.t1529
+//  - attack.t1547.001
+//  - attack.t1552.001
+//  - attack.t1553.005
+//  - malware.quasar
+//
+
+// Part 1: Process-based detections (IOC Hash, Schtasks, Shutdown)
+(DeviceProcessEvents
+| where
+    // Known hash for the .NET Steganography Loader
+    SHA256 =~ "7300535ef26158bdb916366b717390fc36eb570473ed7805c18b101367c68af5"
+    // Detects scheduled task creation with highest privileges for persistence/privilege escalation
+    or (FileName endswith "schtasks.exe" and ProcessCommandLine has_all ("/create", "/rl", "HIGHEST"))
+    // Detects immediate system shutdown or reboot commands
+    or (FileName endswith "shutdown.exe" and ProcessCommandLine has " /t 0" and (ProcessCommandLine has " /s " or ProcessCommandLine has " /r "))
+| extend
+    DetectionMethod = case(
+        SHA256 =~ "7300535ef26158bdb916366b717390fc36eb570473ed7805c18b101367c68af5", "Quasar RAT Loader Hash",
+        ProcessCommandLine has "schtasks", "Scheduled Task with Highest Privileges",
+        ProcessCommandLine has "shutdown", "Immediate System Shutdown/Reboot",
+        "Unknown Process Event"
+    ),
+    ThreatCategory = "Process"
+| project
+    Timestamp, DeviceName, DetectionMethod, ThreatCategory,
+    FileName, ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessCommandLine,
+    AccountName, SHA256
+)
+| union
+// Part 2: File-based detections (FileZilla, Startup, MOTW)
+(DeviceFileEvents
+| where
+    // Detects access to FileZilla configuration files to steal credentials
+    (FolderPath has @"\FileZilla\" and FileName in~ ("recentservers.xml", "sitemanager.xml"))
+    // Detects creation of a .url shortcut in the Startup folder for persistence
+    or (ActionType == "FileCreated" and FolderPath has @"\Start Menu\Programs\Startup\" and FileName endswith ".url")
+    // Detects deletion of the Mark-of-the-Web to bypass security warnings
+    or (ActionType == "FileDeleted" and FileName endswith ":Zone.Identifier")
+| extend
+    DetectionMethod = case(
+        FolderPath has @"\FileZilla\", "Unusual FileZilla Config Access",
+        FolderPath has @"\Start Menu\Programs\Startup\", "Startup Folder URL Shortcut Creation",
+        FileName endswith ":Zone.Identifier", "Mark-of-the-Web Bypass",
+        "Unknown File Event"
+    ),
+    ThreatCategory = "File"
+// Filter out legitimate FileZilla and OneDrive activity. This may need tuning for your environment.
+| where not(DetectionMethod == "Unusual FileZilla Config Access" and InitiatingProcessFileName in~ ("filezilla.exe", "OneDrive.exe"))
+| project
+    Timestamp, DeviceName, DetectionMethod, ThreatCategory,
+    FileName, FolderPath, ActionType, InitiatingProcessFileName, InitiatingProcessCommandLine,
+    AccountName, SHA1
+)
+| union
+// Part 3: Network-based detections (DNS queries for IP checking services)
+(DnsEvents
+| where Name has_any (
+    "wtfismyip.com", "checkip.", "ipecho.net", "ipinfo.io", "api.ipify.org", "icanhazip.com",
+    "ip.anysrc.com", "api.ip.sb", "ident.me", "myexternalip.com", "zen.spamhaus.org", "cbl.abuseat.org",
+    "b.barracudacentral.org", "dnsbl-1.uceprotect.net", "spam.dnsbl.sorbs.net", "iplogger.org", "ip-api.com",
+    "geoip.", "ipwho.is", "ifconfig.me", "myip.com", "ipstack.com", "ip-api.io", "trackip.net",
+    "ipgeolocation.io", "ipfind.io", "freegeoip.app", "ipv4bot.whatismyipaddress.com", "hacker-target.com"
+    )
+// This part can be noisy. Consider filtering for processes that shouldn't be making these queries.
+// For example: where not(InitiatingProcessVersionInfoOriginalFileName in~ ('chrome.exe', 'msedge.exe', 'firefox.exe'))
+| extend
+    DetectionMethod = "Network Reconnaissance via IP Check Service",
+    ThreatCategory = "Network"
+| project
+    Timestamp, DeviceName, DetectionMethod, ThreatCategory,
+    Query = Name, Result = IPAddresses, InitiatingProcessFileName,
+    AccountName
+)

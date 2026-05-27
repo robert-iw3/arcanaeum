@@ -1,0 +1,219 @@
+log_file: /app/logs/analyzer.log
+excluded_dirs:
+  - .git
+  - __pycache__
+  - node_modules
+  - venv
+max_workers: 8
+chunk_size: 1048576  # 1MB
+batch_size: 1000  # DB batch size
+extensions:
+  - .py
+  - .java
+  - .js
+  - .go
+  - .rb
+  - .rs
+  - .php
+  - .cpp
+  - .c
+  - .json  # For SBOM scanning
+  - .xml
+custom_functions:
+  # Existing functions
+  - function: "my_vuln_func()"
+    description: "Custom vulnerable function detected"
+    category: "custom"
+    severity: "Medium"
+    owasp_category: "A04:2021"
+  - function: "XMLDecoder()"
+    description: "XML deserialization, risks insecure deserialization (OWASP A08:2021, HIPAA)"
+    category: "security"
+    severity: "Critical"
+    owasp_category: "A08:2021"
+  - function: "document.execCommand()"
+    description: "Dynamic DOM manipulation, risks XSS (OWASP A07:2021)"
+    category: "security"
+    severity: "High"
+    owasp_category: "A07:2021"
+  - function: "unserialize()"
+    description: "PHP deserialization, risks insecure deserialization (OWASP A08:2021, HIPAA)"
+    category: "security"
+    severity: "Critical"
+    owasp_category: "A08:2021"
+  - function: "sprintf()"
+    description: "Format string vulnerabilities (OWASP A03:2021)"
+    category: "security"
+    severity: "High"
+    owasp_category: "A03:2021"
+  - function: "create_function()"
+    description: "Dynamic function creation, risks injection (OWASP A03:2021)"
+    category: "security"
+    severity: "Critical"
+    owasp_category: "A03:2021"
+  - function: "session_start()"
+    description: "Session management, verify secure configuration (OWASP A02:2021, HIPAA)"
+    category: "security"
+    severity: "High"
+    owasp_category: "A02:2021"
+  - function: "http_response_code()"
+    description: "HTTP response, verify secure headers (OWASP A05:2021)"
+    category: "security"
+    severity: "Medium"
+    owasp_category: "A05:2021"
+  - function: "crypto.createHash('md5')"
+    description: "Weak cryptographic algorithm, risks broken cryptography (OWASP A02:2021, HIPAA)"
+    category: "security"
+    severity: "High"
+    owasp_category: "A02:2021"
+  - function: "execSQL()"
+    description: "Potential SQL injection, verify parameterization (OWASP A03:2021, HIPAA)"
+    category: "security"
+    severity: "Critical"
+    owasp_category: "A03:2021"
+  - function: "strcpy()"
+    description: "Buffer overflow risk (OWASP A08:2021)"
+    category: "security"
+    severity: "Critical"
+    owasp_category: "A08:2021"
+  - function: "evalFile()"
+    description: "Dynamic code execution, risks injection (OWASP A03:2021)"
+    category: "security"
+    severity: "Critical"
+    owasp_category: "A03:2021"
+  - function: "HttpSession.setAttribute()"
+    description: "Session attribute storage, risks exposure (OWASP A04:2021)"
+    category: "security"
+    severity: "Medium"
+    owasp_category: "A04:2021"
+  - function: !ruby/regexp "['\"][0-9a-fA-F]{32}['\"]"
+    description: "Hardcoded secret or API key detected (OWASP A07:2021, HIPAA, RSPEC-5144)"
+    category: "security"
+    severity: "Critical"
+    owasp_category: "A07:2021"
+  - function: !ruby/regexp "eval\\s*\\(\\s*atob\\s*\\(\\s*['\"].*?['\"]\\s*\\)\\s*\\)"
+    description: "Obfuscated code execution, potential malware (OWASP A08:2021, Checkmarx SAST)"
+    category: "security"
+    severity: "Critical"
+    owasp_category: "A08:2021"
+  - function: !ruby/regexp "http\\.get\\s*\\(\\s*['\"][^'\"]+['\"]\\s*\\)"
+    description: "HTTP request, risks SSRF if URL not validated (OWASP A10:2021)"
+    category: "security"
+    severity: "High"
+    owasp_category: "A10:2021"
+  - function: !ruby/regexp "app\\.use\\s*\\(\\s*['\"][^'\"]+['\"]\\s*\\)"
+    description: "Middleware misconfiguration, risks security bypass (OWASP A05:2021)"
+    category: "security"
+    severity: "Medium"
+    owasp_category: "A05:2021"
+  - function: !ruby/regexp "\\bgraphql\\s*\\(\\s*['\"]query\\s*{.*mutation.*['\"]\\s*\\)"
+    description: "GraphQL mutation injection risk (OWASP A03:2021)"
+    category: "security"
+    severity: "High"
+    owasp_category: "A03:2021"
+  - function: !ruby/regexp "\\b[A-Za-z0-9+/]{20,}=*"
+    description: "Potential base64-encoded secret (OWASP A07:2021, RSPEC-5144)"
+    category: "security"
+    severity: "Critical"
+    owasp_category: "A07:2021"
+  - function: !ruby/regexp "\\bapi\\.call\\s*\\(\\s*['\"][^'\"]+['\"]\\s*\\)"
+    description: "API call, risks insecure API access (OWASP A04:2021)"
+    category: "security"
+    severity: "High"
+    owasp_category: "A04:2021"
+  # New functions
+  - function: "System.getenv()"
+    description: "Environment variable access, risks sensitive data exposure (OWASP A07:2021, RSPEC-5144)"
+    category: "security"
+    severity: "High"
+    owasp_category: "A07:2021"
+  - function: "JSON.parse()"
+    description: "JSON parsing, risks unvalidated input (OWASP A03:2021, RSPEC-5335)"
+    category: "security"
+    severity: "High"
+    owasp_category: "A03:2021"
+  - function: "evalScript()"
+    description: "Dynamic script execution, risks injection (OWASP A03:2021, Checkmarx SAST)"
+    category: "security"
+    severity: "Critical"
+    owasp_category: "A03:2021"
+  - function: "crypto.createHash('sha1')"
+    description: "Weak cryptographic algorithm, risks broken cryptography (OWASP A02:2021, RSPEC-5131)"
+    category: "security"
+    severity: "High"
+    owasp_category: "A02:2021"
+  - function: !ruby/regexp "\\bpassword\\s*=\\s*['\"].*?['\"]"
+    description: "Hardcoded password detected (OWASP A07:2021, RSPEC-5144, HIPAA)"
+    category: "security"
+    severity: "Critical"
+    owasp_category: "A07:2021"
+  - function: !ruby/regexp "\\b[A-Za-z0-9+/]{40,}=*"
+    description: "Potential base64-encoded API key (OWASP A07:2021, RSPEC-5144)"
+    category: "security"
+    severity: "Critical"
+    owasp_category: "A07:2021"
+  - function: !ruby/regexp "eval\\s*\\(\\s*decodeURIComponent\\s*\\(\\s*['\"].*?['\"]\\s*\\)\\s*\\)"
+    description: "Obfuscated code execution via decodeURIComponent (OWASP A08:2021, Checkmarx SAST)"
+    category: "security"
+    severity: "Critical"
+    owasp_category: "A08:2021"
+  - function: "ObjectInputStream.readObject()"
+    description: "Java deserialization, risks insecure deserialization (OWASP A08:2021, HIPAA)"
+    category: "security"
+    severity: "Critical"
+    owasp_category: "A08:2021"
+  - function: "exec()"
+    description: "System command execution, risks command injection (OWASP A03:2021)"
+    category: "security"
+    severity: "Critical"
+    owasp_category: "A03:2021"
+  - function: "logger.debug()"
+    description: "Debug logging, risks sensitive data exposure if not sanitized (OWASP A09:2021)"
+    category: "security"
+    severity: "Medium"
+    owasp_category: "A09:2021"
+cve_patterns:
+  # Existing CVEs
+  - dependency: lodash
+    version: "<4.17.21"
+    cve: CVE-2021-23337
+    severity: "High"
+    description: "Prototype pollution in lodash"
+    published_date: "2021-02-15"
+    cvss_score: 7.4
+  - dependency: log4j
+    version: "<=2.16.0"
+    cve: CVE-2021-44228
+    severity: "Critical"
+    description: "Remote code execution in Log4j (Log4Shell)"
+    published_date: "2021-12-10"
+    cvss_score: 10.0
+  - dependency: express
+    version: "<4.17.1"
+    cve: CVE-2020-7608
+    severity: "Medium"
+    description: "Prototype pollution in express"
+    published_date: "2020-03-10"
+    cvss_score: 5.3
+  # New CVEs
+  - dependency: log4j
+    version: "<=2.17.0"
+    cve: CVE-2021-44832
+    severity: "High"
+    description: "Remote code execution in Log4j via JDBC Appender"
+    published_date: "2021-12-28"
+    cvss_score: 6.6
+  - dependency: normalize-url
+    version: "<4.5.1"
+    cve: CVE-2020-8116
+    severity: "High"
+    description: "Prototype pollution in normalize-url"
+    published_date: "2020-02-10"
+    cvss_score: 7.5
+  - dependency: lodash
+    version: "<4.17.12"
+    cve: CVE-2019-10744
+    severity: "Critical"
+    description: "Prototype pollution in lodash"
+    published_date: "2019-07-10"
+    cvss_score: 9.8

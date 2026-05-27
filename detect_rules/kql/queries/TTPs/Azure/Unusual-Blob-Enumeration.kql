@@ -1,0 +1,55 @@
+// Name: Azure Blob Storage Enumeration
+// Author: RW
+// Date: 2025-10-26
+// Description: Detects potential enumeration of Azure Blob Storage accounts or containers, indicated by a high volume of failed requests from a single source IP address. This activity could be a precursor to data theft or other malicious actions.
+// Tactics: Reconnaissance
+// Techniques: T1593.002, T1594, T1595.003, T1596, T1596.001
+// References: https://www.microsoft.com/en-us/security/blog/2025/10/20/inside-the-attack-chain-threat-activity-targeting-azure-blob-storage/
+// False Positive Sensitivity: Medium
+
+// Define the time window for the analysis
+let timeframe = 1h;
+// Define the threshold for the number of distinct failed container/account lookups from a single IP.
+// Tune this value based on your environment's baseline activity.
+let distinctFailedLookupsThreshold = 20;
+// Define the threshold for the total number of failed requests from a single IP.
+let totalFailedRequestsThreshold = 50;
+// Define known benign IP addresses or subnets to exclude.
+// This is a placeholder; populate with your organization's vulnerability scanners, monitoring tools, etc.
+let IP_Allowlist = dynamic([]);
+
+StorageBlobLogs
+| where TimeGenerated > ago(timeframe)
+// Focus on anonymous requests which are common for external enumeration.
+| where AuthenticationType == "Anonymous"
+// Filter for errors indicating the resource does not exist (404) or a bad request (400) often seen with non-existent accounts.
+| where StatusCode in (404, 400)
+// Filter out known benign IPs.
+| where not(ipv4_is_in_any_range(CallerIpAddress, IP_Allowlist))
+// Summarize activity by the calling IP address.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    DistinctTargetAccounts = dcount(AccountName),
+    DistinctTargetContainers = dcountif(ObjectName, isnotempty(ObjectName)),
+    TotalFailedRequests = count(),
+    SampleTargetAccounts = make_set(AccountName, 5),
+    SampleTargetContainers = make_setif(ObjectName, isnotempty(ObjectName), 5),
+    ReportedUserAgents = make_set(UserAgentHeader, 5)
+    by CallerIpAddress, AuthenticationType
+// Apply thresholds to identify brute-force or scanning behavior.
+| where TotalFailedRequests > totalFailedRequestsThreshold and (DistinctTargetAccounts > distinctFailedLookupsThreshold or DistinctTargetContainers > distinctFailedLookupsThreshold)
+// Add a check for known enumeration tool user agents to increase confidence.
+| extend IsKnownScannerTool = iff(ReportedUserAgents has_any ("goblob", "QuickAZ", "PowerShell"), true, false)
+| project
+    StartTime,
+    EndTime,
+    CallerIpAddress,
+    AuthenticationType,
+    TotalFailedRequests,
+    DistinctTargetAccounts,
+    DistinctTargetContainers,
+    IsKnownScannerTool,
+    ReportedUserAgents,
+    SampleTargetAccounts,
+    SampleTargetContainers

@@ -1,0 +1,41 @@
+rule ngrok_outbound_connection {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects outbound network connections or DNS queries to Ngrok domains. Ngrok is a tunneling service that can be abused by threat actors to exfiltrate data or establish command and control channels from within a compromised network, including cloud environments."
+    tactic = "TA0011, TA0010"
+    technique = "T1071.001"
+    tags = "COMMAND_AND_CONTROL, EXFILTRATION, CLOUD, NGROK"
+    false_positives = "Legitimate use of Ngrok by developers for testing, demos, or exposing local services to the internet. This detection may require tuning to exclude known developer systems or projects."
+
+  events:
+    // This rule looks for either DNS queries or HTTP requests.
+    // You can expand this to other network event types like GENERIC_NETWORK_FLOW if needed.
+    (
+      $network.metadata.event_type = "NETWORK_DNS" or
+      $network.metadata.event_type = "NETWORK_HTTP"
+    )
+
+    // Detects connections to the free tier of Ngrok, commonly abused by threat actors.
+    $network.target.domain.name endswith ".ngrok-free.app"
+
+    // Capture the source IP for grouping and enrichment.
+    $principal_ip = $network.principal.ip[0]
+
+  match:
+    // Group events by the source IP over a 1-hour window to consolidate alerts.
+    $principal_ip over 1h
+
+  outcome:
+    // Risk score can be adjusted based on environment sensitivity.
+    $risk_score = 40
+    $principal_hostname = array_distinct($network.principal.hostname)
+    $target_domain = array_distinct($network.target.domain.name)
+    $event_count = count_distinct($network.metadata.id)
+    // For developer environments, consider adding an exception for known user IDs or hostnames.
+    // For example: not $network.principal.user.userid in %developer_uids
+    $principal_user = array_distinct($network.principal.user.userid)
+
+  condition:
+    $network
+}

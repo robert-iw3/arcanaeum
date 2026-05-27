@@ -1,0 +1,52 @@
+// Name: Managed Identity Abuse Detected
+// Author: RW
+// Date: 2025-08-31
+// Description: Detects the creation of a User-Assigned Managed Identity (UAMI) or the addition of federated credentials to a Managed Identity.
+// Attackers abuse these for persistence and privilege escalation by linking identities to external identity providers they control.
+// MITRE ATT&CK: T1098 (Account Manipulation), T1078 (Valid Accounts), T1550.001 (Application Access Token)
+// False Positive Sensitivity: Medium
+
+(
+    // Part 1: Detects the creation or update of a User-Assigned Managed Identity (UAMI)
+    AzureActivity
+    | where OperationNameValue == "MICROSOFT.MANAGEDIDENTITY/USERASSIGNEDIDENTITIES/WRITE" and ActivityStatusValue == "Success"
+    // Potential for false positives: Legitimate IaC deployments (Terraform, Bicep) or administrative scripts will trigger this.
+    // Consider excluding known service principals or admin accounts from the 'Actor' field.
+    | project
+        TimeGenerated,
+        ActivityType = "User-Assigned Managed Identity Created/Updated",
+        Actor = Caller,
+        ActorIpAddress = CallerIpAddress,
+        OperationName = OperationNameValue,
+        IdentityName = tostring(parse_json(Properties).resource),
+        IdentityId = ResourceId,
+        FederationDetails = "" // Placeholder to align with the union below
+)
+| union
+(
+    // Part 2: Detects when a federated credential is added to a Managed Identity's underlying service principal
+    AuditLogs
+    | where Category == "ApplicationManagement" and OperationName == "Add federated identity credential to application." and Result == "success"
+    | extend TargetSP = TargetResources[0]
+    | extend props = todynamic(TargetSP.modifiedProperties)
+    // Filter for events where the target Service Principal is a Managed Identity
+    | where props has 'ServicePrincipalType' and props has '"ManagedIdentity"'
+    // Potential for false positives: Legitimate for services like GitHub Actions OIDC connect.
+    // Investigate the issuer URL within FederationDetails. Exclude trusted issuers if necessary.
+    | mv-apply prop = props on (
+        // Extract the credential details
+        where prop.DisplayName == "FederatedIdentityCredential"
+        | project FederationDetails = tostring(prop.NewValue)
+    )
+    | where isnotempty(FederationDetails)
+    | project
+        TimeGenerated,
+        ActivityType = "Federated Credential Added to Managed Identity",
+        Actor = tostring(InitiatedBy.user.userPrincipalName),
+        ActorIpAddress = tostring(InitiatedBy.user.ipAddress),
+        OperationName,
+        IdentityName = tostring(TargetSP.displayName),
+        IdentityId = tostring(TargetSP.id),
+        FederationDetails
+)
+| project-reorder TimeGenerated, ActivityType, Actor, ActorIpAddress, OperationName, IdentityName, IdentityId, FederationDetails

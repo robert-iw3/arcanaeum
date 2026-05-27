@@ -1,0 +1,35 @@
+rule gcp_cloud_sql_export_to_external_bucket {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects when data from a Google Cloud SQL instance is exported to a Google Cloud Storage (GCS) bucket that is not on a list of known, trusted buckets. This could indicate an attempt to exfiltrate sensitive database information."
+    false_positives = "Legitimate database backups or data transfers to newly created or untracked GCS buckets. To reduce false positives, maintain a comprehensive reference list (%known_gcs_buckets) of all legitimate storage buckets used for SQL exports."
+    tags = "GCP, EXFILTRATION, CLOUD_SQL, T1537"
+    tactic = "TA0010"
+    technique = "T1537"
+
+  events:
+    // Filter for Cloud SQL instance export events.
+    $e.metadata.event_type = "GCP_CLOUDSQL_INSTANCE_EXPORT"
+    $e.metadata.product_event_type = "cloudsql.instances.export"
+
+    // Capture the destination GCS bucket name from the target URI.
+    $destination_bucket = re.capture($e.target.resource.name, `^gs://([^/]+)`)
+
+    // Alert only if the destination bucket is not in a pre-defined list of known buckets.
+    // This is the primary logic to filter out legitimate backup activity.
+    $destination_bucket not in %known_gcs_buckets
+
+  outcome:
+    // A medium risk score is assigned due to the high potential for data loss.
+    $risk_score = 50
+    $principal_ip = array_distinct($e.principal.ip)
+    $principal_user = $e.principal.user.email_addr
+    $source_project_id = $e.resource.project.name
+    $source_sql_instance = $e.resource.instance
+    $destination_gcs_uri = $e.target.resource.name
+    $destination_gcs_bucket_name = $destination_bucket
+
+  condition:
+    $e
+}

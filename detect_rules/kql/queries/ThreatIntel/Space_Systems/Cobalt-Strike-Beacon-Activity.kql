@@ -1,0 +1,77 @@
+// Name: Cobalt Strike Beacon Activity
+// Author: RW
+// Date: 2025-08-15
+// Description: Detects indicators of Cobalt Strike beacon activity on both the host and network.
+// The rule looks for the creation of default named pipes used for C2 session passing and for network connections to default URIs used by Malleable C2 profiles.
+// This activity is common in post-exploitation frameworks used by advanced threat actors.
+// Tactic: Command and Control, Ingress Tool Transfer
+// Technique: T1071.001, T1105
+// False Positive Sensitivity: Medium. Default Cobalt Strike artifacts are often changed by sophisticated attackers.
+// However, their presence is a high-fidelity indicator of compromise. Legitimate tools are unlikely to use these specific patterns.
+
+let lookback = 1d;
+// Define common default URI paths used by Cobalt Strike Malleable C2 profiles.
+let Default_CS_URIs = dynamic([
+    "/jquery.js", "/jquery.min.js", "/jquery-3.3.1.js", "/jquery-3.3.1.min.js",
+    "/jquery-3.6.0.min.js", "/jquery-3.6.0.js", "/ga.js", "/pixel.gif", "/submit.php",
+    "/__utm.gif", "/cdn.jquery-3.3.1.min.js", "/load.js"
+]);
+// Define a regex for common default named pipes used by Cobalt Strike for session passing.
+let CS_NamedPipes_Regex = @"\\\\.\\pipe\\(msagent|postex|status)_[a-f0-9]{4,6}";
+
+// Logic Part 1: Detect network connections to default Cobalt Strike C2 URIs.
+let NetworkIndicators =
+DeviceNetworkEvents
+| where TimeGenerated > ago(lookback)
+| where isnotempty(RemoteUrl)
+| extend UrlPath = tostring(parse_url(RemoteUrl)["Path"])
+| where UrlPath in~ (Default_CS_URIs)
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    MatchedIndicators = make_set(UrlPath),
+    RemoteUrls = make_set(RemoteUrl),
+    count()
+    by DeviceName, RemoteIP, DestinationPort, InitiatingProcessFileName, InitiatingProcessCommandLine
+| extend
+    DetectionMethod = "Cobalt Strike C2 Network Indicator (Default URI)",
+    MatchedPipeNames = pack_array(""); // Add empty field for union compatibility
+
+// Logic Part 2: Detect the creation of default Cobalt Strike named pipes.
+let HostIndicators =
+DeviceEvents
+| where TimeGenerated > ago(lookback)
+| where ActionType == "PipeCreated" and isnotempty(FileName)
+| where FileName matches regex CS_NamedPipes_Regex
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    MatchedPipeNames = make_set(FileName),
+    count()
+    by DeviceName, InitiatingProcessFileName, InitiatingProcessCommandLine
+| extend
+    DetectionMethod = "Cobalt Strike Named Pipe Creation",
+    MatchedIndicators = pack_array(""), // Add empty fields for union compatibility
+    RemoteUrls = pack_array(""),
+    RemoteIP = "",
+    DestinationPort = "";
+
+// Union the results from both host and network detections.
+union NetworkIndicators, HostIndicators
+| project
+    StartTime,
+    EndTime,
+    DetectionMethod,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RemoteIP,
+    DestinationPort,
+    MatchedIndicators,
+    MatchedPipeNames,
+    RemoteUrls
+| extend
+    timestamp = StartTime,
+    HostName = tostring(split(DeviceName, ".")[0]),
+    DvcHostname = DeviceName,
+    AccountCustomEntity = RemoteIP

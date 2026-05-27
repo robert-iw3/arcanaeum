@@ -1,0 +1,45 @@
+rule Chinese_State_Sponsored_Network_Device_Activity {
+  meta:
+    description = "Detects various TTPs associated with Chinese state-sponsored actors targeting network infrastructure. This includes enabling backdoors, modifying ACLs, creating users, and capturing traffic as described in the joint cybersecurity advisory."
+    author = "RW"
+    date = "2025-08-29"
+    reference = "https://www.cisa.gov/news-events/cybersecurity-advisories/aa25-239a" // Placeholder URL for the advisory
+    tags = "APT, CHINA, NETWORK_DEVICE, SALT_TYPHOON, OPERATOR_PANDA"
+    tactic = "TA0003, TA0005, TA0009, TA0007"
+    technique = "T1021.004, T1562.004, T1136.001, T1040, T1059.008, T1571"
+    false_positives = "Legitimate administrative activity may overlap with some of these indicators. The high-port SSH pattern ('xxx22') may be noisy and require tuning for specific environments."
+
+  events:
+    // Event for command-line/log based indicators from network devices
+    $log.metadata.event_type = "GENERIC_EVENT"
+    // Regex for suspicious commands, filenames, and configuration changes
+    re.regex($log.security_result.about[0], `(?i)service sshd_operns start|access-list (10|20|50)|useradd cisco|vi /etc/sudoers|monitor capture.*(eq 49|start)|mycap\.pcap|tac\.pcap|1\.pcap|span|erspan`)
+
+    // Event for network-based indicators
+    $network.metadata.event_type = "NETWORK_CONNECTION"
+    (
+      // Port for the IOS XR sshd_operns backdoor service
+      $network.target.port = 57722 or
+      // Actor pattern for high ports ending in '22' (e.g., 12322, 4522)
+      // FP-Tuning: This pattern may be noisy. Consider adding filters for known good source/destination IPs or legitimate applications.
+      ($network.target.port > 1024 and re.regex(strings.itoa($network.target.port), `\d+22$`))
+    )
+
+  outcome:
+    // Set a risk score. Can be adjusted based on which condition is met.
+    $risk_score = 50
+    $principal_hostname = coalesce($log.principal.hostname, $network.principal.hostname)
+    $principal_ip = coalesce(array_distinct($log.principal.ip), array_distinct($network.principal.ip))
+    $target_hostname = coalesce($log.target.hostname, $network.target.hostname)
+    $target_ip = coalesce(array_distinct($log.target.ip), array_distinct($network.target.ip))
+    $target_port = if($network, $network.target.port, 0)
+    // Provide a specific description based on which event triggered the rule
+    $summary = if($log,
+        "Suspicious command or configuration change detected on network device: " + $log.security_result.about[0],
+        "Network connection to a non-standard SSH port used for persistence: " + strings.itoa($network.target.port)
+    )
+    $matched_event_type = if($log, "Command/Log", "Network Connection")
+
+  condition:
+    $log or $network
+}

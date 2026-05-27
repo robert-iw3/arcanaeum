@@ -1,0 +1,50 @@
+title: LOLBins Misuse
+description: >-
+  Detects suspicious usage of common Living Off the Land Binaries (LOLBins) such as regsvr32, msbuild, and bitsadmin.
+  Adversaries abuse these trusted, signed utilities to proxy execution of malicious code, download payloads, and evade defenses.
+references:
+  - https://attack.mitre.org/techniques/T1218/010/
+  - https://attack.mitre.org/techniques/T1127/001/
+  - https://attack.mitre.org/techniques/T1197/
+author: RW
+date: 2025-08-18
+tags:
+  - attack.defense_evasion
+  - attack.execution
+  - attack.t1218.010
+  - attack.t1127.001
+  - attack.t1197
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  # Detects regsvr32 used for proxy execution of code from a scriptlet or network location.
+  selection_regsvr32:
+    Image|endswith: '\regsvr32.exe'
+    CommandLine|contains: '/s' # The silent flag is almost always used in malicious executions.
+    CommandLine|contains:
+      - 'scrobj.dll'
+      - 'http:'
+      - 'https:'
+      - 'ftp:'
+  # Detects msbuild being executed from unusual, user-writable locations.
+  selection_msbuild:
+    Image|endswith: '\msbuild.exe'
+    Image|startswith:
+      - 'C:\Users\'
+      - 'C:\ProgramData\'
+      - 'C:\Windows\Temp\'
+      - 'C:\Temp\'
+      - 'C:\Perflogs\'
+  # Detects bitsadmin being used to download a file from the internet.
+  selection_bitsadmin:
+    Image|endswith: '\bitsadmin.exe'
+    CommandLine|contains|all:
+      - '/transfer'
+      - 'http' # This covers both http and https protocols.
+  condition: 1 of them
+falsepositives:
+  - Legitimate software updaters (e.g., Google Update, Adobe Updater) may use bitsadmin.exe to download files. Consider excluding known safe parent processes if false positives occur.
+  - Developer environments may legitimately use msbuild.exe in user profile directories. Exclusions for specific developer project paths or parent processes (e.g., devenv.exe) may be necessary.
+  - Some legitimate installers or scripts may use regsvr32.exe to register components from network locations, though this is uncommon.
+level: high

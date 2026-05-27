@@ -1,0 +1,40 @@
+// Name: Kubernetes - Pod Created with Network Policy Bypass Capability
+// Author: RW
+// Date: 2025-08-11
+// Description: Detects the creation or update of a Pod with configurations that can bypass network policies or facilitate
+//              network-based attacks like ARP and DNS spoofing. This includes enabling hostNetwork, which attaches the pod
+//              directly to the node's network, or adding the CAP_NET_RAW capability, which allows for crafting raw packets.
+// False Positive Sensitivity: Medium. Legitimate workloads, such as CNI plugins or network monitoring tools, may require these privileges.
+// Exclude known service accounts or namespaces if they are expected to create such pods.
+// MITRE TTPs: T1557.001 (Man-in-the-Middle: ARP Poisoning), T1557.002 (Man-in-the-Middle: DNS Spoofing), T1611 (Escape to Host)
+
+KubeAudit
+// Filter for Pod creation or update events.
+| where ObjectRef.resource == "pods" and Verb in ("create", "update")
+// Exclude system namespaces which often have privileged pods by design.
+| where ObjectRef.namespace !in ("kube-system", "kube-public", "kube-node-lease")
+| extend request = todynamic(RequestObject)
+// Check if the pod is configured to use the host's network namespace.
+| extend isHostNetwork = tobool(request.spec.hostNetwork)
+// Check if any container in the pod has the CAP_NET_RAW capability added.
+| extend hasCapNetRaw = tostring(request.spec.containers) has '"NET_RAW"'
+// Trigger if either of these risky configurations is present.
+| where isHostNetwork or hasCapNetRaw
+// Create a summary of the reasons for the alert for easier triage.
+| extend Reasons = bag_pack(
+    "HostNetworkEnabled", isHostNetwork,
+    "CapNetRawAdded", hasCapNetRaw
+    )
+| project
+    TimeGenerated,
+    AuditID,
+    OperationName,
+    Category,
+    ActorUsername = User.username,
+    ActorGroups = User.groups,
+    SourceIP,
+    PodName = ObjectRef.name,
+    PodNamespace = ObjectRef.namespace,
+    Image = tostring(request.spec.containers[0].image),
+    Reasons,
+    RequestObject

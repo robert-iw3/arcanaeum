@@ -1,0 +1,33 @@
+// Name: WMI Event Subscription for Persistence
+// Author: RW
+// Date: 2025-08-07
+// Description: Detects the creation of a WMI event subscription that uses the CommandLineEventConsumer.
+//              This is a known fileless persistence technique (T1546.003) where attackers configure WMI
+//              to execute a malicious command or script in response to a system event.
+// Mitre TTPs: T1546.003
+// False Positive Sensitivity: Medium
+
+DeviceEvents
+// Filter for the WMI event that binds a filter to a consumer, which is the final step in creating the persistence mechanism.
+| where ActionType == "WmiBindEventFilterToConsumer"
+// The AdditionalFields contain the details of the consumer and filter.
+| extend ParsedFields = parse_json(AdditionalFields)
+| extend Consumer = tostring(ParsedFields.Consumer),
+           Filter = tostring(ParsedFields.Filter)
+// The CommandLineEventConsumer is a strong indicator of malicious activity as it allows direct command execution.
+| where Consumer contains "CommandLineEventConsumer"
+// False Positive Tuning: Legitimate system management tools (e.g., SCCM) or administrative scripts may create WMI subscriptions.
+// Exclude known legitimate processes if they are causing false positives.
+// For example: | where InitiatingProcessFileName !~ "CcmExec.exe"
+| project
+    Timestamp,
+    DeviceId,
+    DeviceName,
+    ActionType,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    Consumer,
+    Filter,
+    Tactic = "Persistence, Privilege Escalation",
+    Technique = "WMI Event Subscription",
+    MitreTTP = "T1546.003"

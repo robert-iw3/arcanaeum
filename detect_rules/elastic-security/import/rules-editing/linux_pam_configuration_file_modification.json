@@ -1,0 +1,63 @@
+{
+  "rule_id": "linux_pam_configuration_file_modification",
+  "name": "Linux PAM Configuration File Modification",
+  "description": "Detects unauthorized modifications to Linux Pluggable Authentication Module (PAM) configuration files. This can indicate an attacker attempting to establish a backdoor, bypass authentication, or persist on the system.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "FROM logs-endpoint.events.* | WHERE (file.path LIKE '/etc/pam.d/*' OR file.path IN ('/lib/security/*', '/usr/lib/security/*', '/lib64/security/*')) AND event.action IN ('creation', 'modification') AND process.name NOT IN ('yum', 'apt', 'apt-get', 'dpkg', 'rpm', 'dnf', 'pacman', 'systemd', 'chkconfig', 'update-alternatives', 'authconfig') | STATS count = COUNT(*) BY event.action, host.name, file.name, file.path, process.name, user.name | KEEP event.action, host.name, file.name, file.path, process.name, user.name, count",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0003",
+        "name": "Persistence",
+        "reference": "https://attack.mitre.org/tactics/TA0003/"
+      },
+      "technique": [
+        {
+          "id": "T1546",
+          "name": "Event Triggered Execution",
+          "reference": "https://attack.mitre.org/techniques/T1546/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0005",
+        "name": "Defense Evasion",
+        "reference": "https://attack.mitre.org/tactics/TA0005/"
+      },
+      "technique": [
+        {
+          "id": "T1070",
+          "name": "Indicator Removal on Host",
+          "reference": "https://attack.mitre.org/techniques/T1070/"
+        }
+      ]
+    }
+  ],
+  "interval": "1h",
+  "from": "now-1h",
+  "max_signals": 100,
+  "risk_score": 90,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://www.elastic.co/guide/en/security/current/linux-authentication-module-modification.html",
+    "https://attack.mitre.org/techniques/T1546/"
+  ],
+  "tags": [
+    "Linux",
+    "PAM",
+    "Persistence",
+    "Defense Evasion"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "host.name, user.name, process.name, file.path"
+}

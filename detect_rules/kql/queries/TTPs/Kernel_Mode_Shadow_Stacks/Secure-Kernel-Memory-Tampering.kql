@@ -1,0 +1,40 @@
+//
+// Rule Title: Kernel Security Check Failure due to Stack Corruption
+//
+// Author: RW
+// Date: 2025-08-03
+//
+// Description:
+// This rule detects a system crash (bug check) with the code KERNEL_SECURITY_CHECK_FAILURE (0x139) and a parameter indicating that a return address on the stack was corrupted (Parameter 1 = 0x7).
+// This is a strong indicator of a Control-Flow Guard (CFG) or Kernel Control-flow Enforcement Technology (CET) violation in "enforce" mode.
+// Such a violation suggests a sophisticated kernel-level exploit attempt, such as Return-Oriented Programming (ROP), has occurred, or that memory protected by the Secure Kernel has been tampered with.
+//
+// References:
+// - https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/bug-check-0x139-kernel-security-check-failure
+//
+// False Positive Sensitivity: Medium
+// - While this is a high-fidelity indicator of a security control failure, it can also be caused by a severely buggy driver that incorrectly modifies the stack.
+// - Investigation of the crash dump is typically required to determine the root cause (malicious exploit vs. driver bug).
+//
+// Detection Comment Level: Medium
+//
+
+DeviceEvents
+// Filter for events that contain bug check (system crash) information.
+| where isnotempty(AdditionalFields) and AdditionalFields has "BugCheckCode"
+| extend BugCheckInfo = parse_json(AdditionalFields)
+// Filter for the KERNEL_SECURITY_CHECK_FAILURE bug check code, which is 0x139 (313 in decimal).
+| where toint(BugCheckInfo.BugCheckCode) == 313
+// The first parameter being 7 indicates STACK_COOKIE_CHECK_FAILURE, meaning a return address was corrupted. This is the specific sub-type for a CET/CFG failure.
+| where toint(BugCheckInfo.BugCheckParameter1) == 7
+| project
+    TimeGenerated,
+    DeviceName,
+    ActionType,
+    BugCheckCode = BugCheckInfo.BugCheckCode,
+    BugCheckParameter1 = BugCheckInfo.BugCheckParameter1,
+    BugCheckParameter2 = BugCheckInfo.BugCheckParameter2,
+    BugCheckParameter3 = BugCheckInfo.BugCheckParameter3,
+    BugCheckParameter4 = BugCheckInfo.BugCheckParameter4,
+    ReportId,
+    DeviceId

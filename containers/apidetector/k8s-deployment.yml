@@ -1,0 +1,84 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: apidetector
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apidetector-config
+  namespace: apidetector
+data:
+  PORT: "8080"
+  HOST: "0.0.0.0"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apidetector
+  namespace: apidetector
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: apidetector
+  template:
+    metadata:
+      labels:
+        app: apidetector
+    spec:
+      containers:
+      - name: apidetector
+        image: apidetector:latest
+        ports:
+        - containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: apidetector-config
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        volumeMounts:
+        - name: screenshots
+          mountPath: /app/screenshots
+      volumes:
+      - name: screenshots
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: apidetector-service
+  namespace: apidetector
+spec:
+  selector:
+    app: apidetector
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+  type: LoadBalancer
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: apidetector-hpa
+  namespace: apidetector
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: apidetector
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70

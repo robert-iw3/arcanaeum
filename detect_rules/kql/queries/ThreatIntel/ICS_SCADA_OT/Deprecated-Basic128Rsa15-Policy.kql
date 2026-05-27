@@ -1,0 +1,47 @@
+// Name: OPC UA Communication Using Deprecated Basic128Rsa15 Policy
+// Author: RW
+// Date: 2025-08-14
+// Description: Detects OPC UA communication that negotiates the deprecated and insecure 'Basic128Rsa15' security policy.
+// This policy is vulnerable to RSA padding oracle attacks (Bleichenbacher's attack), which can lead to authentication
+// bypass or traffic decryption. Its use should be investigated and disabled.
+// References:
+// - https://reference.opcfoundation.org/Core/Part7/v104/docs/6.6.162
+// - https://www.cisa.gov/news-events/ics-advisories/icsa-25-072-09
+// MITRE TTPs: T1566.001
+
+// Define the time window for the search.
+let lookback = 1d;
+
+// This rule assumes logs from an OPC UA-aware source (e.g., Zeek, specific vendor logs) are available.
+// The table and field names may need to be adjusted for your environment.
+// Common table names: Zeek_OpcUa_CL, OpcUaAuditLogs, CommonSecurityLog, DeviceNetworkEvents
+// Common field names: security_policy, endpoint_url, EventData, Message
+union isfuzzy=true OpcUa*, Zeek*, CommonSecurityLog, DeviceNetworkEvents
+| where TimeGenerated > ago(lookback)
+// Search for the specific deprecated security policy string.
+| where EventData has "Basic128Rsa15"
+    or Message has "Basic128Rsa15"
+    or AdditionalExtensions has "Basic128Rsa15"
+    or Url has "Basic128Rsa15"
+// FP Tuning: If this policy is required for specific legacy systems, they should be
+// investigated and, if approved, added to an exclusion list to reduce noise.
+// For example: | where DstIp !in ('10.0.0.5', '192.168.1.10') and SrcIp !in ('10.0.0.50')
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    SrcIpSet = make_set(SrcIp),
+    DstPortSet = make_set(DstPort)
+    by DstIp, DstHostname, bin(TimeGenerated, 1h)
+| extend
+    timestamp = StartTime,
+    HostName = DstHostname,
+    IPAddress = DstIp
+| project
+    timestamp,
+    StartTime,
+    EndTime,
+    IPAddress,
+    HostName,
+    SrcIpSet,
+    DstPortSet,
+    Description = "Deprecated OPC UA security policy 'Basic128Rsa15' was observed in use."

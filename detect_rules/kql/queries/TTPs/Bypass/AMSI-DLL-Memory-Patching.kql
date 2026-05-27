@@ -1,0 +1,34 @@
+// Name: AMSI DLL Memory Patching via PowerShell
+// Author: RW
+// Date: 2025-07-31
+// Description: Detects PowerShell script blocks that contain code to patch AMSI-related functions (e.g., AmsiScanBuffer) in memory. Adversaries use this technique to disable AMSI and evade detection.
+// Tags: TTPs, Defense Evasion, T1027, T1059.001
+
+DeviceEvents
+// Filter for PowerShell script block execution events (Event ID 4104).
+| where ActionType == "PowerShellScriptBlock"
+| extend ParsedFields = parse_json(AdditionalFields)
+| extend ScriptBlockText = tostring(ParsedFields.ScriptBlockText)
+// Filter for script blocks containing a combination of keywords indicative of in-memory patching of AMSI.
+| where isnotempty(ScriptBlockText)
+  // Looks for the function used to change memory permissions.
+  and ScriptBlockText has "VirtualProtect"
+  // Looks for the function used to find the address of the target function to patch.
+  and ScriptBlockText has "GetProcAddress"
+  // Looks for the namespace often used to copy the patch into memory.
+  and ScriptBlockText has "InteropServices"
+  and (
+    // Looks for the common target function and the DLLs it resides in.
+    ScriptBlockText has "AmsiScanBuffer" and (ScriptBlockText has "amsi.dll" or ScriptBlockText has "clr.dll")
+  )
+// FP Tuning: This is a highly suspicious combination of function calls.
+// Legitimate software is unlikely to perform this sequence. However, some security assessment tools might.
+// Exclude known tools by name or signer if they cause noise.
+// For example: | where InitiatingProcessFileName !in~ ("pentest-tool.exe")
+| project
+    Timestamp,
+    DeviceName,
+    AccountName = InitiatingProcessAccountName,
+    ParentProcess = InitiatingProcessFileName,
+    ParentCommandLine = InitiatingProcessCommandLine,
+    ScriptBlockText

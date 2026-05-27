@@ -1,0 +1,20 @@
+{
+    "_comment1": "ePO server hostname (e.g., epo.example.com)",
+    "epo_server": "epo.example.com",
+    "_comment2": "ePO username for API authentication",
+    "epo_username": "admin",
+    "_comment3": "ePO password for API authentication",
+    "epo_password": "secure_password",
+    "_comment4": "Directory for JSON rule files",
+    "rules_dir": "/app/rules",
+    "_comment5": "Directory for markdown rule files (TCL, JSON, or YAML)",
+    "markdown_rules_dir": "/app/rules_markdown",
+    "_comment6": "Batch size for rule uploads",
+    "batch_size": 10,
+    "_comment7": "Dry-run mode for testing rule uploads (true/false)",
+    "dry_run": true,
+    "_comment8": "ePO group ID for rule assignment (optional, set to null if not used)",
+    "group_id": null,
+    "_comment9": "Path to CA certificate for ePO (optional, set to null for trusted CAs)",
+    "ca_cert": null
+}

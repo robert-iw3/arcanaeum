@@ -1,0 +1,60 @@
+stages:
+  - build
+
+splunk_build:
+  stage: build
+  image: docker:24.0
+  services:
+    - docker:24.0-dind
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "release"'
+      changes:
+        - splunk/searches/*
+      when: always
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}-pip
+    paths:
+      - .cache/pip
+  variables:
+    PIP_CACHE_DIR: .cache/pip
+    SPLUNK_HOST: $SPLUNK_HOST
+    SPLUNK_PORT: $SPLUNK_PORT
+    SPLUNK_USER: $SPLUNK_USER
+    SPLUNK_PASSWORD: $SPLUNK_PASSWORD
+    APP_CONTEXT: $APP_CONTEXT
+    SPLUNK_SSL_VERIFY: $SPLUNK_SSL_VERIFY
+    CLEANUP_JSON: $CLEANUP_JSON
+    POOL_SIZE: $POOL_SIZE
+    RATE_LIMIT_CALLS: $RATE_LIMIT_CALLS
+    RATE_LIMIT_PERIOD: $RATE_LIMIT_PERIOD
+    API_TIMEOUT: $API_TIMEOUT
+    MAX_FILES: $MAX_FILES
+    VALIDATE_API: $VALIDATE_API
+    CONFIG_PATH: $CONFIG_PATH
+  environment:
+    name: production
+  before_script:
+    - apk add --no-cache python3 py3-pip
+    - pip install --upgrade pip
+  script:
+    - set -e
+    - cd splunk
+    - echo "SPLUNK_HOST=$SPLUNK_HOST" > .env
+    - echo "SPLUNK_PORT=$SPLUNK_PORT" >> .env
+    - echo "SPLUNK_USER=$SPLUNK_USER" >> .env
+    - echo "SPLUNK_PASSWORD=$SPLUNK_PASSWORD" >> .env
+    - echo "APP_CONTEXT=$APP_CONTEXT" >> .env
+    - echo "SPLUNK_SSL_VERIFY=$SPLUNK_SSL_VERIFY" >> .env
+    - echo "CLEANUP_JSON=$CLEANUP_JSON" >> .env
+    - echo "POOL_SIZE=$POOL_SIZE" >> .env
+    - echo "RATE_LIMIT_CALLS=$RATE_LIMIT_CALLS" >> .env
+    - echo "RATE_LIMIT_PERIOD=$RATE_LIMIT_PERIOD" >> .env
+    - echo "API_TIMEOUT=$API_TIMEOUT" >> .env
+    - echo "MAX_FILES=$MAX_FILES" >> .env
+    - echo "VALIDATE_API=$VALIDATE_API" >> .env
+    - echo "CONFIG_PATH=$CONFIG_PATH" >> .env
+    - if [ ! -f .env ]; then echo "Error: .env file not found"; exit 1; fi
+    - if [ ! -f config.json ]; then echo "Error: config.json file not found"; exit 1; fi
+    - for var in SPLUNK_HOST SPLUNK_PORT SPLUNK_USER SPLUNK_PASSWORD APP_CONTEXT SPLUNK_SSL_VERIFY CLEANUP_JSON POOL_SIZE RATE_LIMIT_CALLS RATE_LIMIT_PERIOD API_TIMEOUT MAX_FILES VALIDATE_API CONFIG_PATH; do if ! grep -q "^${var}=" .env; then echo "Error: Required variable ${var} not found in .env"; exit 1; fi; done
+    - docker build -t splunk-pipeline -f pipeline.Dockerfile .
+    - docker run --env-file .env -v $(pwd)/import:/import -v $(pwd):/import/src splunk-pipeline

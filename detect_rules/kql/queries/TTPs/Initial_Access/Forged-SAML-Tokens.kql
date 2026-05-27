@@ -1,0 +1,43 @@
+// Name: Forged SAML Token Usage (Golden SAML)
+// Author: RW
+// Date: 2025-08-09
+// Description: Detects successful SAML-based federated sign-ins from an IP address that is not a known AD FS server.
+//              This is a key indicator of a "Golden SAML" attack, where an attacker forges a SAML token using a
+//              stolen AD FS token-signing certificate to gain unauthorized access to cloud applications.
+//              The rule is enhanced to look for signs of MFA bypass via a forged claim in the token.
+// False Positives:
+// - This rule may generate false positives if the 'ADFS_Public_IPs' list is incomplete or if users are legitimately authenticating via federation from unexpected IP addresses (e.g., through a new VPN or network egress point).
+// - It is critical to populate the 'ADFS_Public_IPs' list with all legitimate public-facing IP addresses of your AD FS and Web Application Proxy (WAP) servers.
+
+let timeframe = 1d;
+// Tuning: Populate this list with the public egress IP addresses of your organization's AD FS / WAP infrastructure.
+// To discover potential AD FS IPs, you can run the following query over a longer time period (e.g., 30d):
+// SigninLogs | where TimeGenerated > ago(30d) | where AuthenticationProtocol == "Saml" and ResultType == 0 | summarize by IPAddress
+let ADFS_Public_IPs = dynamic([]);
+SigninLogs
+| where TimeGenerated > ago(timeframe)
+// Look for successful federated sign-ins using the SAML protocol.
+| where ResultType == 0
+| where AuthenticationProtocol == "Saml"
+// The core logic: A Golden SAML attack involves the attacker sending a forged token directly to the service provider (Entra ID),
+// so the sign-in will not originate from a legitimate AD FS server.
+// This check prevents the rule from running if the IP list is empty.
+| where isnotempty(ADFS_Public_IPs) and not(IPAddress in (ADFS_Public_IPs))
+// A common goal of this attack is to bypass MFA by including a corresponding claim in the forged token.
+// This condition looks for sign-ins where MFA was required by policy but was satisfied by a claim in the token.
+| where AuthenticationRequirement == "multiFactorAuthentication" and AuthenticationDetails has "MFA satisfied by claim in token"
+| project
+    TimeGenerated,
+    UserPrincipalName,
+    UserDisplayName,
+    AppDisplayName,
+    ResourceDisplayName,
+    IPAddress,
+    Location,
+    DeviceDetail,
+    AuthenticationProtocol,
+    AuthenticationRequirement,
+    ConditionalAccessStatus,
+    AuthenticationDetails,
+    UserAgent
+| extend timestamp = TimeGenerated, AccountCustomEntity = UserPrincipalName, IPCustomEntity = IPAddress

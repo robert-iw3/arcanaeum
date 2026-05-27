@@ -1,0 +1,96 @@
+// name: Intune Device Name Spoofing followed by SCEP Certificate Enrollment
+// id: 2a9b8c7d-6e5f-4a3b-2c1d-0e9f8a7b6c5d
+// version: 1
+// date: 2025-07-31
+// author: RW
+// description: |
+//   Detects a sequence of events where a user changes a device's name in Intune, and shortly thereafter, a certificate is issued for that new device name via an on-premises NDES server.
+//   This pattern is indicative of the device property spoofing attack detailed by Dirk-jan Mollema. An attacker with control over an Intune-enrolled device can change its name to impersonate a privileged asset (e.g., a Domain Controller).
+//   If a SCEP certificate profile uses the device name in the Subject Alternative Name (SAN), the attacker can abuse this to request a certificate for the privileged asset. By also injecting a malicious SID into the certificate request, they can achieve privilege escalation from the cloud to the on-premises Active Directory.
+//   This rule correlates the device name change event in Intune with the certificate issuance event from AD CS to detect this suspicious sequence.
+// severity: High
+// tactics:
+//   - PrivilegeEscalation
+//   - DefenseEvasion
+// techniques:
+//   - T1552.006 # Unsecured Credentials: Group Policy Preferences
+// dataSources:
+//   - AuditLogs
+//   - WindowsEvent
+// how_to_implement: |
+//   To implement this detection, you must ingest both Microsoft Intune audit logs and Active Directory Certificate Services (AD CS) logs.
+//   1.  **Intune Audit Logs**: Ensure you are collecting Intune audit data into the `AuditLogs` table in your Log Analytics workspace.
+//   2.  **AD CS Logs**: Ingest logs from your Certificate Authority servers, specifically the `Microsoft-Windows-CertificationAuthority/Operational` log, into the `WindowsEvent` table.
+//   3.  **NDES Server List**: You MUST populate the `NdesServers` list in the query with the `RequesterName` of your NDES servers to ensure the rule is properly targeted.
+// known_false_positives: |
+//   False positives could occur in environments where legitimate administrative or automated processes involve renaming a device and then immediately re-issuing its certificate. This might happen during helpdesk support or device provisioning workflows. The time window in the query can be tuned to reduce such false positives. Any alert should be investigated to confirm if the device name change was authorized and expected.
+
+
+query: |
+  let timeWindow = 1h;
+  // comment: Define the list of NDES/Intune Connector servers. This list MUST be populated.
+  let NdesServers = dynamic([
+      "ndes-server1.contoso.com",
+      "intune-connector1.contoso.com"
+      // Add the RequesterName (often FQDN or DOMAIN\\MACHINE$) of your NDES servers here.
+  ]);
+  // comment: Find recent device name changes in Intune audit logs.
+  let deviceNameChanges =
+      AuditLogs
+      | where TimeGenerated > ago(timeWindow + 5m) // Look back slightly further for changes to account for log delay.
+      | where Category == "DeviceConfiguration" and OperationName == "Patch device" and Result == "Success"
+      | mv-expand TargetResources
+      | where isnotempty(TargetResources.modifiedProperties)
+      | mv-expand ModifiedProperties = TargetResources.modifiedProperties
+      | where ModifiedProperties.displayName == "Device Name"
+      | extend NewDeviceName = trim('"', tostring(ModifiedProperties.newValue))
+      | extend NormalizedDeviceName = tolower(extract(@"^([^\.]+)", 1, NewDeviceName))
+      | where isnotempty(NormalizedDeviceName)
+      | extend ActorUPN = tostring(InitiatedBy.user.userPrincipalName)
+      | extend ActorIP = tostring(InitiatedBy.ip.ipAddress)
+      | project ChangeTime = TimeGenerated, NormalizedDeviceName, ActorUPN, ActorIP, NewDeviceName;
+  // comment: Find recent certificate issuances from NDES servers.
+  let certIssuances =
+      WindowsEvent
+      | where TimeGenerated > ago(timeWindow)
+      | where Provider == "Microsoft-Windows-CertificationAuthority" and EventID == 21
+      | extend RequesterName = tostring(EventData.RequesterName)
+      | where RequesterName in~ (NdesServers)
+      | extend CertificateAttributes = tostring(EventData.Attributes)
+      | extend SanDnsName = extract("DNS Name=([^\\n,]+)", 1, CertificateAttributes)
+      | where isnotempty(SanDnsName)
+      | extend NormalizedDeviceName = tolower(extract(@"^([^\.]+)", 1, SanDnsName))
+      | where isnotempty(NormalizedDeviceName)
+      | extend CaServer = Computer
+      | project IssueTime = TimeGenerated, NormalizedDeviceName, RequesterName, SanDnsName, CaServer;
+  // comment: Correlate device name changes with subsequent certificate issuance for that new name.
+  deviceNameChanges
+  | join kind=inner (certIssuances) on NormalizedDeviceName
+  | where IssueTime > ChangeTime and IssueTime - ChangeTime < timeWindow
+  | project
+      TimeGenerated = IssueTime,
+      ChangeTime,
+      ActorUPN,
+      ActorIP,
+      NewDeviceName,
+      SanDnsName,
+      RequesterName,
+      CaServer
+entityMappings:
+  - entityType: Account
+    fieldMappings:
+      - identifier: FullName
+        columnName: ActorUPN
+  - entityType: IP
+    fieldMappings:
+      - identifier: Address
+        columnName: ActorIP
+  - entityType: Host
+    fieldMappings:
+      - identifier: HostName
+        columnName: NewDeviceName
+customDetails:
+  ChangeTime: ChangeTime
+  SanDnsName: SanDnsName
+  RequesterName: RequesterName
+  CaServer: CaServer

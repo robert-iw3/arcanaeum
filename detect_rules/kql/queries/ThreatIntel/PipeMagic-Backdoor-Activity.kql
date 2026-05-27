@@ -1,0 +1,168 @@
+// Name: PipeMagic Backdoor Activity
+// Description: Detects various Tactics, Techniques, and Procedures (TTPs) associated with the PipeMagic backdoor framework used by the Storm-2460 threat actor.
+// References:
+// - https://www.microsoft.com/en-us/security/blog/2025/08/18/dissecting-pipemagic-inside-the-architecture-of-a-modular-backdoor-framework/
+// - https://securelist.com/pipemagic/117270/
+// Author: RW
+// Date: 2025-08-20
+// Tags:
+// - attack.execution
+// - attack.defense_evasion
+// - attack.command_and_control
+// - attack.credential_access
+// - attack.t1059
+// - attack.t1071.001
+// - attack.t1140
+// - attack.t1218.010
+// - attack.t1003.001
+
+(union isouter=true
+    (
+        // IOC Hashes for PipeMagic components
+        let selection_hashes = dynamic([
+            "dc54117b965674bad3d7cd203ecf5e7fc822423a3f692895cf5e96e83fb88f6a", // In-memory dropper (trojanized ChatGPT)
+            "4843429e2e8871847bc1e97a0f12fa1f4166baa4735dff585cb3b4736e3fe49e", // PipeMagic backdoor (unpacked)
+            "297ea881aa2b39461997baf75d83b390f2c36a9a0a4815c81b5cf8be42840fd1"  // PipeMagic network module (unpacked)
+        ]);
+        DeviceFileEvents
+        | where SHA256 in (selection_hashes)
+        | extend
+            RuleName = "PipeMagic File Hash IOC",
+            Tactic = "Execution, Defense Evasion",
+            Technique = "T1059"
+        | project-reorder
+            Timestamp,
+            RuleName,
+            DeviceName,
+            Tactic,
+            Technique,
+            FileName,
+            FolderPath,
+            SHA256,
+            InitiatingProcessCommandLine
+    ),
+    (
+        // PipeMagic Named Pipe Creation
+        // The malware creates a named pipe with the format \\.\pipe\1.<32-char-hex-string>
+        DeviceEvents
+        | where ActionType == "PipeCreated"
+        // The regex below is more specific than a simple startswith to reduce potential false positives.
+        | where FileName matches regex @"^\\\\.\\pipe\\1\\.[0-9a-fA-F]{32}$"
+        | extend
+            RuleName = "PipeMagic Named Pipe",
+            Tactic = "Command and Control",
+            Technique = "T1059" // Inter-Process Communication
+        | project-reorder
+            Timestamp,
+            RuleName,
+            DeviceName,
+            Tactic,
+            Technique,
+            FileName,
+            InitiatingProcessFileName,
+            InitiatingProcessCommandLine
+    ),
+    (
+        // PipeMagic C2 Communication
+        let selection_c2_domains = dynamic([
+            "aaaaabbbbbbb.eastus.cloudapp.azure.com"
+        ]);
+        let selection_c2_ports = dynamic([
+            443,
+            8082 // Local testing mode
+        ]);
+        DeviceNetworkEvents
+        | where (RemoteUrl has_any (selection_c2_domains) or RemoteIP == "127.0.0.1") and RemotePort in (selection_c2_ports)
+        | extend
+            RuleName = "PipeMagic C2 Connection",
+            Tactic = "Command and Control",
+            Technique = "T1071.001"
+        | project-reorder
+            Timestamp,
+            RuleName,
+            DeviceName,
+            Tactic,
+            Technique,
+            RemoteUrl,
+            RemoteIP,
+            RemotePort,
+            InitiatingProcessFileName,
+            InitiatingProcessCommandLine
+    ),
+    (
+        // PipeMagic C2 HTTP Request Pattern
+        // This looks for the specific URI pattern used in C2 GET requests.
+        // Note: This does not check for HTTP headers like 'Upgrade: websocket' as they are not available in standard DeviceNetworkEvents.
+        DeviceNetworkEvents
+        | where RemoteUrl matches regex @".*\/[a-fA-F0-9]{16}$"
+        | extend
+            RuleName = "PipeMagic C2 HTTP Pattern",
+            Tactic = "Command and Control",
+            Technique = "T1071.001"
+        | project-reorder
+            Timestamp,
+            RuleName,
+            DeviceName,
+            Tactic,
+            Technique,
+            RemoteUrl,
+            InitiatingProcessFileName,
+            InitiatingProcessCommandLine
+    ),
+    (
+        // Initial access using certutil to download payload
+        // This technique is common but the combination of arguments and downloaded file types is more specific.
+        DeviceProcessEvents
+        | where FileName endswith "certutil.exe"
+        | where ProcessCommandLine has_all ("-urlcache", "-f") and (ProcessCommandLine has ".tmp" or ProcessCommandLine has ".dat" or ProcessCommandLine has ".msbuild")
+        | extend
+            RuleName = "PipeMagic Certutil Download",
+            Tactic = "Defense Evasion, Execution",
+            Technique = "T1218.010, T1140"
+        | project-reorder
+            Timestamp,
+            RuleName,
+            DeviceName,
+            Tactic,
+            Technique,
+            FileName,
+            ProcessCommandLine
+    ),
+    (
+        // Execution of payload via MSBuild with a newly observed loader mechanism
+        DeviceProcessEvents
+        | where InitiatingProcessFileName endswith "msbuild.exe" and ProcessCommandLine has ".mshi"
+        | extend
+            RuleName = "PipeMagic MSBuild Execution",
+            Tactic = "Defense Evasion, Execution",
+            Technique = "T1218.010"
+        | project-reorder
+            Timestamp,
+            RuleName,
+            DeviceName,
+            Tactic,
+            Technique,
+            FileName,
+            ProcessCommandLine,
+            InitiatingProcessCommandLine
+    ),
+    (
+        // Credential dumping via LSASS access from a masqueraded process
+        // dllhost.exe accessing lsass.exe can be legitimate. Further investigation of the parent process and context is required.
+        DeviceEvents
+        | where ActionType == "LsassProcessAccess" and InitiatingProcessFileName endswith "dllhost.exe"
+        | extend
+            RuleName = "PipeMagic LSASS Access",
+            Tactic = "Credential Access",
+            Technique = "T1003.001"
+        | project-reorder
+            Timestamp,
+            RuleName,
+            DeviceName,
+            Tactic,
+            Technique,
+            FileName,
+            InitiatingProcessFileName,
+            InitiatingProcessCommandLine
+    )
+)

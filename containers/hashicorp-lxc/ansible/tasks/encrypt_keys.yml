@@ -1,0 +1,15 @@
+---
+- name: Create keys directory
+  ansible.builtin.file:
+    path: '.tmp/encrypt_keys'
+    state: directory
+    mode: "0755"
+
+- name: Create Consul encrypt key
+  ansible.builtin.shell:
+    cmd: cat /dev/urandom | head -c 32 | base64 > .tmp/encrypt_keys/consul.txt
+    creates: .tmp/encrypt_keys/consul.txt
+- name: Create Nomad encrypt key
+  ansible.builtin.shell:
+    cmd: cat /dev/urandom | head -c 32 | base64 > .tmp/encrypt_keys/nomad.txt
+    creates: .tmp/encrypt_keys/nomad.txt

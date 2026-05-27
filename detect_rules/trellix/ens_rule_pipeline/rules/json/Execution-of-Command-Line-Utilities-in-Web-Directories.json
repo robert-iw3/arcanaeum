@@ -1,0 +1,29 @@
+[
+  {
+    "type": "expert",
+    "name": "Detect Suspicious Execution in IIS Web Root (Original Refined)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"wget.exe\" -v \"curl.exe\" -v \"nc.exe\" -v \"bash.exe\" -v \"python.exe\" -v \"perl.exe\" -v \"php.exe\" -v \"sh.exe\" }\n   }\n   Target {\n      Match FILE {\n         Include OBJECT_NAME { -v \"C:\\\\inetpub\\\\wwwroot\\\\**\" }\n         Include -access \"EXECUTE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects execution of common downloader/shell/script interpreters (wget/curl/nc/bash/python/perl/php/sh) targeting files in IIS web root (C:\\inetpub\\wwwroot\\**). Potential indicator of webshell activity or payload staging. High FP risk from legitimate web apps/scripts; tune with exclusions or combine with parent process w3wp.exe."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Webshell Command Execution from Web Server Process",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"cmd.exe\" -v \"powershell.exe\" -v \"pwsh.exe\" -v \"rundll32.exe\" -v \"cscript.exe\" -v \"wscript.exe\" -v \"mshta.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -parent_process \"w3wp.exe\" -parent_process \"httpd.exe\" -parent_process \"nginx.exe\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects IIS/Apache/Nginx worker processes (w3wp.exe, etc.) spawning suspicious command interpreters — classic webshell behavior (China Chopper, Behinder, AntSword, etc.). Very high-fidelity indicator of post-exploitation webshell activity in 2025-2026 campaigns. Tune for legitimate monitoring tools or automation."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Suspicious File Creation in IIS Web Root (Potential Webshell Drop)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n      Exclude OBJECT_NAME { -v \"w3wp.exe\" -v \"trusted_deploy_tool.exe\" }\n   }\n   Target {\n      Match FILE {\n         Include OBJECT_NAME { -v \"C:\\\\inetpub\\\\wwwroot\\\\**\" }\n         Include -access \"CREATE,WRITE\"\n         Include OBJECT_NAME { -v \"**.asp\" -v \"**.aspx\" -v \"**.php\" -v \"**.jsp\" -v \"**.ashx\" -v \"**.cfm\" }\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects creation or write to suspicious web-script extensions (.asp/.aspx/.php/.jsp/.ashx/.cfm) in IIS wwwroot by non-web-server processes — common webshell drop pattern (e.g., China Chopper one-liners). Excludes w3wp.exe to reduce noise from legitimate uploads. Tune exclusions for known upload paths or admin tools."
+  }
+]

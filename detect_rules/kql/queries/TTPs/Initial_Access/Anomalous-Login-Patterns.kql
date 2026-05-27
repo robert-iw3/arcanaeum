@@ -1,0 +1,41 @@
+// Name: Anomalous Login Patterns
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects successful user sign-ins from a country not seen in their recent history.
+//              This could indicate a compromised account being used by an attacker from an unusual
+//              location, a pattern that can result from password spray tools which mask their origin.
+// False Positive Sensitivity: Medium
+// Tags:
+// - Tactic: Initial Access
+// - Technique: T1078.004, Cloud Accounts
+
+let detection_window = 1d;
+let baseline_period = 14d;
+
+// Create a baseline of countries previously seen for each user over the last 14 days.
+let user_baseline =
+    SigninLogs
+    | where TimeGenerated between (ago(baseline_period) .. ago(detection_window))
+    | where ResultType == 0
+    | where isnotempty(UserPrincipalName) and isnotempty(LocationDetails.countryOrRegion)
+    | summarize known_countries = make_set(LocationDetails.countryOrRegion, 100) by UserPrincipalName;
+// Find recent successful sign-ins.
+SigninLogs
+| where TimeGenerated > ago(detection_window)
+| where ResultType == 0 // Successful sign-in
+| where isnotempty(UserPrincipalName) and isnotempty(LocationDetails.countryOrRegion)
+// Join with the user's baseline locations.
+| join kind=leftouter user_baseline on UserPrincipalName
+// Alert if the sign-in country is not in the user's known list.
+| where LocationDetails.countryOrRegion !in (known_countries)
+// FP Tuning: This may generate alerts for users who are traveling or using a VPN for the first time.
+// If new user sign-ins are noisy, you can filter them out by adding: | where isnotempty(known_countries)
+| project
+    TimeGenerated,
+    UserPrincipalName,
+    IPAddress,
+    AppDisplayName,
+    NewCountry = LocationDetails.countryOrRegion,
+    KnownCountries = known_countries,
+    UserAgent,
+    ConditionalAccessStatus

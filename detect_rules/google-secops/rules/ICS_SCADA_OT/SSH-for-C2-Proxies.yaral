@@ -1,0 +1,53 @@
+rule ssh_c2_or_proxy_from_ot_environment {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects outbound SSH connections from an OT asset to a public IP address. This could indicate an adversary leveraging SSH for command and control (C2) tunnels or as a proxy, a TTP highlighted by intelligence indicating 45% of OT environments have SSH communicating to publicly routable addresses. This rule requires a reference list '%ot_asset_ip_ranges' to be populated with OT network segments."
+    reference = "https://attack.mitre.org/techniques/T1090/, https://attack.mitre.org/techniques/T1572/"
+    tags = "ICS, OT, C2, PROXY, NETWORK, WINDOWS, LINUX"
+    tactic = "TA0011"
+    technique = "T1090, T1572"
+    false_positives = "Legitimate remote administration or vendor support using SSH. This rule requires tuning by populating the '%ot_asset_ip_ranges' reference list and potentially whitelisting known-good external IP addresses."
+    severity = "HIGH"
+
+  events:
+    // Event 1: High-fidelity detection of SSH tunneling commands on an OT asset
+    $ssh_tunnel.metadata.event_type = "PROCESS_LAUNCH"
+    $ssh_tunnel.principal.ip in %ot_asset_ip_ranges
+    $ssh_tunnel.principal.hostname = $hostname
+    re.regex($ssh_tunnel.target.process.file.full_path, `ssh\.exe$|plink\.exe$`) nocase
+    // Detects flags for local, remote, or dynamic port forwarding (proxying)
+    re.regex($ssh_tunnel.target.process.command_line, `\s-(L|R|D)\s`)
+
+    // Event 2: Broader detection of any SSH connection from an OT asset to a public IP
+    $ssh_conn.metadata.event_type = "NETWORK_CONNECTION"
+    $ssh_conn.principal.ip in %ot_asset_ip_ranges
+    $ssh_conn.principal.hostname = $hostname
+    $ssh_conn.target.port = 22
+    // Filter to ensure the destination is a public (non-RFC1918) IP address
+    not (
+      net.ip_in_range_cidr($ssh_conn.target.ip, "10.0.0.0/8") or
+      net.ip_in_range_cidr($ssh_conn.target.ip, "172.16.0.0/12") or
+      net.ip_in_range_cidr($ssh_conn.target.ip, "192.168.0.0/16") or
+      net.ip_in_range_cidr($ssh_conn.target.ip, "127.0.0.0/8") or
+      net.ip_in_range_cidr($ssh_conn.target.ip, "169.254.0.0/16")
+    )
+
+  match:
+    // Correlate events on the same host over a 10 minute window
+    $hostname over 10m
+
+  outcome:
+    $risk_score = 80
+    $principal_hostname = $hostname
+    // Consolidate OT asset IP from either event type
+    $ot_asset_ip = if(#ssh_tunnel > 0, array_distinct($ssh_tunnel.principal.ip), array_distinct($ssh_conn.principal.ip))
+    $external_ip = array_distinct($ssh_conn.target.ip)
+    $tunneling_commands = array_distinct($ssh_tunnel.target.process.command_line)
+    // Provide context on what triggered the detection
+    $detection_summary = if(#ssh_tunnel > 0, "High-fidelity detection: SSH tunneling command observed on OT asset.", "General detection: Outbound SSH from OT asset to public IP address.")
+
+  condition:
+    // Alert if either a specific tunneling command is seen or a general SSH connection to the internet occurs
+    $ssh_tunnel or $ssh_conn
+}

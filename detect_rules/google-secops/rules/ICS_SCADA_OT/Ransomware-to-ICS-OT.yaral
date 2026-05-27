@@ -1,0 +1,68 @@
+rule ransomware_deployment_ttps_in_ics_ot {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects common ransomware deployment TTPs in ICS/OT environments. This includes inhibiting system recovery by deleting shadow copies, clearing event logs to hide tracks, and creating ransom notes. A significant increase in ransomware attacks against industrial organizations makes detection of these precursor activities critical."
+    reference = "https://attack.mitre.org/techniques/T1490/, https://attack.mitre.org/techniques/T1486/, https://attack.mitre.org/techniques/T1070/001/"
+    tags = "ICS, OT, RANSOMWARE, WINDOWS"
+    tactic = "TA0040, TA0005"
+    technique = "T1486, T1490, T1070.001"
+    false_positives = "Legitimate administrative activity, especially from backup or system management software. Whitelisting of known administrative scripts or tools may be necessary."
+    severity = "HIGH"
+
+  events:
+    // Event for Inhibit System Recovery (T1490)
+    $inhibit_recovery.metadata.event_type = "PROCESS_LAUNCH"
+    $inhibit_recovery.principal.hostname = $hostname
+    (
+      (
+        re.regex($inhibit_recovery.target.process.file.full_path, `\\vssadmin\.exe$`) nocase
+        and re.regex($inhibit_recovery.target.process.command_line, `delete shadows`) nocase
+      ) or (
+        re.regex($inhibit_recovery.target.process.file.full_path, `\\wmic\.exe$`) nocase
+        and re.regex($inhibit_recovery.target.process.command_line, `shadowcopy delete`) nocase
+      ) or (
+        re.regex($inhibit_recovery.target.process.file.full_path, `\\wbadmin\.exe$`) nocase
+        and re.regex($inhibit_recovery.target.process.command_line, `delete catalog`) nocase
+      ) or (
+        re.regex($inhibit_recovery.target.process.file.full_path, `\\bcdedit\.exe$`) nocase
+        and re.regex($inhibit_recovery.target.process.command_line, `\/set\s.*recoveryenabled\sNo`) nocase
+      )
+    )
+
+    // Event for Clearing Windows Event Logs (T1070.001)
+    $log_clear.metadata.event_type = "PROCESS_LAUNCH"
+    $log_clear.principal.hostname = $hostname
+    (
+      (
+        re.regex($log_clear.target.process.file.full_path, `\\wevtutil\.exe$`) nocase
+        and re.regex($log_clear.target.process.command_line, `\scl\s`) nocase // " cl " for clear-log
+      ) or (
+        re.regex($log_clear.target.process.file.full_path, `\\powershell\.exe$|\\pwsh\.exe$`) nocase
+        and re.regex($log_clear.target.process.command_line, `Clear-EventLog|cel`) nocase
+      )
+    )
+
+    // Event for Ransom Note Creation (T1486)
+    $ransom_note.metadata.event_type = "FILE_CREATION"
+    $ransom_note.principal.hostname = $hostname
+    // Regex for common ransom note names and extensions
+    re.regex($ransom_note.target.file.path, `(?i)(READ_ME|README|RECOVER|RESTORE|DECRYPT|HELP|RANSOM).*\.(txt|html|hta|md)$`)
+
+  match:
+    // Correlate events on the same host over a 30 minute window
+    $hostname over 30m
+
+  outcome:
+    $risk_score = 85
+    $principal_hostname = $hostname
+    // Collect details from all potential event types for investigation
+    $inhibit_recovery_commands = array_distinct($inhibit_recovery.target.process.command_line)
+    $log_clear_commands = array_distinct($log_clear.target.process.command_line)
+    $ransom_note_paths = array_distinct($ransom_note.target.file.path)
+    $event_count = count_distinct($inhibit_recovery.metadata.id) + count_distinct($log_clear.metadata.id) + count_distinct($ransom_note.metadata.id)
+
+  condition:
+    // Alert on high-confidence ransom note creation, or a combination of at least two other suspicious TTPs.
+    $ransom_note or ( #inhibit_recovery + #log_clear >= 2 )
+}

@@ -1,0 +1,43 @@
+title: Anomalous Grid Fluctuations Indicating Potential Manipulation
+status: experimental
+description: >-
+  Detects anomalous voltage or frequency fluctuations in an ICS/OT environment, which could be an early indicator of a cyber-physical attack or system instability.
+  As highlighted in analyses of real-world grid events, abnormal voltage levels and oscillations often precede major outages and can be a symptom of control system manipulation (e.g., by modifying setpoints or controller logic).
+  This detection requires logs from process historians or other OT monitoring systems that record physical process values.
+references:
+author: RW
+date: 2025-08-18
+tags:
+  - attack.impair_process_control
+  - attack.t0831
+  - attack.t0836
+  - ics.electric
+logsource:
+  category: process_control
+  product: historian
+detection:
+  # This rule is a template. The field names (e.g., tag_name, tag_value) and thresholds are placeholders
+  # and MUST be adapted to the specific process historian or SCADA logging schema in use.
+
+  # comment: Monitor for voltage readings that exceed the established safe operating envelope.
+  voltage_high:
+    tag_name|contains: 'voltage' # Placeholder for the sensor/tag name field.
+    tag_value|gt: '1.05' # Placeholder: Example for Per-Unit (pu) voltage. Adjust threshold and units.
+  voltage_low:
+    tag_name|contains: 'voltage'
+    tag_value|lt: '0.95' # Placeholder: Example for Per-Unit (pu) voltage. Adjust threshold and units.
+
+  # comment: Monitor for grid frequency that deviates from the nominal value (e.g., 50Hz or 60Hz).
+  frequency_high:
+    tag_name|contains: 'frequency'
+    tag_value|gt: '60.5' # Placeholder: Example for a 60Hz system. Adjust for your nominal frequency and deadband.
+  frequency_low:
+    tag_name|contains: 'frequency'
+    tag_value|lt: '59.5' # Placeholder: Example for a 60Hz system. Adjust for your nominal frequency and deadband.
+
+  condition: 1 of them
+falsepositives:
+  - Legitimate grid instability caused by non-malicious events (e.g., physical equipment failure, weather events, sudden changes in load or generation).
+  - Normal, short-lived fluctuations during system startup, shutdown, or switching operations.
+  - Incorrectly configured thresholds that do not match the system's normal operating parameters.
+level: medium

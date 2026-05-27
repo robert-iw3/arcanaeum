@@ -1,0 +1,60 @@
+rule kubernetes_network_policy_bypass_and_spoofing {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects the creation of Kubernetes pods with configurations that can bypass network policies (e.g., hostNetwork: true) or enable network-level attacks like ARP/DNS spoofing (e.g., CAP_NET_RAW capability). It also detects the execution of common network spoofing tools inside a container. These techniques are used for lateral movement and man-in-the-middle attacks within the cluster."
+    tactic = "TA0005, TA0008"
+    technique = "T1562.004, T1557.002, T1040, T1213"
+    false_positives = "Legitimate network monitoring tools (e.g., Cilium, Istio), CNI components (e.g., Calico), or ingress controllers may use `hostNetwork` or `CAP_NET_RAW`. These should be excluded by namespace, image name, or service account. The rule attempts to filter common system namespaces, but further tuning may be required."
+    tags = "KUBERNETES, NETWORKING, LATERAL_MOVEMENT, ARP_SPOOFING, DNS_SPOOFING"
+
+  events:
+    // Event 1: Detects a pod created with the CAP_NET_RAW capability, enabling packet spoofing.
+    $pod_with_net_raw.metadata.event_type = "KUBERNETES_AUDIT"
+    $pod_with_net_raw.additional.verb in ("create", "update")
+    $pod_with_net_raw.target.resource.resource_subtype = "pods"
+    // Check for CAP_NET_RAW in either the pod-level or container-level security context.
+    (
+      "CAP_NET_RAW" in $pod_with_net_raw.additional.request.spec.securityContext.capabilities.add or
+      "CAP_NET_RAW" in $pod_with_net_raw.additional.request.spec.containers.securityContext.capabilities.add
+    )
+
+    // Event 2: Detects a pod created with hostNetwork, which bypasses CNI network policies.
+    $pod_with_host_network.metadata.event_type = "KUBERNETES_AUDIT"
+    $pod_with_host_network.additional.verb in ("create", "update")
+    $pod_with_host_network.target.resource.resource_subtype = "pods"
+    $pod_with_host_network.additional.request.spec.hostNetwork = true
+    // Exclude common system namespaces where hostNetwork is expected for CNI plugins, etc.
+    not $pod_with_host_network.target.namespace in ("kube-system", "calico-system", "tigera-operator", "kube-public")
+
+    // Event 3: Detects execution of common network spoofing tools inside a container.
+    $spoofing_tool.metadata.event_type = "PROCESS_LAUNCH"
+    // Ensure the process is running inside a container.
+    $spoofing_tool.target.process.container.id != ""
+    // Look for common network spoofing/packet crafting tools.
+    (
+      re.regex($spoofing_tool.target.process.file.full_path, `/(arpspoof|ettercap|dsniff)$`) or
+      // Python with Scapy is a common combination for custom spoofing scripts.
+      (
+        re.regex($spoofing_tool.target.process.file.full_path, `/python\d?$`) and
+        re.regex($spoofing_tool.target.process.command_line, `scapy`)
+      )
+    )
+
+  condition:
+    $pod_with_net_raw or $pod_with_host_network or $spoofing_tool
+
+  outcome:
+    // Set a risk score. This activity is suspicious and warrants investigation.
+    $risk_score = 60
+    // Consolidate fields from the different event types for uniform alerting.
+    $detection_type = if($pod_with_net_raw, "Pod Created with CAP_NET_RAW", if($pod_with_host_network, "Pod Created with hostNetwork to Bypass Policy", "Network Spoofing Tool Execution"))
+    $principal_user = if($spoofing_tool, $spoofing_tool.principal.user.userid, if($pod_with_net_raw, $pod_with_net_raw.principal.user.userid, $pod_with_host_network.principal.user.userid))
+    $principal_ip = if($spoofing_tool, array_distinct($spoofing_tool.principal.ip), if($pod_with_net_raw, array_distinct($pod_with_net_raw.principal.ip), array_distinct($pod_with_host_network.principal.ip)))
+    $principal_hostname = if($spoofing_tool, $spoofing_tool.principal.hostname, if($pod_with_net_raw, $pod_with_net_raw.principal.hostname, $pod_with_host_network.principal.hostname))
+    $target_pod_name = if($pod_with_net_raw, $pod_with_net_raw.target.resource.name, if($pod_with_host_network, $pod_with_host_network.target.resource.name, ""))
+    $target_pod_namespace = if($pod_with_net_raw, $pod_with_net_raw.target.namespace, if($pod_with_host_network, $pod_with_host_network.target.namespace, ""))
+    $image = if($spoofing_tool, array_distinct($spoofing_tool.target.process.container.image.path), if($pod_with_net_raw, array_distinct($pod_with_net_raw.additional.request.spec.containers.image), array_distinct($pod_with_host_network.additional.request.spec.containers.image)))
+    $command_line = if($spoofing_tool, $spoofing_tool.target.process.command_line, "")
+    $container_id = if($spoofing_tool, $spoofing_tool.target.process.container.id, "")
+}

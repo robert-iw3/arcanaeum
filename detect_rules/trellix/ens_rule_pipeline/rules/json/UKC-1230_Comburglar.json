@@ -1,0 +1,41 @@
+[
+  {
+    "type": "expert",
+    "name": "Detect Comburglar High-Fidelity Imphash (c4f69d93110080cc2432c9cc3d2c58ab)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match FILE {\n         Include -hash \"c4f69d93110080cc2432c9cc3d2c58ab\"\n         Include -access \"CREATE,EXECUTE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "Critical",
+    "enabled": true,
+    "description": "Detects creation or execution of files matching the exact imphash c4f69d93110080cc2432c9cc3d2c58ab — high-fidelity indicator for Comburglar (UKC-1230) malware loader (2026 Black Hills Infosec analysis). Extremely specific; very low false positive rate. This is a primary trigger for alerts."
+  },
+  {
+    "type": "firewall",
+    "name": "Detect Comburglar C2 DNS Queries (techdataservice.us)",
+    "application": "**",
+    "direction": "out",
+    "protocol": "UDP",
+    "port": "53",
+    "action": "Report",
+    "severity": "Critical",
+    "enabled": true,
+    "description": "Detects outbound DNS queries (UDP 53) to the known Comburglar C2 domain techdataservice.us — high-fidelity network indicator from 2026 analysis. Domain-specific filtering not supported in ENS Firewall; use Web Control for domain blocking or enrichment. Combine with high-fidelity imphash rule for maximum confidence."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Suspicious GUID-Named DLL Creation (Comburglar COM Hijacking)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match FILE {\n         Include OBJECT_NAME { -v \"C:\\\\ProgramData\\\\Microsoft\\\\Windows\\\\**\" -v \"C:\\\\Users\\\\**\\\\AppData\\\\Local\\\\Microsoft\\\\Windows\\\\**\" }\n         Include -access \"CREATE,WRITE\"\n         Include OBJECT_NAME { -v \"*.dll\" }\n         Include -file_name_regex \"\\{[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}\\}\\.dll$\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects creation/write of DLL files with GUID-only names (e.g., {xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}.dll) in ProgramData\\Microsoft\\Windows or user AppData\\Local\\Microsoft\\Windows paths — signature of Comburglar COM hijacking persistence. High-fidelity behavioral indicator; low false positives outside development environments. Tune for rare legitimate GUID-named DLLs."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Suspicious dllhost.exe Execution from svchost (Comburglar COM Surrogate)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"dllhost.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -parent_process \"svchost.exe\"\n         Include -command_line \"*/Processid:*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects dllhost.exe (COM surrogate) launched by svchost.exe with /Processid argument — matches Comburglar execution via hijacked User_Feed_Synchronization scheduled task. High-fidelity when combined with GUID DLL creation. Tune for legitimate COM surrogate activity (e.g., exclude known scheduled task parents if needed)."
+  }
+]

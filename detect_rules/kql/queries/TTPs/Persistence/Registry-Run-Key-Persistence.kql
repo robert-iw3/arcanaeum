@@ -1,0 +1,49 @@
+// Name: Registry Run Key Persistence in Suspicious Location
+// Author: RW
+// Date: 2025-08-06
+// Tactic: Persistence
+// Technique: T1547.001
+// MITRE: https://attack.mitre.org/techniques/T1547/001/
+// Description:
+// This rule detects the creation or modification of a registry run key that points to an executable or script in a suspicious, non-standard location.
+// Adversaries use registry run keys (e.g., Run, RunOnce) to automatically execute malware at system startup or user logon.
+// Placing the payload in a user-writable or temporary directory, as seen in the provided research with a Metasploit payload in AppData\Local\Temp,
+// is a common tactic to evade detection and maintain persistence.
+
+// Define the target registry keys for Run/RunOnce persistence
+let run_keys = dynamic([
+    @'\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
+    @'\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce',
+    @'\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer\Run',
+    @'\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Run',
+    @'\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\RunOnce'
+]);
+
+// Define suspicious paths for the executable/script
+let suspicious_paths = dynamic([
+    @'C:\Users\',
+    @'C:\ProgramData\',
+    @'C:\Windows\Temp\',
+    @'C:\PerfLogs\',
+    @'C:\$Recycle.Bin\',
+    @'\AppData\Local\Temp\'
+]);
+
+DeviceRegistryEvents
+| where ActionType == "RegistryValueSet"
+// Check if the registry key path ends with any of the known run keys
+| where RegistryKey has_any (run_keys)
+// Check if the value data (path to executable) points to a suspicious location
+| where RegistryValueData has_any (suspicious_paths)
+// False Positive Tuning: Legitimate software, especially installers or updaters, may temporarily use these locations.
+// Exclude known good software by filtering on the initiating process or the value data itself.
+// For example: | where not(InitiatingProcessFileName =~ "msiexec.exe" and RegistryValueData contains "update")
+| project
+    TimeGenerated = Timestamp,
+    DeviceName,
+    AccountName = InitiatingProcessAccountName,
+    InitiatingProcess = InitiatingProcessFileName,
+    CommandLine = InitiatingProcessCommandLine,
+    RegistryKey,
+    RegistryValueName,
+    RegistryValueData

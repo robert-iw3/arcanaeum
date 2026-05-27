@@ -1,0 +1,55 @@
+//    Administrative DoS via Spoofed Traffic
+//    This attack leverages spoofed traffic to trigger abuse reports, potentially leading to account termination or IP blocklisting.
+//    Detecting this pattern is crucial for protecting legitimate users and services from administrative disruption.
+//    Tactics = "Denial of Service, Defense Evasion"
+//    Techniques = "Network Denial of Service, IP Address Spoofing"
+//    Author = "RW"
+//    Date = "2025-08-14"
+
+let timeframe = 30m;
+// This threshold defines the minimum number of SYN packets sent from a single source to a single destination to be considered suspicious.
+// Tune this value based on your environment's baseline to avoid false positives from legitimate connection timeouts or network issues.
+let syn_threshold = 1000;
+// This ratio defines the maximum percentage of SYN-ACKs received compared to SYNs sent. A very low ratio suggests the SYN-ACKs are not being returned to the sender, a strong indicator of source IP spoofing.
+let syn_ack_ratio_threshold = 0.05; // 5%
+
+// This query requires firewall logs with TCP flag information. The fields used here ('AdditionalExtensions' for flags) may need to be adapted
+// based on your specific firewall log format (e.g., DeviceCustomString1, TcpFlags).
+// It identifies hosts sending a high number of TCP SYN packets without receiving corresponding SYN-ACKs.
+
+// Collect all outbound TCP packets with only the SYN flag set.
+let OutboundSYNs = CommonSecurityLog
+| where TimeGenerated > ago(timeframe)
+| where CommunicationDirection == "Outbound"
+| where Protocol == "TCP"
+// The method for checking TCP flags can vary. This example checks for 'SYN' in a string field while excluding others.
+// Adjust this logic to match how your logs represent TCP flags (e.g., using bitwise operations on a flag field).
+| where AdditionalExtensions has "SYN" and not(AdditionalExtensions has "ACK" or AdditionalExtensions has "FIN" or AdditionalExtensions has "RST")
+| summarize SentSYNs = count(), StartTime = min(TimeGenerated), EndTime = max(TimeGenerated) by SourceIP, DestinationIP
+| where SentSYNs > syn_threshold;
+
+// Collect all inbound TCP packets with SYN and ACK flags set.
+let InboundSYNACKs = CommonSecurityLog
+| where TimeGenerated > ago(timeframe)
+| where CommunicationDirection == "Inbound"
+| where Protocol == "TCP"
+| where AdditionalExtensions has "SYN" and AdditionalExtensions has "ACK"
+| summarize ReceivedSYNACKs = count() by SourceIP, DestinationIP;
+
+// Correlate the outbound SYNs with inbound SYN-ACKs to find imbalances.
+OutboundSYNs
+| join kind=leftouter (
+    InboundSYNACKs
+  ) on $left.SourceIP == $right.DestinationIP and $left.DestinationIP == $right.SourceIP
+| extend ReceivedSYNACKs = iif(isempty(ReceivedSYNACKs), 0, ReceivedSYNACKs)
+| extend SynAckRatio = todouble(ReceivedSYNACKs) / SentSYNs
+// Filter for flows where the SYN-ACK ratio is below our threshold.
+| where SynAckRatio < syn_ack_ratio_threshold
+| project
+    StartTime,
+    EndTime,
+    ProxyHost = SourceIP,
+    TargetHost = DestinationIP,
+    SentSYNs,
+    ReceivedSYNACKs,
+    SynAckRatio

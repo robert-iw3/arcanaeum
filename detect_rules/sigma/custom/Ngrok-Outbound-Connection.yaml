@@ -1,0 +1,29 @@
+title: Ngrok Outbound Connection
+id: e04df146-efe9-4b29-b731-2a9f89c74ce9
+status: experimental
+description: >-
+  Detects outbound network connections or DNS queries to Ngrok domains. Ngrok is a tunneling service that can be abused by threat actors
+  to exfiltrate data or establish command and control channels from within a compromised network, including cloud environments.
+references:
+  - https://blog.talosintelligence.com/duping-cloud-functions-an-emerging-serverless-attack-vector/
+author: RW
+date: 2025-08-20
+tags:
+  - attack.t1071.001
+  - attack.exfiltration
+  - attack.command_and_control
+logsource:
+    # This detection can be applied to various network log sources like DNS, proxy, or general network traffic logs.
+  category: proxy
+detection:
+  selection:
+        # The following fields cover common log sources. Adapt to your environment's field names.
+    - c-uri|contains: '.ngrok-free.app'
+    - url.domain|endswith: '.ngrok-free.app'
+    - destination.domain|endswith: '.ngrok-free.app'
+    - dns.question.name|endswith: '.ngrok-free.app'
+  condition: selection
+falsepositives:
+  - Legitimate use of Ngrok by developers for testing, demos, or exposing local services to the internet.
+  - This detection may require tuning to exclude known developer systems or projects.
+level: medium

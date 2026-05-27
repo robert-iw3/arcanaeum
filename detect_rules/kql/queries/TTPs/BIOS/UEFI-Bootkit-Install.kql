@@ -1,0 +1,45 @@
+// Name: UEFI Bootkit Installation Attempt
+// Author: RW
+// Date: 2025-08-12
+// Description: Detects the creation or modification of files and folders in the EFI System Partition (ESP), which could
+//              indicate the installation of a UEFI bootkit.
+// Tactic: Persistence, Defense Evasion
+// Technique: T1542.003, T1542.001
+// False Positive Sensitivity: Medium
+// References: https://github.com/TheMalwareGuardian/Abyss, https://github.com/TheMalwareGuardian/Benthic
+
+let known_updaters = dynamic([
+    "TiWorker.exe",
+    "TrustedInstaller.exe",
+    "Bcdedit.exe",
+    "bootim.exe",
+    "setup.exe",
+    "dism.exe"
+]);
+// Look for file or folder creation events in the EFI System Partition (ESP)
+DeviceFileEvents
+// Look for file creation, which includes overwriting existing files, and folder creation.
+| where ActionType in ("FileCreated", "FolderCreated")
+// The EFI partition is commonly mounted under a path containing \EFI\ or \boot\.
+| where FolderPath has_any (@"\EFI\", @"\boot\")
+// Exclude known legitimate processes that perform system updates or configuration changes.
+// FP Note: This list may need to be expanded based on your environment's specific tools (e.g., firmware update utilities from Dell, HP, etc.).
+| where not(InitiatingProcessFileName in~ (known_updaters) or InitiatingProcessFolderPath endswith @"\MoUsoCoreWorker.exe")
+// Filter for suspicious activities: new EFI executables, modification of the main boot manager, or creation of non-standard directories.
+| where
+    // 1. A new executable file (.efi) is created.
+    (ActionType == "FileCreated" and FileName endswith ".efi") or
+    // 2. The primary Windows Boot Manager is modified.
+    (ActionType == "FileCreated" and FileName =~ "bootmgfw.efi" and FolderPath has_all (@"\EFI\", @"\Microsoft\Boot\")) or
+    // 3. A new, potentially suspicious staging directory is created.
+    // FP Note: Exclude known vendor or OS folder names. This list may require tuning.
+    (ActionType == "FolderCreated" and not(FileName in~ ("Microsoft", "Boot", "OEM", "Dell", "HP", "Lenovo", "Insyde")))
+| project-reorder
+    TimeGenerated,
+    DeviceName,
+    ActionType,
+    FileName,
+    FolderPath,
+    SHA1,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine

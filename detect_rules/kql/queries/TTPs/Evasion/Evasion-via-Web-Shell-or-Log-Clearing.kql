@@ -1,0 +1,42 @@
+// Name: Defense Evasion via Web Shell or Log Clearing
+// Author: RW
+// Date: 2025-08-19
+// MITRE ATT&CK: TA0005 (Defense Evasion), T1211 (Exploitation for Defense Evasion), T1070.001 (Clear Windows Event Logs)
+
+let lookback = 1d;
+// List of common web server processes.
+let webServers = dynamic(["w3wp.exe", "httpd.exe", "nginx.exe", "tomcat.exe", "caddy.exe", "lighttpd.exe", "php-cgi.exe"]);
+// List of common shell and scripting processes.
+let shells = dynamic(["cmd.exe", "powershell.exe", "pwsh.exe", "sh.exe", "bash.exe", "cscript.exe", "wscript.exe"]);
+
+DeviceProcessEvents
+| where Timestamp > ago(lookback)
+| where
+    // Pattern 1: Potential Web Shell (T1211) - A web server process spawning a shell.
+    (InitiatingProcessFileName in~ (webServers) and ProcessFileName in~ (shells))
+    or
+    // Pattern 2: Indicator Removal (T1070.001) - Clearing Windows Event Logs.
+    (
+        (ProcessFileName =~ "wevtutil.exe" and ProcessCommandLine has_any ("cl", "clear-log"))
+        or
+        (ProcessFileName in~ ("powershell.exe", "pwsh.exe") and ProcessCommandLine has "Clear-EventLog")
+    )
+// False Positive Tuning:
+// For web shells (Pattern 1), legitimate application pools or admin scripts may spawn shells. Exclude known-good command lines or parent-child relationships.
+// For log clearing (Pattern 2), this may be performed by administrators, though it is uncommon. Exclude known admin accounts or scheduled maintenance scripts.
+// Example: | where AccountName !in ("admin_account1", "sys_maint") and not (InitiatingProcessFileName =~ "w3wp.exe" and ProcessCommandLine has "app_deployment.ps1")
+| extend
+    DetectionPattern = case(
+        InitiatingProcessFileName in~ (webServers), "Potential Web Shell (T1211)",
+        "Indicator Removal - Log Clearing (T1070.001)"
+    )
+| project
+    AlertTime = Timestamp,
+    DeviceName,
+    DeviceId,
+    AccountName,
+    AccountDomain,
+    DetectionPattern,
+    ParentProcess = InitiatingProcessFileName,
+    ChildProcess = ProcessFileName,
+    CommandLine = ProcessCommandLine

@@ -1,0 +1,72 @@
+// This rule detects a process behavior pattern indicative of a Cobalt Strike BOF stealing tokens and then generating Kerberos tickets.
+// It correlates LSASS process access (for token theft) with subsequent Kerberos network traffic from the same process.
+// Author: RW
+// MITRE ATT&CK Tactics: Credential Access, Defense Evasion, Persistence, Lateral Movement
+// MITRE ATT&CK Techniques: T1003.001, T1055, T1134.001, T1558.003, T1547
+
+
+// Define a list of common processes used for injection by Cobalt Strike.
+// This list can be tuned to reduce false positives based on your environment.
+let injection_targets = dynamic([
+    "rundll32.exe",
+    "regsvr32.exe",
+    "svchost.exe",
+    "dllhost.exe",
+    "wermgr.exe",
+    "werfault.exe",
+    "explorer.exe",
+    "powershell.exe",
+    "msiexec.exe"
+]);
+// Find processes that accessed LSASS, which is a prerequisite for token theft.
+let lsass_access_events =
+    DeviceEvents
+    | where Timestamp > ago(timeframe)
+    // Look for specific events indicating access to the LSASS process memory.
+    | where ActionType has "LsassProcessAccess" or (ActionType == "OpenProcess" and TargetProcessFileName =~ "lsass.exe")
+    // Focus on processes that are common injection targets and not typical LSASS clients.
+    | where InitiatingProcessFileName in (injection_targets)
+    // FP Tuning: Exclude known legitimate processes that may access LSASS.
+    // For example, WMI Provider Host is a common source of benign activity.
+    | where not(InitiatingProcessFolderPath has_any (@"C:\Windows\System32\wbem\", @"C:\Windows\SysWOW64\wbem\"))
+    | project
+        LsassAccessTime = Timestamp,
+        DeviceId,
+        DeviceName,
+        InitiatingProcessId,
+        InitiatingProcessFileName,
+        InitiatingProcessFolderPath,
+        InitiatingProcessCommandLine;
+// Find subsequent Kerberos network activity from the same processes.
+let kerberos_traffic_events =
+    DeviceNetworkEvents
+    | where Timestamp > ago(timeframe)
+    // Kerberos authentication traffic uses TCP port 88.
+    | where RemotePort == 88 and Protocol == "TCP"
+    | project
+        NetworkEventTime = Timestamp,
+        DeviceId,
+        InitiatingProcessId = ProcessId,
+        RemoteIP,
+        RemoteUrl;
+// Join the LSASS access events with the Kerberos network events.
+kerberos_traffic_events
+| join kind=inner (
+    lsass_access_events
+) on DeviceId, InitiatingProcessId
+// Ensure the Kerberos activity happened *after* the LSASS access within a short timeframe (e.g., 5 minutes).
+| where NetworkEventTime > LsassAccessTime and (NetworkEventTime - LsassAccessTime) < 5m
+| project-reorder
+    LsassAccessTime,
+    NetworkEventTime,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessId,
+    InitiatingProcessCommandLine,
+    RemoteIP,
+    RemoteUrl,
+    DeviceId
+| extend
+    timestamp = LsassAccessTime,
+    AccountCustomEntity = InitiatingProcessId,
+    HostCustomEntity = DeviceName

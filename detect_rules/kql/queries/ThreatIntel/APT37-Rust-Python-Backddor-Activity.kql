@@ -1,0 +1,85 @@
+// Name: APT37 Rustonotto, Chinotto, and FadeStealer Activity
+// Author: RW
+// Date: 2025-09-08
+// Description: Detects TTPs associated with the APT37 campaign involving Rustonotto, Chinotto, and FadeStealer malware.
+// This includes specific file names, paths, registry keys, process command lines, and C2 communication patterns.
+// References: https://www.zscaler.com/blogs/security-research/apt37-targets-windows-rust-backdoor-and-python-loader
+// Tactics: Persistence, Execution, Defense Evasion, Collection, Command and Control, Exfiltration
+// Techniques: T1053.005, T1547.001, T1218.005, T1059.001, T1055.013, T1560.001, T1071.001, T1132.001, T1041
+
+let suspiciousHashes = dynamic([
+    "b9900bef33c6cc9911a5cd7eeda8e093",
+    "7967156e138a66f3ee1bfce81836d8d0",
+    "77a70e87429c4e552649235a9a2cf11a",
+    "04b5e068e6f0079c2c205a42df8a3a84",
+    "d2b34b8bfafd6b17b1cf931bb3fdd3db",
+    "3d6b999d65c775c1d27c8efa615ee520",
+    "89986806a298ffd6367cf43f36136311",
+    "4caa44930e5587a0c9914bda9d240acc"
+]);
+let fadeStealerFolders = dynamic([
+    "\\VSTelems_Fade\\NgenPdbk\\",
+    "\\VSTelems_Fade\\NgenPdbc\\",
+    "\\VSTelems_Fade\\NgenPdbm\\",
+    "\\VSTelems_FadeOut\\",
+    "\\VSTelems_FadeIn\\"
+]);
+let fadeStealerRarPrefix = dynamic([
+    "watch_",
+    "usb_",
+    "data_"
+]);
+let suspiciousFileNames = dynamic([
+    "3HNoWZd.exe",
+    "wonder.cab",
+    "tele_update.exe",
+    "tele.conf",
+    "tele.dat",
+    "Password.chm",
+    "1.html"
+]);
+// Detect based on file hashes
+let hashMatches = union DeviceFileEvents, DeviceProcessEvents
+| where MD5 in (suspiciousHashes)
+| extend RuleName = "APT37 File Hash IOC", Tactic = "Execution", Technique = "T1204.002";
+// Detect FadeStealer artifact creation
+let fileArtifacts = DeviceFileEvents
+| where
+    // Look for specific file names in ProgramData
+    (FolderPath has "C:\\ProgramData" and FileName in (suspiciousFileNames)) or
+    // Look for FadeStealer staging folders and files
+    (FolderPath has_any (fadeStealerFolders)) or
+    // Look for FadeStealer RAR archive patterns
+    (FileName has_any (fadeStealerRarPrefix) and FileName endswith ".rar")
+| extend RuleName = "APT37 FadeStealer File Artifacts", Tactic = "Collection", Technique = "T1560.001";
+// Detect suspicious process executions
+let processArtifacts = DeviceProcessEvents
+| where
+    // Detect scheduled task creation for persistence
+    (ProcessCommandLine has "schtasks" and ProcessCommandLine has "/create" and ProcessCommandLine has "MicrosoftUpdate" and ProcessCommandLine has "3HNoWZd.exe") or
+    // Detect mshta proxy execution of remote HTA
+    (FileName =~ "mshta.exe" and ProcessCommandLine has "http") or
+    // Detect CAB file expansion in ProgramData
+    (InitiatingProcessFileName =~ "cmd.exe" and FileName =~ "expand.exe" and ProcessCommandLine has "c:\\programdata\\wonder.cab") or
+    // Detect execution of FadeStealer loader
+    (FileName =~ "tele_update.exe" and FolderPath has "c:\\programdata\\")
+| extend RuleName = "APT37 Suspicious Process Execution", Tactic = "Execution", Technique = "T1053.005, T1218.005";
+// Detect registry modification for persistence
+let registryArtifacts = DeviceRegistryEvents
+| where ActionType == "RegistryValueSet"
+    and RegistryKey has @"\Software\Microsoft\Windows\CurrentVersion\Run"
+    and RegistryValueName =~ "OnedriveStandaloneUpdater"
+    // The command uses mshta to download and execute a payload
+    and RegistryValueData has "mshta" and RegistryValueData has "http"
+| extend RuleName = "APT37 Registry Run Key Persistence", Tactic = "Persistence", Technique = "T1547.001";
+// Detect C2 communication patterns
+let networkArtifacts = DeviceNetworkEvents
+| where ActionType == "NetworkConnection"
+    and RemoteUrl has "http"
+    // This pattern is specific to Rustonotto, Chinotto, and FadeStealer C2
+    and RemoteUrl has "U=" and (RemoteUrl has "R=" or RemoteUrl has "_file=")
+// FP Tuning: The C2 parameters 'U=' and 'R=' might be generic. Consider adding filters for destination IP/domain or process if false positives occur.
+| extend RuleName = "APT37 C2 Communication Pattern", Tactic = "Command and Control", Technique = "T1071.001";
+// Union all detection methods
+union isfuzzy=true hashMatches, fileArtifacts, processArtifacts, registryArtifacts, networkArtifacts
+| extend timestamp = TimeGenerated, AccountCustomEntity = AccountName, HostCustomEntity = DeviceName

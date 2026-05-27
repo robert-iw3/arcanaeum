@@ -1,0 +1,51 @@
+// Name: Potential Data Exfiltration Over C2 Channel
+// Description: Detects processes with a high ratio of outbound to inbound network traffic over common web ports (80, 443).
+// This behavior can indicate data exfiltration over a C2 channel, a technique used by info-stealers like StealC V2.
+// Author: RW
+// Date: 2025-08-18
+// MITRE TTPs: T1041, T1071.001
+
+let time_window = 10m;
+let min_bytes_out = 10000; // Minimum bytes sent to be considered significant (10 KB)
+let exfil_ratio_threshold = 10; // Outbound traffic should be at least 10x inbound traffic
+
+// FP Filtering: Exclude common browsers and legitimate applications that may upload data.
+// This list is critical for tuning and should be adapted to your environment.
+let process_allowlist = dynamic([
+    "msedge.exe", "chrome.exe", "firefox.exe", "iexplore.exe",
+    "teams.exe", "onedrive.exe", "outlook.exe",
+    "svchost.exe", "backgroundtaskhost.exe", "wudfhost.exe",
+    "compatelrunner.exe", "officeclicktorun.exe"
+]);
+
+DeviceNetworkEvents
+| where TimeGenerated > ago(time_window)
+| where ActionType == "ConnectionSuccess" and RemotePort in (80, 443)
+// Focus on external communication
+| where isnotempty(RemoteIP) and not(ipv4_is_private(RemoteIP))
+// Exclude known legitimate processes
+| where InitiatingProcessFileName !in (process_allowlist)
+// Aggregate network traffic per process and destination over the time window
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    TotalBytesOut = sum(TotalBytesSent),
+    TotalBytesIn = sum(TotalBytesReceived),
+    RemoteIPs = make_set(RemoteIP)
+    by DeviceId, DeviceName, InitiatingProcessFileName, InitiatingProcessId
+// Filter for connections with significant data exfiltration characteristics
+| where TotalBytesOut > min_bytes_out
+// Calculate the exfiltration ratio, handling cases where inbound bytes is zero.
+| extend ExfilRatio = iff(TotalBytesIn > 0, todouble(TotalBytesOut) / TotalBytesIn, todouble(TotalBytesOut))
+// Trigger alert if the exfiltration ratio exceeds the defined threshold
+| where ExfilRatio > exfil_ratio_threshold
+| project
+    StartTime,
+    EndTime,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessId,
+    TotalBytesOut,
+    TotalBytesIn,
+    ExfilRatio,
+    RemoteIPs

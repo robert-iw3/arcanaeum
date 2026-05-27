@@ -1,0 +1,79 @@
+// Name: Privileged Azure AD Role Assignment or Credential Addition
+// Author: RW
+// Date: 2025-08-31
+// Description: Detects the assignment of high-privilege roles to Azure AD principals or the addition of new credentials to a
+// Service Principal/Application. These actions can be used for privilege escalation and persistence.
+// Tactic: Privilege Escalation, Persistence
+// Technique: T1078.004, T1098.001
+
+// Set the lookback time for the detection.
+let lookback = 1d;
+// Define a list of trusted users or service principals that are allowed to perform these actions.
+// This list should be populated with known administrative and automation accounts to reduce false positives.
+let trustedCallers = dynamic([]); // e.g. dynamic(["admin@example.com", "service-principal-guid"])
+// Define a list of high-privilege role GUIDs.
+let privilegedRoleIds = dynamic([
+    "8e3af657-a8ff-443c-a75c-2fe8c4bcb635", // Owner
+    "b24988ac-6180-42a0-ab88-20f7382dd24c", // Contributor
+    "18d7d88d-d35e-4fb5-b5fe-f169143e10e2", // User Access Administrator
+    "e835a43e-115c-4576-895a-ca0611379b34"  // Privileged Role Administrator
+]);
+
+// Detects assignment of privileged roles.
+let PrivilegedRoleAssignments = AzureActivity
+| where TimeGenerated > ago(lookback)
+| where OperationNameValue == "MICROSOFT.AUTHORIZATION/ROLEASSIGNMENTS/WRITE"
+| where ActivityStatusValue == "Succeeded"
+// Exclude assignments initiated by PIM, a common source of legitimate role assignments.
+| where not(Caller has "MS-PIM")
+| where Caller !in (trustedCallers)
+| extend Properties = todynamic(Properties)
+| extend RoleDefinitionId = tostring(Properties.roleDefinitionId)
+| extend RoleId = tostring(split(RoleDefinitionId, '/')[-1])
+| where RoleId in (privilegedRoleIds)
+| extend PrincipalId = tostring(Properties.principalId)
+| extend PrincipalType = tostring(Properties.principalType)
+| extend Scope = tostring(Properties.scope)
+| project
+    TimeGenerated,
+    Activity = "Privileged Role Assigned",
+    Tactic = "Privilege Escalation, Persistence",
+    Technique = "T1098.001",
+    User = Caller,
+    UserIpAddress = CallerIpAddress,
+    TargetPrincipalId = PrincipalId,
+    TargetPrincipalType = PrincipalType,
+    Details = strcat("Assigned Role ID: ", RoleId),
+    TargetResource = Scope,
+    CorrelationId;
+
+// Detects when new credentials are added to a Service Principal or Application.
+let NewSPNCredentials = AuditLogs
+| where TimeGenerated > ago(lookback)
+| where LoggedByService == "Core Directory"
+| where Category == "ApplicationManagement"
+| where OperationName in ("Update ServicePrincipal", "Update Application")
+| extend InitiatingUser = tostring(InitiatedBy.user.userPrincipalName)
+| where isnotempty(InitiatingUser) and InitiatingUser !in (trustedCallers)
+| mv-expand TargetResource = TargetResources
+| where isnotempty(TargetResource.modifiedProperties)
+| mv-expand ModifiedProperty = TargetResource.modifiedProperties
+// This identifies when a credential (key or password) has been added or updated.
+| where ModifiedProperty.displayName == "Credentials" and isnotempty(tostring(ModifiedProperty.newValue))
+| extend TargetObjectId = tostring(TargetResource.id)
+| extend TargetObjectName = tostring(TargetResource.displayName)
+| project
+    TimeGenerated,
+    Activity = "New Credential Added to Service Principal/Application",
+    Tactic = "Privilege Escalation, Persistence",
+    Technique = "T1098.001",
+    User = InitiatingUser,
+    UserIpAddress = tostring(InitiatedBy.ip.ipAddress),
+    TargetPrincipalId = TargetObjectId,
+    TargetPrincipalType = tostring(TargetResource.type),
+    Details = strcat("New credentials added to '", TargetObjectName, "'"),
+    TargetResource = TargetObjectId,
+    CorrelationId;
+
+// Combine the results from both queries.
+union PrivilegedRoleAssignments, NewSPNCredentials

@@ -1,0 +1,53 @@
+// ZTNA Configuration or Token Theft via Unauthorized Process Access
+// author: RW
+// description: Detects when a non-standard process accesses sensitive ZTNA configuration files or registry keys.
+//              This could indicate an attacker attempting to steal credentials, tokens, or configuration data for
+//              replay attacks, as described in the "Zero Trust - Total Bust" research. This detection requires that
+//              System Access Control Lists (SACLs) are enabled for the specified objects to generate Security Event ID 4663.
+// creationDate 2025-08-11
+// tags
+// - attack.credential_access
+// - attack.t1552.002
+
+// Define the list of legitimate processes expected to access ZTNA artifacts.
+// This list should be customized for your environment's specific ZTNA client executables.
+let ztna_processes = dynamic([
+    "ZSATray.exe",
+    "stAgentUI.exe",
+    "Netskope Client.exe",
+    "Zscaler.exe",
+    "svchost.exe" // svchost may be legitimate in some scenarios, requires baselining.
+]);
+// Define the sensitive ZTNA-related registry keys and file paths to monitor.
+// These paths are based on the research and should be verified for your specific deployment.
+let sensitive_objects = dynamic([
+    "\\REGISTRY\\MACHINE\\SOFTWARE\\Netskope\\SecureToken",
+    "\\REGISTRY\\MACHINE\\SOFTWARE\\Zscaler Inc.\\Zscaler\\EXTRA",
+    "C:\\ProgramData\\Zscaler\\"
+]);
+// Set the detection timeframe.
+let timeframe = 1h;
+SecurityEvent
+| where TimeGenerated > ago(timeframe)
+// Event ID 4663 indicates an attempt was made to access an object.
+// This requires SACL auditing to be enabled on the target objects.
+| where EventID == 4663
+| extend ProcessNameOnly = tostring(split(ProcessName, '\\')[-1])
+// Filter for events where the accessing process is NOT a known legitimate ZTNA process.
+| where ProcessNameOnly !in~ (ztna_processes)
+// Filter for events where the object being accessed is a known sensitive ZTNA artifact.
+| where array_index_of(sensitive_objects, (obj) -> (ObjectName has obj)) != -1
+// Potential False Positives: Backup software, security scanners, or administrative scripts might access these locations.
+// Exclude known-good processes from this alert by adding them to the 'ztna_processes' list.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    AccessedByProcess = make_set(ProcessName),
+    AccessedObjects = make_set(ObjectName),
+    AccessMasks = make_set(AccessMask)
+    by
+    SubjectUserName,
+    SubjectUserSid,
+    DeviceName = Computer,
+    bin(TimeGenerated, 30m)
+| project-reorder StartTime, EndTime, DeviceName, SubjectUserName, SubjectUserSid, AccessedByProcess, AccessedObjects, AccessMasks

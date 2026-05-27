@@ -1,0 +1,77 @@
+rule malicious_vscode_extension_activity {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects multiple potentially malicious activities related to Visual Studio Code extensions. This includes installation via URI handlers or command line, suspicious network connections, direct file modification in extension directories, and loading of unusual Node modules. These behaviors can be indicative of an attacker leveraging VSCode for initial access or persistence."
+    tactic = "TA0002, TA0003, TA0007, TA0011"
+    technique = "T1129, T1566.001, T1071.001, T1192"
+    false_positives = "Legitimate developer activity can trigger parts of this rule. Extension installation, updates, and normal operation involve file writes and network connections. Tuning, especially of the network and file event portions, may be required."
+
+  events:
+    // Part 1: Detects VSCode being launched to install an extension from a URL.
+    $uri_handler.metadata.event_type = "PROCESS_LAUNCH"
+    re.regex($uri_handler.target.process.file.full_path, `\\Code\.exe$`)
+    re.regex($uri_handler.target.process.command_line, `\-\-open-url`) and re.regex($uri_handler.target.process.command_line, `vscode:\/\/`)
+
+    // Part 2: Detects VSCode extensions being installed from the command line.
+    $vsix_install.metadata.event_type = "PROCESS_LAUNCH"
+    re.regex($vsix_install.target.process.file.full_path, `\\Code\.exe$`)
+    re.regex($vsix_install.target.process.command_line, `\-\-install-extension`) and re.regex($vsix_install.target.process.command_line, `\.vsix`)
+
+    // Part 3: Detects suspicious network connections from VSCode.
+    $network_activity.metadata.event_type = "NETWORK_CONNECTION"
+    re.regex($network_activity.principal.process.file.full_path, `\\Code\.exe$`)
+    $network_activity.target.url != ""
+    // FP-Medium: Legitimate extensions may communicate with their own backends. This list may need to be expanded with trusted publisher domains.
+    not re.regex($network_activity.target.url, `marketplace\.visualstudio\.com|vscode\.blob\.core\.windows\.net|update\.code\.visualstudio\.com|gallerycdn\.vsassets\.io`)
+
+    // Part 4: Detects files being created in VSCode extension directories.
+    $file_writes.metadata.event_type = "FILE_CREATION"
+    // FP-Medium: This can be noisy during legitimate extension installs. Review the principal process for suspicious origins (e.g., browsers, office apps).
+    re.regex($file_writes.target.file.full_path, `\\(\.vscode[\\\/]extensions|Microsoft VS Code[\\\/]resources[\\\/]app[\\\/]extensions)[\\\/]`)
+
+    // Part 5: Detects VSCode loading a Node native addon (.node file) from a suspicious path.
+    $node_loads.metadata.event_type = "MODULE_LOAD"
+    re.regex($node_loads.principal.process.file.full_path, `\\Code\.exe$`)
+    re.regex($node_loads.target.file.full_path, `\.node$`)
+    // Look for modules loaded from temp or user profile locations outside of normal extension paths.
+    re.regex($node_loads.target.file.full_path, `(\\AppData\\Local|\\Temp)`)
+    not re.regex($node_loads.target.file.full_path, `(\.vscode[\\\/]extensions|Microsoft VS Code)`)
+
+  outcome:
+    $risk_score = 45
+    $principal_hostname = coalesce(
+        $uri_handler.principal.hostname,
+        $vsix_install.principal.hostname,
+        $network_activity.principal.hostname,
+        $file_writes.principal.hostname,
+        $node_loads.principal.hostname
+    )
+    $principal_user = coalesce(
+        $uri_handler.principal.user.userid,
+        $vsix_install.principal.user.userid,
+        $network_activity.principal.user.userid,
+        $file_writes.principal.user.userid,
+        $node_loads.principal.user.userid
+    )
+    $actor_process_command_line = coalesce(
+        $uri_handler.principal.process.command_line,
+        $vsix_install.principal.process.command_line,
+        $network_activity.principal.process.command_line,
+        $file_writes.principal.process.command_line,
+        $node_loads.principal.process.command_line
+    )
+    $detection_method = if($uri_handler, "VSCode URI Handler Installation",
+                       if($vsix_install, "VSCode Extension CLI Installation",
+                       if($network_activity, "Suspicious Outbound Connection from VSCode",
+                       if($file_writes, "File Write to VSCode Extension Directory",
+                       if($node_loads, "Suspicious Node Module Loaded by VSCode", "Unknown")))))
+    $details = if($uri_handler, "URI: " + re.capture($uri_handler.target.process.command_line, `vscode:\/\/(.*)`),
+               if($vsix_install, "VSIX File: " + re.capture($vsix_install.target.process.command_line, `\-\-install-extension\s+"?([^"\s]+)"?`),
+               if($network_activity, "Destination: " + $network_activity.target.url,
+               if($file_writes, "File: " + $file_writes.target.file.full_path,
+               if($node_loads, "Module: " + $node_loads.target.file.full_path, "N/A")))))
+
+  condition:
+    $uri_handler or $vsix_install or $network_activity or $file_writes or $node_loads
+}

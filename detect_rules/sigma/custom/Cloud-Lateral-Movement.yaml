@@ -1,0 +1,55 @@
+title: Cloud Persistence and Lateral Movement Techniques
+id: 856b3099-d699-45be-b097-48f122824e60
+status: experimental
+description: >-
+  Detects common cloud persistence and lateral movement techniques used by adversaries like BLOCKADE SPIDER and GENESIS PANDA.
+  This includes granting powerful IAM permissions, creating new programmatic access keys, and adding SSH keys to compute instances.
+author: RW
+date: 2025-08-22
+tags:
+  - attack.persistence
+  - attack.privilege_escalation
+  - attack.t1098
+  - attack.t1078.004
+  - threat_actor.blockade_spider
+  - threat_actor.genesis_panda
+logsource:
+  product: cloud
+  category: audit
+detection:
+  selection_aws_admin_policy:
+    # Detects the attachment of the default full administrator policy to an AWS IAM user or role.
+    # Corresponds to GENESIS PANDA and BLOCKADE SPIDER TTPs of escalating privileges in the cloud.
+    aws.event_name:
+      - 'AttachUserPolicy'
+      - 'AttachRolePolicy'
+      - 'PutUserPolicy'
+      - 'PutRolePolicy'
+    aws.request_parameters.policy_arn: 'arn:aws:iam::aws:policy/AdministratorAccess'
+  selection_azure_admin_role:
+    # Detects a user being added to a highly privileged role in Azure Active Directory / Entra ID.
+    # Corresponds to BLOCKADE SPIDER TTPs of compromising IAM and adding accounts to privileged roles.
+    azure.activity.operation_name: 'Add member to role'
+    azure.activity.target_resources|contains:
+      # Add or remove roles based on what is considered highly privileged in your environment.
+      - 'Global Administrator'
+      - 'Privileged Role Administrator'
+      - 'User Administrator'
+      - 'Contributor'
+      - 'Owner'
+  selection_new_access_key:
+    # Detects the creation of new programmatic access keys, a common persistence method.
+    # GENESIS PANDA was observed creating backdoor access keys.
+    aws.event_name: 'CreateAccessKey'
+    gcp.method_name: 'google.iam.admin.v1.CreateServiceAccountKey'
+  selection_ssh_key_addition:
+    # Detects the addition of an SSH public key to a compute instance via the cloud control plane.
+    # GENESIS PANDA was observed adding SSH keys for persistence.
+    aws.event_name: 'SendSSHPublicKey'
+    gcp.method_name: 'v1.oslogin.users.importSshPublicKey'
+  condition: 1 of them
+falsepositives:
+  - Legitimate administrative activity for user and access management.
+  - Automated provisioning scripts or infrastructure-as-code (IaC) deployments (e.g., Terraform, CloudFormation) may trigger these events.
+  - It is recommended to filter events initiated by known and trusted administrative accounts or service principals.
+level: medium

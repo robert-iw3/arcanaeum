@@ -1,0 +1,37 @@
+title: AWS CloudTrail Logging Impaired
+id: 302cbed7-c12a-4ed7-b143-318821559761
+status: experimental
+description: >-
+  Detects attempts to impair AWS CloudTrail logging by stopping a trail or modifying its event selectors.
+  Attackers may perform these actions to evade detection and hide their activity, as seen with tools like AWSDoor.
+author: RW
+date: 2025-09-21
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection_stop:
+    # Detects when a CloudTrail trail is stopped
+    eventName: 'StopLogging'
+    eventSource: 'cloudtrail.amazonaws.com'
+    errorCode:
+  selection_modify:
+    # Detects when the event selectors for a trail are modified, which can be used to exclude certain events from being logged
+    eventName: 'PutEventSelectors'
+    eventSource: 'cloudtrail.amazonaws.com'
+    errorCode:
+  condition: selection_stop or selection_modify
+fields:
+  - userIdentity.arn
+  - userIdentity.principalId
+  - requestParameters.name
+  - requestParameters.trailName
+  - requestParameters.eventSelectors
+  - sourceIPAddress
+falsepositives:
+  - Legitimate administrative actions to temporarily disable or reconfigure a trail. Such actions should be rare and correlated with change management tickets.
+  - Automated infrastructure management scripts modifying trail configurations.
+level: high

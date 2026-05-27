@@ -1,0 +1,23 @@
+rule LLMNR_NBTNS_Poisoning_Detection {
+  meta:
+    author = "RW"
+    description = "Detects potential LLMNR/NBT-NS poisoning by observing a single host responding to a high number of clients on UDP ports 137 or 5355."
+    severity = "MEDIUM"
+
+  events:
+    $e.metadata.event_type = "NETWORK_CONNECTION" // Or a more specific network event type
+    $e.network.transport_protocol = "UDP"
+    $e.network.target.port in (137, 5355)
+
+  match:
+    $poisoner_ip = $e.principal.ip // The source IP in Network_Traffic.src (the "poisoner")
+    $victim_ip = $e.target.ip // The destination IP in Network_Traffic.dest (the "victim")
+
+  outcome:
+    $poisoner = $poisoner_ip
+    $victim_count = count(distinct $victim_ip) // Count distinct victim IPs per poisoner
+    $reason = "LLMNR/NBT-NS Poisoning Detected"
+
+  condition:
+    $e and $victim_count > 10 // Threshold for number of distinct victims
+}

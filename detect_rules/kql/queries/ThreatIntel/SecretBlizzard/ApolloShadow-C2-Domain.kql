@@ -1,0 +1,36 @@
+// Name: ApolloShadow C2 Domain Communication
+// Author: RW
+// Date: 2025-07-31
+// Description: Detects network communication to the known ApolloShadow C2 domain 'kav-certificates.info', indicating a potential active compromise by the Secret Blizzard threat actor.
+// False Positives: Low. The domain is a known malicious indicator. If false positives occur, it may indicate the domain has been sinkholed or re-purposed.
+// References: https://www.microsoft.com/en-us/security/blog/2025/07-31/frozen-in-transit-secret-blizzards-aitm-campaign-against-diplomats/
+// MITRE ATT&CK: T1071.001
+// Data Sources: Microsoft Defender for Endpoint (DeviceNetworkEvents)
+
+let timeframe = 1d;
+// IOC list for ApolloShadow C2 domains.
+let ioc_domains = dynamic(["kav-certificates.info"]);
+DeviceNetworkEvents
+| where Timestamp > ago(timeframe)
+// Filter for network connections to the specified C2 domains.
+| where RemoteUrl has_any (ioc_domains)
+| summarize
+    startTime = min(Timestamp),
+    endTime = max(Timestamp),
+    count(),
+    // Collect distinct values for key fields to provide context.
+    RemoteIP = make_set(RemoteIP, 10),
+    RemotePort = make_set(RemotePort, 10),
+    InitiatingProcess = make_set(InitiatingProcessFileName, 10)
+    by
+    DeviceName,
+    DeviceId,
+    RemoteUrl
+| project-rename
+    endpoint = DeviceName,
+    firstTime = startTime,
+    lastTime = endTime,
+    c2_domain = RemoteUrl,
+    c2_ip = RemoteIP,
+    remote_port = RemotePort,
+    initiating_process = InitiatingProcess

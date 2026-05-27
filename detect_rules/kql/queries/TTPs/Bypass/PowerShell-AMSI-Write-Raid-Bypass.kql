@@ -1,0 +1,38 @@
+// Name: PowerShell AMSI Write Raid Bypass
+// Author: RW
+// Date: 2025-07-31
+// Tactic: Defense Evasion
+// Technique: T1562.001, Impair Defenses: Disable or Modify Tools
+// Description: Detects a PowerShell command line that exhibits characteristics of the "AMSI Write Raid" bypass technique.
+// This method involves defining and using kernel32.dll functions via P/Invoke to find the in-memory address of AmsiScanBuffer and overwrite it,
+// thus disabling AMSI for the current process. This bypass is notable for not requiring VirtualProtect.
+// False Positive Sensitivity: Medium.
+// This detection may trigger on legitimate administrative or security research scripts that perform in-memory operations.
+// Consider excluding known-good scripts, trusted script signers, or specific parent processes if false positives occur.
+
+let timeframe = 1d;
+DeviceProcessEvents
+| where Timestamp > ago(timeframe)
+// Focus on PowerShell execution, including core and desktop versions.
+| where FileName in~ ("powershell.exe", "pwsh.exe")
+// The core of the technique involves compiling C# code with P/Invoke signatures in PowerShell.
+| where ProcessCommandLine has "Add-Type" and ProcessCommandLine has "DllImport" and ProcessCommandLine has "kernel32"
+// The script then uses these imported functions to locate and patch memory.
+// The combination of these specific function names is highly indicative of this bypass.
+and ProcessCommandLine has "ReadProcessMemory"
+and ProcessCommandLine has "GetProcAddress"
+// Marshal.Copy is used to perform the in-memory patch.
+and ProcessCommandLine has "Marshal" and ProcessCommandLine has "::Copy"
+// The public proof-of-concept heavily uses string replacement to obfuscate "Amsi.dll" and "AmsiScanBuffer".
+and ProcessCommandLine has ".replace"
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    FileName,
+    ProcessCommandLine,
+    MD5,
+    SHA1,
+    SHA256

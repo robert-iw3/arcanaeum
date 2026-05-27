@@ -1,0 +1,42 @@
+rule gcp_cloud_build_image_export_access {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects when a Google Cloud Build service account accesses a Compute Image. This is often a legitimate step in a CI/CD pipeline, but it is also a key step used by attackers to export a Compute Image to a Cloud Storage bucket for data exfiltration."
+    false_positives = "Legitimate CI/CD pipelines that use Cloud Build to access or manage compute images as part of their build process."
+    tags = "GCP, EXFILTRATION, CLOUD_BUILD, COMPUTE"
+    tactic = "TA0010"
+    technique = "T1537"
+
+  events:
+    // Filter for GCP audit logs and the specific method for getting a compute image.
+    $event.metadata.event_type = "GCP_CLOUDAUDIT_LOG"
+    $event.metadata.method_name = "v1.compute.images.get"
+
+    // Check if the action was performed by a Cloud Build service account.
+    // The principal could be the service account itself or delegated by a Cloud Build principal.
+    (
+      re.regex($event.principal.user.userid, `\@cloudbuild\.gserviceaccount\.com$`) or
+      re.regex($event.principal.user.delegated_by.userid, `^cloud-build-argo-foreman\@prod\.google\.com$`)
+    )
+
+    // Capture the project ID from the resource name.
+    $project_id = re.capture($event.resource.name, `projects/([^/]+)/`)
+
+  outcome:
+    // A moderate risk score, as this can be legitimate activity.
+    $risk_score = 45
+    // Actor and resource information.
+    $principal_user_userid = array_distinct($event.principal.user.userid)
+    $delegated_by_userid = array_distinct($event.principal.user.delegated_by.userid)
+    $image_accessed = array_distinct($event.resource.name)
+    $project_id = array_distinct($project_id)
+
+  condition:
+    // The condition is met if the event is found.
+    $event
+    // To reduce false positives, consider excluding known CI/CD projects or service accounts
+    // where this activity is expected. For example:
+    // and not $project_id in %gcp_ci_cd_projects
+    // and not $principal_user_userid in %gcp_legitimate_cloud_build_sa
+}

@@ -1,0 +1,52 @@
+rule cobalt_strike_bof_token_theft_and_kerberos_request {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects a process accessing LSASS memory for token theft, followed by a Kerberos ticket request from the same process. This behavioral sequence is a strong indicator of a Cobalt Strike Beacon Object File (BOF) being used to steal credentials and establish persistence via Kerberos tickets, as described in the reference."
+    tags = "COBALT_STRIKE, BOF, CREDENTIAL_ACCESS, PERSISTENCE, KERBEROS"
+    tactic = "TA0006, TA0005, TA0003, TA0008"
+    technique = "T1003.001, T1055, T1134.001, T1558.003"
+    false_positives = "Legitimate security tools, domain controllers, or system management software might perform similar actions. Tuning the process allowlist is crucial for the environment."
+
+  events:
+    // Event 1: A non-standard process accesses the LSASS process. This is often a precursor to token theft.
+    // This logic implicitly covers Process Injection (T1055) by looking for unusual processes accessing LSASS.
+    $lsass_access.metadata.event_type = "PROCESS_OPEN"
+    $lsass_access.target.process.file.full_path = /lsass\.exe$/ nocase
+    $lsass_access.principal.process.pid = $pid
+    $lsass_access.principal.hostname = $hostname
+
+    // Filter for suspicious access rights like PROCESS_VM_READ (0x10) or PROCESS_QUERY_INFORMATION (0x400).
+    // The exact format may vary, so a regex is used.
+    re.regex($lsass_access.target.process.granted_access_rights, `(0x10|16|0x400|1024)`)
+
+    // FP Tuning: Exclude known legitimate processes that are expected to access LSASS.
+    // This list should be customized for your environment to reduce noise.
+    not re.regex($lsass_access.principal.process.file.full_path, `(?i)(\\svchost\.exe|\\services\.exe|\\wininit\.exe|\\csrss\.exe|\\smss\.exe|\\winlogon\.exe|\\MsMpEng\.exe|\\sense\.exe|\\healthservice\.exe|\\WmiPrvSE\.exe|\\taskmgr\.exe)$`)
+
+    // Event 2: The same process makes a network connection to a Kerberos port (88).
+    $kerberos_request.metadata.event_type = "NETWORK_CONNECTION"
+    $kerberos_request.target.port = 88
+    $kerberos_request.principal.process.pid = $pid
+    $kerberos_request.principal.hostname = $hostname
+
+  match:
+    // Correlate events by process ID and hostname over a 5-minute window.
+    // The window for the kerberos request opens for 5 minutes *after* the lsass access event.
+    $pid, $hostname over 5m after $lsass_access
+
+  outcome:
+    // The risk is higher if the process is a common target for process injection.
+    $risk_score = if(re.regex($lsass_access.principal.process.file.full_path, `(?i)(\\rundll32\.exe|\\regsvr32\.exe|\\dllhost\.exe|\\wermgr\.exe|\\werfault\.exe|\\explorer\.exe|\\powershell\.exe|\\msiexec\.exe)$`), 85, 65)
+    $principal_hostname = $hostname
+    $principal_process_pid = $pid
+    $principal_process_path = $lsass_access.principal.process.file.full_path
+    $principal_process_commandline = $lsass_access.principal.process.command_line
+    $lsass_access_time = $lsass_access.metadata.event_timestamp
+    $kerberos_request_time = $kerberos_request.metadata.event_timestamp
+    $kerberos_target_ip = array_distinct($kerberos_request.target.ip)
+
+  condition:
+    // The condition is met if a kerberos request from the same process is seen within the match window.
+    $kerberos_request
+}

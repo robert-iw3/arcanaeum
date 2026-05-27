@@ -1,0 +1,35 @@
+stages:
+  - test-and-deploy
+
+yaral_test_and_deploy:
+  stage: test-and-deploy
+  image: python:3.12
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "release"'
+      changes:
+        - google-secops/rules/*
+      when: always
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}-pip
+    paths:
+      - .cache/pip
+  variables:
+    PIP_CACHE_DIR: .cache/pip
+    CHRONICLE_API_URL: $CHRONICLE_API_URL
+    GOOGLE_CLOUD_CREDENTIALS: $GOOGLE_CLOUD_CREDENTIALS
+  environment:
+    name: production
+  script:
+    - set -e
+    - cd google-secops
+    - pip install --upgrade pip
+    - pip install -r requirements.txt
+    - python -m unittest test_yaral_pipeline.py
+    - docker build -t yara-l-pipeline .
+    - echo "$GOOGLE_CLOUD_CREDENTIALS" > service-account.json
+    - docker run --rm -e CHRONICLE_API_URL=$CHRONICLE_API_URL -e CREDENTIALS_FILE=/import/service-account.json -e AUTH_SCOPE=https://www.googleapis.com/auth/chronicle-backstory yara-l-pipeline
+  artifacts:
+    paths:
+      - google-secops/yara_pipeline.log
+    expire_in: 7 days
+    when: always

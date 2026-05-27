@@ -1,0 +1,77 @@
+{
+  "name": "CORNFLAKE.V3 Backdoor Activity",
+  "queries": [
+    {
+      "name": "execution_cornflake_node_js_php_spawned_from_powershell",
+      "query": "@winlog.event_id:1 AND @process.parent.executable:*\\\\powershell.exe AND @process.executable:*\\\\AppData\\\\Roaming* AND ((@process.executable:*\\\\node.exe AND @process.cmdline:\"-e *\") OR (@process.executable:*\\\\php.exe AND @process.cmdline:\"-d *\" AND @process.cmdline:\"* 1\"))",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "post_exploitation_cornflake_process_spawning_shell_for_reconnaissance",
+      "query": "@winlog.event_id:1 AND @process.parent.executable:*\\\\AppData\\\\Roaming\\\\*(node|php).exe AND @process.executable:*\\\\(cmd|powershell).exe AND @process.cmdline:(*systeminfo* OR *tasklist* OR \"*arp -a*\" OR *nltest* OR *setspn* OR \"*whoami /all*\" OR *Get-LocalGroup* OR *KerberosRequestorSecurityToken*)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "persistence_registry_run_key_points_to_cornflake_in_appdata",
+      "query": "@winlog.event_id:(12 OR 13) AND @winlog.event_data.TargetObject:*HKU*\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run AND @winlog.event_data.Details:*AppData\\\\Roaming\\\\*(node|php).exe*",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "c2_network_connection_to_known_cornflake_infrastructure",
+      "query": "@winlog.event_id:3 AND (@network.destination.ip:(\"138.199.161.141\" OR \"159.69.3.151\" OR \"167.235.235.151\" OR \"128.140.120.188\" OR \"177.136.225.135\") OR @network.destination.domain:(\"varying-rentals-calgary-predict.trycloudflare.com\" OR \"dnsmicrosoftds-data.com\" OR \"windows-msg-as.live\"))",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "ioc_known_cornflake_or_windytwist_file_hash_detected",
+      "query": "@winlog.event_id:(1 OR 11) AND @winlog.event_data.Hashes:*MD5=(\"04668c6f39b0a67c4bd73d5459f8c3a3\" OR \"bcdffa955608e9463f272adca205c9e65592840d98dcb63155b9fa0324a88be2\" OR \"ec82216a2b42114d23d59eecb876ccfc\")*",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "initial_access_powershell_mshta_downloading_node_js_php_runtime",
+      "query": "@winlog.event_id:3 AND @process.executable:(*\\\\powershell.exe OR *\\\\mshta.exe) AND @network.destination.domain:(\"nodejs.org\" OR \"windows.php.net\")",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "execution_rundll32_executing_a_png_file_from_appdata",
+      "query": "@winlog.event_id:1 AND @process.executable:*\\\\rundll32.exe AND @process.cmdline:*\\\\AppData\\\\Roaming\\\\*.png*",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    }
+  ],
+  "cases": [
+    {
+      "name": "CORNFLAKE.V3 Backdoor Activity",
+      "status": "high",
+      "condition": "event_count_0 >= 1 OR event_count_1 >= 1 OR event_count_2 >= 1 OR event_count_3 >= 1 OR event_count_4 >= 1 OR event_count_5 >= 1 OR event_count_6 >= 1"
+    }
+  ],
+  "options": {
+    "evaluation_window": 3600,
+    "keep_alive": 3600,
+    "max_signal_duration": 3600,
+    "correlation_based_signal": {
+      "correlation_inputs": [
+        {
+          "rule_id": "cornflake_v3_correlation"
+        }
+      ],
+      "correlated_by_fields": [
+        "@host",
+        "@usr"
+      ],
+      "distinct_fields": [
+        "case_id"
+      ]
+    }
+  },
+  "message": "CORNFLAKE.V3 Activity: {{distinct_count}} reason(s) on host {{host}} by user {{usr}}: {{case_names}}",
+  "type": "correlation_based_signal",
+  "tags": [],
+  "is_enabled": true
+}

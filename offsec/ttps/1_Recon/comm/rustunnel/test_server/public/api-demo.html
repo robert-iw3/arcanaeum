@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>API Demo — rustunnel Demo</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .endpoint { margin-bottom: 24px; }
+    .endpoint-header {
+      display: flex; align-items: center; gap: 12px; margin-bottom: 10px;
+    }
+    .pill {
+      font-size: 11px; font-weight: 700; padding: 3px 9px;
+      border-radius: 5px; font-family: var(--mono); letter-spacing: 0.04em;
+    }
+    .pill.GET    { background: rgba(96,200,255,0.12); color: #60c8ff; border: 1px solid rgba(96,200,255,0.25); }
+    .path { font-family: var(--mono); font-size: 13px; color: var(--text); }
+    .desc { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+    .response {
+      background: #0a0c12; border: 1px solid var(--border);
+      border-radius: 7px; padding: 14px 16px;
+      font-family: var(--mono); font-size: 12.5px;
+      color: #8892a4; min-height: 60px; white-space: pre-wrap;
+      word-break: break-all; max-height: 320px; overflow-y: auto;
+    }
+    .response.loading { color: var(--muted); font-style: italic; }
+    .response.error   { color: var(--red); }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="/">Home</a>
+    <a href="/about">About</a>
+    <a href="/live">Live Stats</a>
+    <a href="/api-demo" class="active">API</a>
+  </nav>
+
+  <main>
+    <div class="card" style="margin-bottom:24px">
+      <div class="badge">🔌 JSON endpoints</div>
+      <h2 style="font-size:20px;margin-bottom:8px">API Demo</h2>
+      <p style="color:var(--muted)">
+        These endpoints are served by the same Node.js process.
+        Click <strong>Run</strong> to fetch each one live through the tunnel.
+      </p>
+    </div>
+
+    <!-- /api/status -->
+    <div class="card endpoint">
+      <div class="endpoint-header">
+        <span class="pill GET">GET</span>
+        <span class="path">/api/status</span>
+      </div>
+      <p class="desc">Server health: uptime, request count, Node version, and current timestamp.</p>
+      <button class="btn" onclick="run('status')">Run</button>
+      <div class="response loading" id="res-status">Click Run to fetch…</div>
+    </div>
+
+    <!-- /api/requests -->
+    <div class="card endpoint">
+      <div class="endpoint-header">
+        <span class="pill GET">GET</span>
+        <span class="path">/api/requests</span>
+      </div>
+      <p class="desc">Total request count and the last 10 requests seen by this server.</p>
+      <button class="btn" onclick="run('requests')">Run</button>
+      <div class="response loading" id="res-requests">Click Run to fetch…</div>
+    </div>
+
+    <!-- /api/echo -->
+    <div class="card endpoint">
+      <div class="endpoint-header">
+        <span class="pill GET">GET</span>
+        <span class="path">/api/echo?msg=hello</span>
+      </div>
+      <p class="desc">
+        Echoes back the <code>msg</code> query param plus the raw request headers —
+        useful to inspect what headers rustunnel adds.
+      </p>
+      <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">
+        <input id="echo-msg" type="text" value="hello from the tunnel!"
+          style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+                 padding:7px 12px;color:var(--text);font-size:13px;font-family:var(--mono);
+                 flex:1;outline:none;">
+        <button class="btn" onclick="runEcho()">Run</button>
+      </div>
+      <div class="response loading" id="res-echo">Click Run to fetch…</div>
+    </div>
+  </main>
+
+  <footer>
+    rustunnel demo server &mdash; <a href="/live">live stats</a>
+  </footer>
+
+  <script>
+    async function run(name) {
+      const el = document.getElementById(`res-${name}`);
+      el.className = "response loading";
+      el.textContent = "fetching…";
+      try {
+        const r = await fetch(`/api/${name}`);
+        const data = await r.json();
+        el.className = "response";
+        el.textContent = JSON.stringify(data, null, 2);
+      } catch (e) {
+        el.className = "response error";
+        el.textContent = "Error: " + e.message;
+      }
+    }
+
+    async function runEcho() {
+      const msg = document.getElementById("echo-msg").value;
+      const el  = document.getElementById("res-echo");
+      el.className = "response loading";
+      el.textContent = "fetching…";
+      try {
+        const r = await fetch(`/api/echo?msg=${encodeURIComponent(msg)}`);
+        const data = await r.json();
+        el.className = "response";
+        el.textContent = JSON.stringify(data, null, 2);
+      } catch (e) {
+        el.className = "response error";
+        el.textContent = "Error: " + e.message;
+      }
+    }
+  </script>
+</body>
+</html>

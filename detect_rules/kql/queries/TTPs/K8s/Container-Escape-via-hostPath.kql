@@ -1,0 +1,46 @@
+// Name: Kubernetes - Container Escape Attempt via Privileged Pod Configuration
+// Author: RW
+// Date: 2025-08-11
+// Description: Detects the creation or update of a Pod with configurations that could facilitate a container escape.
+//              This includes running as a privileged container, using the host's PID or network namespaces, or mounting
+//              sensitive host directories via hostPath. Such configurations can be exploited by an attacker to gain access to the underlying node.
+// False Positive Sensitivity: Medium. Legitimate administrative or monitoring pods may use some of these settings.
+// Review the pod's purpose and the user creating it. Consider excluding specific namespaces or service accounts if they are known to run such workloads.
+// MITRE TTPs: T1611 (Escape to Host)
+
+KubeAudit
+// Filter for Pod creation or update events
+| where ObjectRef.resource == "pods" and Verb in ("create", "update")
+// Exclude system namespaces which often have privileged pods by design.
+| where ObjectRef.namespace !in ("kube-system", "kube-public", "kube-node-lease")
+| extend request = todynamic(RequestObject)
+| extend requestString = tostring(request)
+// Check for various high-risk settings that enable container escape.
+| extend isPrivileged = requestString has '"privileged":true'
+| extend isHostPID = tobool(request.spec.hostPID)
+| extend isHostNetwork = tobool(request.spec.hostNetwork)
+// Use regex to find mounts of sensitive host directories.
+| extend sensitiveHostPaths = extract_all(@'"path":\s*"((/|/etc|/root|/proc|/var/run/docker\.sock|/var/lib/kubelet|/var/run/containerd/containerd\.sock)[^"]*)"', requestString)
+| extend hasSensitiveMount = array_length(sensitiveHostPaths) > 0
+// Trigger if any of the risky settings are present.
+| where isPrivileged or isHostPID or isHostNetwork or hasSensitiveMount
+// Create a summary of the reasons for the alert for easier triage.
+| extend Reasons = bag_pack(
+    "PrivilegedContainer", isPrivileged,
+    "HostPID", isHostPID,
+    "HostNetwork", isHostNetwork,
+    "SensitiveHostPath", hasSensitiveMount
+    )
+| project
+    TimeGenerated,
+    AuditID,
+    OperationName,
+    Category,
+    ActorUsername = User.username,
+    SourceIP,
+    PodName = ObjectRef.name,
+    PodNamespace = ObjectRef.namespace,
+    Image = tostring(request.spec.containers[0].image),
+    Reasons,
+    SensitivePathsMounted = sensitiveHostPaths,
+    RequestObject

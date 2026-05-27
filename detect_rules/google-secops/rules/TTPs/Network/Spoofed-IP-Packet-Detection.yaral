@@ -1,0 +1,47 @@
+rule potential_ip_spoofing_private_source_to_public_destination {
+  meta:
+    description = "Detects network traffic originating from a private (RFC1918) source IP address to a public destination IP address. This pattern is indicative of an IP spoofing attempt or a significant network misconfiguration, as private IP addresses should not be routable on the public internet. This rule is most effective when applied to logs from perimeter network devices (e.g., firewalls, edge routers) that monitor traffic leaving the network."
+    author = "RW"
+    date = "2025-08-13"
+    reference = "https://www.rfc-editor.org/rfc/rfc1918"
+    tags = "NETWORK, SPOOFING, EGRESS, RFC1918"
+    tactic = "TA0001, TA0007"
+    technique = "T1595.002, T1090.002"
+    false_positives = "This rule can be very noisy if not scoped to the correct log sources. Legitimate outbound traffic from internal hosts will match this pattern before Network Address Translation (NAT) is applied. It is critical to filter for log sources that are positioned at the network edge to monitor post-NAT or un-NATted egress traffic. Network misconfigurations can also be a source of false positives."
+
+  events:
+    $network.metadata.event_type = "NETWORK_CONNECTION"
+
+    // This condition identifies traffic originating from a private IP address space.
+    (
+      net.ip_in_range_cidr($network.principal.ip, "10.0.0.0/8") or
+      net.ip_in_range_cidr($network.principal.ip, "172.16.0.0/12") or
+      net.ip_in_range_cidr($network.principal.ip, "192.168.0.0/16")
+    )
+
+    // This condition ensures the destination is a public IP address, excluding other non-routable ranges.
+    not (
+      net.ip_in_range_cidr($network.target.ip, "10.0.0.0/8") or
+      net.ip_in_range_cidr($network.target.ip, "172.16.0.0/12") or
+      net.ip_in_range_cidr($network.target.ip, "192.168.0.0/16") or
+      net.ip_in_range_cidr($network.target.ip, "127.0.0.0/8") or      // Exclude loopback addresses
+      net.ip_in_range_cidr($network.target.ip, "169.254.0.0/16") or // Exclude link-local addresses
+      net.ip_in_range_cidr($network.target.ip, "224.0.0.0/4")       // Exclude multicast addresses
+    )
+
+    // To improve fidelity, consider filtering for specific log sources, such as perimeter firewalls.
+    // For example: $network.metadata.product_name = "Palo Alto Networks Firewall"
+
+  outcome:
+    // A moderate risk score is assigned, as this is a strong anomaly but highly dependent on log source placement and network configuration.
+    $risk_score = 50
+    $principal_ip = array_distinct($network.principal.ip)
+    $target_ip = array_distinct($network.target.ip)
+    $principal_hostname = array_distinct($network.principal.hostname)
+    $target_hostname = array_distinct($network.target.hostname)
+    $network_protocol = array_distinct($network.network.ip.protocol)
+    $event_count = count_distinct($network.metadata.id)
+
+  condition:
+    $network
+}

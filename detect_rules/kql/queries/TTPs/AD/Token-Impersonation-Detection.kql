@@ -1,0 +1,69 @@
+// Name: Token Impersonation or Theft leading to Process Creation
+// Author: RW
+// Date: 2025-08-04
+// Description: Detects when a process spawns a new, sensitive process (like a command shell) under a different and
+//              often more privileged user account (e.g., SYSTEM). This is a strong indicator of token impersonation
+//              or theft (T1134), where an attacker uses a stolen token to escalate privileges and execute commands
+//              in the context of another user.
+// MITRE ATT&CK: T1134.001
+// False Positive Sensitivity: Medium
+// Tags: Privilege Escalation, Lateral Movement, T1134.001
+
+let timeWindow = 1h;
+
+// List of sensitive child processes an attacker might spawn after impersonating a token.
+let SuspiciousChildProcesses = dynamic([
+    "cmd.exe",
+    "powershell.exe",
+    "pwsh.exe",
+    "cscript.exe",
+    "wscript.exe"
+]);
+
+// List of parent processes that are expected to spawn shells or scripts.
+// This list may need tuning for your environment to reduce false positives from admin tools or software deployment systems.
+let BenignParentProcesses = dynamic([
+    "explorer.exe",
+    "svchost.exe",
+    "services.exe",
+    "userinit.exe",
+    "wininit.exe",
+    "wsmprovhost.exe", // For PowerShell remoting
+    "powershell.exe",
+    "cmd.exe",
+    "pwsh.exe",
+    "mmc.exe"
+]);
+
+DeviceProcessEvents
+| where TimeGenerated > ago(timeWindow)
+// Filter for the creation of suspicious child processes.
+| where FileName in~ (SuspiciousChildProcesses)
+// Exclude processes spawned by common, benign parent processes.
+| where InitiatingProcessFileName !in~ (BenignParentProcesses)
+// The core logic: detect when the child process runs under a different account than its parent.
+| where isnotempty(AccountName) and isnotempty(InitiatingProcessAccountName) and AccountName != InitiatingProcessAccountName
+// Further refine by looking for elevation to a highly privileged account, which is common in this attack.
+| where AccountName has "SYSTEM" or IsElevated
+// Summarize to reduce noise and group related activity.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    EventCount = count(),
+    CommandLineSet = make_set(ProcessCommandLine, 10)
+    by DeviceName,
+       ChildProcess = FileName,
+       ChildAccount = AccountName,
+       ParentProcess = InitiatingProcessFileName,
+       ParentAccount = InitiatingProcessAccountName
+// Project the relevant fields for the alert.
+| project
+    StartTime,
+    EndTime,
+    DeviceName,
+    ParentProcess,
+    ParentAccount,
+    ChildProcess,
+    ChildAccount,
+    CommandLineSet,
+    EventCount

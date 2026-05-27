@@ -1,0 +1,64 @@
+rule lazarus_group_activity_cluster {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects a cluster of activities and TTPs associated with the Lazarus Group, based on recent threat intelligence. This rule identifies several behaviors including cryptocurrency wallet access, exploitation of regional software, execution of payloads from social engineering, and compromise of developer tools."
+    tags = "APT, LAZARUS, HIDDEN_COBRA, CRYPTOCURRENCY, SUPPLY_CHAIN, SOCIAL_ENGINEERING"
+    tactic = "TA0001, TA0002, TA0005, TA0007, TA0009"
+    technique = "T1566, T1204, T1005, T1203, T1588.002, T1059"
+    false_positives = "Legitimate use of cryptocurrency wallets, administrative scripts for regional software (Innorix, CrossEX), developers running scripts from download folders, or build processes using shell commands could trigger this rule. Tuning may be required based on environment specifics."
+
+  events:
+    $p.metadata.event_type = "PROCESS_LAUNCH"
+    $p.principal.hostname = $hostname
+
+    (
+      // Condition 1: Cryptocurrency Wallet Compromise Activity
+      // Looks for commands accessing common crypto wallet files or directories.
+      // Potential FP: Legitimate use of wallets or related backup software.
+      re.regex($p.target.process.command_line, `(?i)(wallet\.dat|seed\.seco|private_key|mnemonics\.txt|exodus|atomic wallet|coinomi|electrum|metamask)`)
+      and not re.regex($p.principal.process.file.path, `(?i)(Exodus|atomic|Coinomi|Electrum|MetaMask)`)
+
+      or
+
+      // Condition 2: Regional Software Exploitation (e.g., South Korea)
+      // Looks for suspicious child processes spawned by known vulnerable software.
+      // Potential FP: Legitimate software updates or admin scripts for these applications.
+      $p.principal.process.file.name in ("InnorixAgent.exe", "CrossEXService.exe", "CrossEXLive.exe")
+      and $p.target.process.file.name in ("cmd.exe", "powershell.exe", "rundll32.exe", "mshta.exe")
+
+      or
+
+      // Condition 3: Social Engineering Payload Execution
+      // Detects script execution from common download/temp locations, a frequent result of phishing.
+      // Potential FP: Users or legitimate installers running scripts from these locations.
+      re.regex($p.target.process.command_line, `(?i)(Users\\[^\\]+\\(Downloads|AppData)|\\Temp\\)`)
+      and $p.target.process.file.name in ("wscript.exe", "cscript.exe", "mshta.exe", "powershell.exe")
+      and re.regex($p.target.process.command_line, `(\.js|\.vbs|\.hta|\.ps1)`)
+
+      or
+
+      // Condition 4: Supply Chain Compromise via Developer Tools
+      // Detects developer tools spawning discovery commands or shells, indicative of a compromised toolchain.
+      // Potential FP: Legitimate developer or build system activities.
+      $p.principal.process.file.name in ("npm.exe", "node.exe", "git.exe", "MSBuild.exe")
+      and $p.target.process.file.name in ("powershell.exe", "cmd.exe", "whoami.exe", "net.exe", "ipconfig.exe", "systeminfo.exe")
+    )
+
+  match:
+    $hostname over 1h
+
+  outcome:
+    $risk_score = 65
+    $principal_hostname = array_distinct($p.principal.hostname)
+    $principal_user = array_distinct($p.principal.user.userid)
+    $principal_process = array_distinct($p.principal.process.command_line)
+    $principal_process_path = array_distinct($p.principal.process.file.full_path)
+    $target_process = array_distinct($p.target.process.command_line)
+    $target_process_path = array_distinct($p.target.process.file.full_path)
+    $target_process_hash = array_distinct($p.target.process.file.sha256)
+    $event_count = count_distinct($p.metadata.id)
+
+  condition:
+    $p
+}

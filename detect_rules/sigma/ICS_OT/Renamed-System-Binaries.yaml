@@ -1,0 +1,55 @@
+title: Renamed System Binary Execution
+status: experimental
+description: >-
+  Detects the execution of a legitimate system binary that has been renamed.
+  Adversaries may rename system utilities to bypass security controls, such as application whitelisting based on file names.
+references:
+  - https://attack.mitre.org/techniques/T1036/003/
+author: RW
+date: 2025-08-18
+tags:
+  - attack.defense_evasion
+  - attack.t1036.003
+logsource:
+  category: process_creation
+  product: windows
+detection:
+    # This selection identifies processes whose internal name corresponds to a common system binary.
+  selection_orig_name:
+    OriginalFileName:
+      - 'cmd.exe'
+      - 'powershell.exe'
+      - 'pwsh.exe'
+      - 'cscript.exe'
+      - 'wscript.exe'
+      - 'mshta.exe'
+      - 'rundll32.exe'
+      - 'regsvr32.exe'
+      - 'bitsadmin.exe'
+      - 'certutil.exe'
+      - 'msiexec.exe'
+    # This filter excludes cases where the running process name matches its internal name.
+  filter_img_name:
+    Image|endswith:
+      - '\cmd.exe'
+      - '\powershell.exe'
+      - '\pwsh.exe'
+      - '\cscript.exe'
+      - '\wscript.exe'
+      - '\mshta.exe'
+      - '\rundll32.exe'
+      - '\regsvr32.exe'
+      - '\bitsadmin.exe'
+      - '\certutil.exe'
+      - '\msiexec.exe'
+    # This filter excludes executions from legitimate system directories.
+  filter_path:
+    Image|startswith:
+      - 'C:\Windows\System32\'
+      - 'C:\Windows\SysWOW64\'
+      - 'C:\Windows\WinSxS\'
+  condition: selection_orig_name and not filter_img_name and not filter_path
+falsepositives:
+  - Legitimate software installers or self-extracting archives (e.g., from SCCM in ccmcache) may contain renamed copies of system binaries like 'msiexec.exe'.
+  - If false positives occur, consider excluding known legitimate parent processes or specific application paths.
+level: high

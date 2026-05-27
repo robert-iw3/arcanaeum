@@ -1,0 +1,77 @@
+{
+  "name": "DPRK Threat Actor Hunting",
+  "queries": [
+    {
+      "name": "impossible_travel_multi_geo_login",
+      "query": "@event.category:authentication AND @event.outcome:success",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "phishing_link_click",
+      "query": "@event.category:web AND @vulnerability.category:(\"Phishing & Fraud\" OR Malware)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "suspicious_tld_visited",
+      "query": "@url.domain:*.(xyz OR top OR online OR club OR live OR icu OR gq OR buzz)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "suspicious_process_execution",
+      "query": "(@process.name:(powershell.exe OR pwsh.exe) AND @process.cmdline:(*\\ -enc\\ * OR *\\ -encoded\\ * OR *\\ -w\\ hidden\\ * OR *\\ IEX\\ * OR *\\ Invoke-Expression\\ *)) OR (@process.name:mshta.exe AND @process.cmdline:(*http:* OR *https:* OR *javascript:*))",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "new_service_created",
+      "query": "@winlog.event_id:4697 AND @winlog.source:\"Microsoft-Windows-Security-Auditing\"",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "new_scheduled_task_created",
+      "query": "@winlog.event_id:106 AND @winlog.channel:\"Microsoft-Windows-TaskScheduler/Operational\"",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "cryptocurrency_site_visited",
+      "query": "@url:(*binance.com* OR *coinbase.com* OR *kraken.com* OR *kucoin.com* OR *bybit.com* OR *metamask.io*)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    }
+  ],
+  "cases": [
+    {
+      "name": "DPRK Threat Actor Hunting",
+      "status": "medium",
+      "condition": "event_count_0 >= 1 OR event_count_1 >= 1 OR event_count_2 >= 1 OR event_count_3 >= 1 OR event_count_4 >= 1 OR event_count_5 >= 1 OR event_count_6 >= 1"
+    }
+  ],
+  "options": {
+    "evaluation_window": 3600,
+    "keep_alive": 3600,
+    "max_signal_duration": 3600,
+    "correlation_based_signal": {
+      "correlation_inputs": [
+        {
+          "rule_id": "dprk_hunting_correlation"
+        }
+      ],
+      "correlated_by_fields": [
+        "@host",
+        "@usr"
+      ],
+      "distinct_fields": [
+        "case_id"
+      ]
+    }
+  },
+  "message": "DPRK Hunting: {{distinct_count}} activity(s) on host {{host}} by user {{usr}}: {{case_names}}",
+  "type": "correlation_based_signal",
+  "tags": [],
+  "is_enabled": true
+}

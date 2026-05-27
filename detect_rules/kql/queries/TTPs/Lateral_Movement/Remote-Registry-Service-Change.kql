@@ -1,0 +1,50 @@
+// Name: Rapid Remote Registry Service State Change
+// Author: RW
+// Date: 2025-08-06
+// Description: Detects when the 'RemoteRegistry' service is enabled and then quickly disabled on the same host, often by the same user. This pattern is indicative of the BitLockMove lateral movement tool which transiently enables the service to perform remote registry modifications.
+// Tactic: Defense Evasion, Lateral Movement
+// Technique: T1569.002 - Service Execution
+// False Positive Sensitivity: Medium
+
+// Define the time window to correlate the enable and disable events.
+let timeframe = 5m;
+
+// Find instances where the Remote Registry service was enabled (changed from Disabled).
+let EnableEvents =
+    DeviceEvents
+    | where ActionType == "ServiceStartTypeChanged"
+    | where ServiceName == "RemoteRegistry"
+    | where PreviousStartType == "Disabled" and StartType in ("Automatic", "Manual")
+    // Exclude legitimate changes by the Service Control Manager itself.
+    | where not (InitiatingProcessFileName =~ "services.exe" and InitiatingProcessAccountName =~ "NT AUTHORITY\\SYSTEM")
+    | project EnableTime = Timestamp, DeviceId, DeviceName, InitiatingProcessAccountName, InitiatingProcessFileName, EnabledTo = StartType;
+
+// Find instances where the Remote Registry service was disabled.
+let DisableEvents =
+    DeviceEvents
+    | where ActionType == "ServiceStartTypeChanged"
+    | where ServiceName == "RemoteRegistry"
+    | where StartType == "Disabled"
+    | where not (InitiatingProcessFileName =~ "services.exe" and InitiatingProcessAccountName =~ "NT AUTHORITY\\SYSTEM")
+    | project DisableTime = Timestamp, DeviceId, InitiatingProcessAccountName;
+
+// Correlate the enable and disable events happening by the same account on the same device within the specified timeframe.
+EnableEvents
+| join kind=inner (
+    DisableEvents
+) on DeviceId, InitiatingProcessAccountName
+// Ensure the disable event happens after the enable event but within the correlation window.
+| where DisableTime between (EnableTime .. (EnableTime + timeframe))
+// FP Tuning: Legitimate administrators might perform this action, but the rapid succession is suspicious.
+// The timeframe can be adjusted to reduce noise. A shorter timeframe is higher fidelity for this specific tool.
+| project
+    Timestamp = DisableTime,
+    DeviceName,
+    AccountName = InitiatingProcessAccountName,
+    Tactic = "Defense Evasion, Lateral Movement",
+    Technique = "T1569.002 - Service Execution",
+    Description = "The 'RemoteRegistry' service was enabled and then disabled within a short period, a behavior associated with the BitLockMove tool.",
+    EnableTime,
+    DisableTime,
+    EnabledToStartType = EnabledTo,
+    InitiatingProcess = InitiatingProcessFileName

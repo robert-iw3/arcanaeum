@@ -1,0 +1,32 @@
+title: AWS S3 Reconnaissance Using S3 Browser
+id: b656d7e6-d317-450c-93e4-260dbeb94343
+status: experimental
+description: Detects reconnaissance activity in an AWS environment using the S3 Browser tool. This behavior is associated with threat actors like Bling Libra (ShinyHunters) who use the tool to enumerate S3 buckets and their configurations as a precursor to data access or extortion.
+references:
+  - https://unit42.paloaltonetworks.com/shinyhunters-ransomware-extortion/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.discovery
+  - attack.t1538
+  - cloud
+  - aws
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+    # Detects the use of the S3 Browser tool via its User-Agent string
+  s3_browser:
+    UserAgent|startswith: 'S3 Browser/'
+    # Specific reconnaissance API calls made by the S3 Browser tool
+  recon_events:
+    EventName:
+      - 'ListBuckets'
+      - 'ListObjects'
+      - 'GetBucketLocation'
+      - 'GetBucketObjectLockConfiguration'
+  condition: s3_browser and recon_events
+falsepositives:
+  - Legitimate use of the S3 Browser tool by administrators or developers for managing S3 buckets.
+  - Consider tuning this rule by baselining legitimate user activity or focusing on non-approved user agents.
+level: low

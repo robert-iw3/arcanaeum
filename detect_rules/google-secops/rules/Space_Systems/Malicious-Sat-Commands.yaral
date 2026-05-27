@@ -1,0 +1,43 @@
+rule malicious_satellite_command_anomaly {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects commands that were reportedly received and executed by a satellite but have no corresponding 'sent' record from the ground control station logs. This indicates a potential command injection attack, either from a compromised ground station asset or via a Man-in-the-Middle (MitM) attack on the command link itself. This detection relies on the defense-in-depth strategy of cross-validating commands sent from the ground with telemetry received from the satellite, as discussed in the reference."
+    tags = "SATELLITE, AEROSPACE, COMMAND_AND_CONTROL, IMPACT"
+    tactic = "TA0011, TA0040"
+    technique = "T1071, T1489"
+    false_positives = "Logging delays between the ground station and satellite telemetry ingestion. Dropped logs from the ground control station. Misconfigured or non-unique command identifiers across log sources."
+
+  events:
+    // Event for a command sent from the ground station.
+    // Tuning: Replace 'SATELLITE_COMMAND_SENT' with the actual event type for your ground station command logs.
+    $sent.metadata.event_type = "SATELLITE_COMMAND_SENT"
+    // This field should contain the unique identifier for the command.
+    $command_id = $sent.udm.extensions.command_id
+
+    // Event for a command received by the satellite, reported via telemetry.
+    // Tuning: Replace 'SATELLITE_COMMAND_RECEIVED' with the actual event type for your satellite telemetry logs.
+    $received.metadata.event_type = "SATELLITE_COMMAND_RECEIVED"
+    // This field should contain the same unique command identifier.
+    $command_id = $received.udm.extensions.command_id
+    // Capture the satellite ID for context, assuming the satellite is represented as an asset.
+    $satellite_id = $received.principal.asset.hostname
+
+  match:
+    // Correlate events by the unique command ID over a 1-hour window to account for potential latency.
+    $command_id over 1h
+
+  outcome:
+    // Set a risk score for the detection.
+    $risk_score = 70
+    // Consolidate details for the alert.
+    $anomalous_command_id = $command_id
+    $satellite_id = array_distinct($satellite_id)
+    $received_event_count = count($received.metadata.id)
+    // For investigation, it's useful to know which telemetry events reported this.
+    $telemetry_event_ids = array_distinct($received.metadata.id)
+
+  condition:
+    // The core detection logic: a command was received, but no corresponding command was sent.
+    #received > 0 and #sent = 0
+}

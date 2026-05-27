@@ -1,0 +1,39 @@
+---
+- name: Install HAProxy
+  ansible.builtin.apt:
+    name: haproxy
+    state: present
+    update_cache: true
+
+- name: Copy HAProxy certs
+  loop:
+    - cert
+    - key
+  ansible.builtin.copy:
+    src: '.tmp/certs/haproxy/{{ item }}.pem'
+    dest: /etc/certs.d/
+    owner: haproxy
+    group: haproxy
+    mode: "0600"
+
+- name: Copy HAProxy private key
+  ansible.builtin.copy:
+    remote_src: true
+    src: /etc/certs.d/key.pem
+    dest: /etc/certs.d/cert.pem.key
+    owner: haproxy
+    group: haproxy
+    mode: "0600"
+
+- name: Remove original HAProxy private key
+  ansible.builtin.file:
+    path: /etc/certs.d/key.pem
+    state: absent
+
+- name: Copy HAProxy config
+  ansible.builtin.template:
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    owner: haproxy
+    mode: "0600"
+  notify: Restart HAProxy

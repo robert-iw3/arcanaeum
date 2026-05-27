@@ -1,0 +1,70 @@
+rule scada_parameter_tampering {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects two patterns of SCADA/ICS parameter manipulation indicative of an attack: 1) A high volume of distinct parameter changes by a single user or from a single source system in a short time. 2) Any modification to a pre-defined list of critical parameters by an unauthorized user or system. This aligns with intelligence where attackers made widespread changes to parameters like voltage levels, pump pressure, and valve states. IMPORTANT: This rule requires logs from a SCADA/ICS/OT monitoring solution mapped to the UDM. The event type and fields used are placeholders and must be adapted to your specific log source."
+    tactic = "TA0040"
+    technique = "T1565"
+    false_positives = "Legitimate operators performing bulk configuration changes. Authorized users or systems missing from the allowlists. Thorough tuning of thresholds and reference lists is essential for your specific OT environment."
+
+  events:
+    // Catches a generic event for a SCADA parameter change.
+    // Users must map their specific SCADA/ICS logs to UDM.
+    $change.metadata.event_type = "GENERIC_EVENT"
+    // Filter for the specific log source for SCADA events. This is a placeholder.
+    $change.metadata.product_name = "SCADA Monitoring System"
+    $change.security_result.action = "MODIFIED"
+
+    // Capture key fields for correlation and analysis.
+    $change.principal.user.userid = $user
+    $change.principal.ip = $ip
+    // Using target.application as a placeholder for the parameter name (e.g., "PumpPressureSetpoint").
+    $change.target.application = $parameter
+    // The PLC or device being modified.
+    $change.target.resource.name = $device
+
+  match:
+    // Group all changes by the acting user and source IP over a 1-hour window.
+    $user, $ip over 1h
+
+  outcome:
+    // --- Bulk Change Analysis ---
+    $distinct_parameter_count = count_distinct($parameter)
+    // Tuning: Threshold for the number of distinct parameter changes to be considered a "bulk" operation.
+    $bulk_change_threshold = 10
+
+    // --- Critical Change Analysis ---
+    // Check if any of the changed parameters are on the critical list.
+    // Tuning: The %critical_scada_parameters list must be populated with sensitive parameter names.
+    $critical_parameters_changed = array_distinct(
+      if($parameter in %critical_scada_parameters, $parameter, "")
+    )
+    // Check if the user or IP is NOT in the authorized lists.
+    // Tuning: The %authorized_scada_users and %authorized_scada_systems lists must be populated.
+    $is_unauthorized_user = not ($user in %authorized_scada_users)
+    $is_unauthorized_system = not ($ip in %authorized_scada_systems)
+
+    // --- Shared Outcome Fields ---
+    $risk_score = if(
+      #critical_parameters_changed > 0 and ($is_unauthorized_user or $is_unauthorized_system),
+      85, // High risk for unauthorized critical changes
+      60  // Medium risk for bulk changes
+    )
+    $principal_ip = $ip
+    $principal_user_userid = $user
+    $target_devices_affected = array_distinct($device)
+    $all_changed_parameters = array_distinct($parameter)
+    $detection_method = if(
+      #critical_parameters_changed > 0 and ($is_unauthorized_user or $is_unauthorized_system),
+      "Unauthorized Critical Parameter Change",
+      "Bulk Parameter Change"
+    )
+
+  condition:
+    // Trigger an alert if either condition is met:
+    // 1. A critical parameter was changed by an unauthorized user or from an unauthorized system.
+    ( #critical_parameters_changed > 0 and ($is_unauthorized_user or $is_unauthorized_system) )
+    or
+    // 2. The number of distinct parameters changed exceeds the threshold.
+    ( $distinct_parameter_count > $bulk_change_threshold )
+}

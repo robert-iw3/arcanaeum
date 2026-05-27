@@ -1,0 +1,73 @@
+{
+  "data": {
+    "type": "signal_correlation",
+    "attributes": {
+      "name": "ClickFix Social Engineering Attack Detection",
+      "enabled": true,
+      "cases": [
+        {
+          "name": "Suspicious Command Execution (Win+R/Win+X)",
+          "status": "high",
+          "query": "source:endpoint @parent_process.name:(cmd.exe OR powershell.exe) @process.name:(curl.exe OR mshta.exe OR certutil.exe OR rundll32.exe) | aggregate count by @host, @user, @parent_process.name, @process.name, @process.command_line"
+        },
+        {
+          "name": "RunMRU Registry Key Monitoring",
+          "status": "high",
+          "query": "source:endpoint @registry.path:*\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\RunMRU\\* @registry.value:/(powershell|cmd|mshta|rundll32|certutil|curl|bitsadmin|wget|iex\\(|invoke-expression|downloadstring)/ | aggregate count by @host, @user, @registry.path, @registry.value_name, @registry.value"
+        },
+        {
+          "name": "DLL Side-Loading and Process Injection",
+          "status": "high",
+          "query": "source:endpoint @process.name:(jp2launcher.exe OR filezilla.exe OR nvidia.exe) @image_load.name:(msvcp140.dll OR libcef.dll OR libsqlite3-0.dll) @image_load.path:(*\\AppData\\* OR *\\ProgramData\\* OR *\\Temp\\*) | aggregate count by @host, @user, @process.name, @image_load.name, @image_load.path"
+        },
+        {
+          "name": "Obfuscated PowerShell Execution",
+          "status": "high",
+          "query": "source:endpoint @process.name:(powershell.exe OR pwsh.exe) @process.command_line:(\"-e \" OR \"-en \" OR \"-enc \" OR \"-encodedcommand \" OR FromBase64String OR \"iex(\" OR Invoke-Expression OR DownloadString OR /[\\u0400-\\u04FF]+/) | aggregate count by @host, @user, @parent_process.name, @process.command_line"
+        },
+        {
+          "name": "Typosquatting and Malvertising Domains",
+          "status": "high",
+          "query": "source:network_resolution @dns.query:(iplogger.co OR oktacheck.it.com OR docusign.sa.com OR stuffgull.top OR sumeriavgv.digital OR pub-164d8d82c41c4e1b871bc21802a18154.r2.dev OR pub-626890a630d8418ea6c2ef0fa17f02ef.r2.dev OR pub-a5a2932dc7f143499b865f8580102688.r2.dev OR pub-7efc089d5da740a994d1472af48fc689.r2.dev OR agroeconb.live OR animatcxju.live OR webbs.live OR diab.live OR mhbr.live OR decr.live OR lexip.live OR rimz.live OR byjs.live OR btco.live OR izan.live OR k.veuwb.live OR r.netluc.live OR heyues.live OR k.mailam.live OR doccsign.it.com OR dosign.it.com OR loyalcompany.net OR leocompany.org OR mhousecreative.com OR mh-sns.com OR lasix20.com) | aggregate count by @ip.src, @user, @dns.query"
+        },
+        {
+          "name": "Malware Hashes",
+          "status": "high",
+          "query": "source:endpoint @process.hash:(2bc23b53bb76e59d84b0175e8cba68695a21ed74be9327f0b6ba37edc2daaeef OR 06efe89da25a627493ef383f1be58c95c3c89a20ebb4af4696d82e729c75d1a7 OR 5809c889e7507d357e64ea15c7d7b22005dbf246aefdd3329d4a5c58d482e7e1 OR 52e6e819720fede0d12dcc5430ff15f70b5656cbd3d5d251abfc2dcd22783293 OR 57e75c98b22d1453da5b2642c8daf6c363c60552e77a52ad154c200187d20b9a OR 33a0cf0a0105d8b65cf62f31ec0a6dcd48e781d1fece35b963c6267ab2875559 OR 5C762FF1F604E92ECD9FD1DC5D1CB24B3AF4B4E0D25DE462C78F7AC0F897FC2D OR 9DCA5241822A0E954484D6C303475F94978B6EF0A016CBAE1FBA29D0AED86288 OR CBAF513E7FD4322B14ADCC34B34D793D79076AD310925981548E8D3CFF886527 OR 506ab08d0a71610793ae2a5c4c26b1eb35fd9e3c8749cd63877b03c205feb48a OR 3ACC40334EF86FD0422FB386CA4FB8836C4FA0E722A5FCFA0086B9182127C1D7) | aggregate count by @host, @user, @process.name, @process.command_line, @process.hash"
+        },
+        {
+          "name": "Malicious IP Address",
+          "status": "high",
+          "query": "source:network_traffic @ip.dst:80.77.23.48 | aggregate count by @ip.src, @ip.dst, @user, @port.dst"
+        }
+      ],
+      "group_by_fields": ["@host", "@ip.src", "@user"],
+      "distinct_fields": ["case_id"],
+      "correlation": {
+        "expression": "distinct_count >= 2",
+        "timeframe": "1h"
+      },
+      "message": "ClickFix Social Engineering Attack Detected: {distinct_count} distinct TTPs on host {@host}, source IP {@ip.src}, or user {@user}. Techniques: {case_names}. Details: {@process.command_line OR @registry.value OR @image_load.name OR @dns.query OR @process.hash OR @ip.dst}. Timeframe: {first_activity} to {last_activity}",
+      "severity": "high",
+      "tags": [
+        "security:attack",
+        "tactic:TA0001",
+        "tactic:TA0005",
+        "technique:T1204.004",
+        "technique:T1059.001",
+        "technique:T1059.003",
+        "technique:T1574.002",
+        "technique:T1055",
+        "technique:T1112",
+        "technique:T1566.002",
+        "technique:T1583.001",
+        "malware:netsupport_rat",
+        "malware:latrodectus",
+        "malware:lumma_stealer"
+      ],
+      "options": {
+        "evaluation_window": "1h"
+      }
+    }
+  }
+}

@@ -1,0 +1,41 @@
+// title: New User Identity Creation
+// description: Detects the creation of new user identities by users or application principals that are not on an allowlist of authorized creators. Threat actors like Scattered Spider may create new accounts for persistence (T1136) after gaining initial access. This detection helps identify user creation that deviates from established provisioning processes.
+// author: RW
+// date: 2025-07-31
+// references:
+//   - https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-320a
+// tags:
+//   - attack.t1136
+//   - attack.persistence
+//   - group.scattered_spider
+
+// -- KQL query for Azure AD / Entra ID AuditLogs --
+
+// --_comment: Define the timeframe for the search.
+let timeframe = 1d;
+
+// --_comment: To reduce false positives, populate this list with UPNs of users or AppIds of service principals authorized to create user accounts (e.g., HR system provisioning apps, IT admins). This is a critical tuning step.
+let authorized_creators_allowlist = dynamic([]);
+
+AuditLogs
+| where TimeGenerated > ago(timeframe)
+// --_comment: Filter for successful user creation events in Azure AD.
+| where Category == "UserManagement" and OperationName == "Add user" and Result == "success"
+// --_comment: Extract the creator's identity, which can be a user or a service principal.
+| extend Creator = tostring(iff(isnotempty(InitiatedBy.user.userPrincipalName), InitiatedBy.user.userPrincipalName, InitiatedBy.app.appId))
+// --_comment: Exclude creations by authorized accounts to focus on anomalous activity.
+| where Creator !in~ (authorized_creators_allowlist)
+// --_comment: Extract relevant details for investigation.
+| extend
+    NewUserPrincipalName = tostring(TargetResources[0].userPrincipalName),
+    NewUserDisplayName = tostring(TargetResources[0].displayName),
+    NewUserId = tostring(TargetResources[0].id),
+    CreatorIpAddress = tostring(InitiatedBy.user.ipAddress)
+| project-reorder
+    TimeGenerated,
+    NewUserPrincipalName,
+    NewUserDisplayName,
+    Creator,
+    CreatorIpAddress,
+    CorrelationId,
+    NewUserId

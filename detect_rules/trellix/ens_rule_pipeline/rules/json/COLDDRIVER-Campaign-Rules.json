@@ -1,0 +1,50 @@
+[
+  {
+    "type": "expert",
+    "name": "Detect COLDRIVER ClickFix Rundll32 Network Share Execution",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"rundll32.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*\\\\*.dll*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects rundll32.exe executing DLLs from UNC/network share paths (e.g., \\\\<C2>\\*.dll) — signature TTP of COLDRIVER ClickFix campaigns (2025-2026) delivering NOROBOT/BAITSWITCH loaders. High-fidelity for social-engineering lures tricking users into running commands. Tune exclusions for legitimate network share/DLL execution (e.g., corporate file servers)."
+  },
+  {
+    "type": "expert",
+    "name": "Detect COLDRIVER Persistence via UserInitMprLogonScript",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"reg.exe\" -v \"powershell.exe\" }\n   }\n   Target {\n      Match REGISTRY {\n         Include OBJECT_NAME { -v \"HKEY_CURRENT_USER\\\\Environment\\\\UserInitMprLogonScript\" }\n         Include -access \"WRITE,CREATE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects writes to HKCU\\Environment\\UserInitMprLogonScript — primary persistence mechanism used by COLDRIVER's BAITSWITCH downloader to execute PowerShell stagers at next logon (observed in 2025 ClickFix chains). Highly specific; low FP risk. Tune for rare legitimate logon script usage by admins."
+  },
+  {
+    "type": "expert",
+    "name": "Detect COLDRIVER Encrypted Payload Storage in Registry",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"powershell.exe\" }\n   }\n   Target {\n      Match REGISTRY {\n         Include OBJECT_NAME { -v \"HKEY_CURRENT_USER\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Explorer\\\\CLSID\\\\{53121F47-8C52-44A7-89A5-5595BB2B32BE}\\\\DefaultIcon\\\\EnthusiastMode\" -v \"HKEY_CURRENT_USER\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Explorer\\\\CLSID\\\\{53121F47-8C52-44A7-89A5-5595BB2B32BE}\\\\DefaultIcon\\\\QatItems\" }\n         Include -access \"WRITE,CREATE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects PowerShell writing to specific CLSID keys (EnthusiastMode/QatItems under {53121F47-...}) for storing encrypted payloads — confirmed IOC from COLDRIVER malware staging (2025-2026). Extremely specific; very low false positives. Minimal tuning needed unless legitimate software uses this exact path."
+  },
+  {
+    "type": "firewall",
+    "name": "Detect COLDRIVER C2 Communication",
+    "application": "**",
+    "direction": "out",
+    "protocol": "TCP",
+    "port": "80,443",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects outbound HTTP/HTTPS traffic potentially to COLDRIVER C2 domains (e.g., captchanom.top, southprovesolutions.com) used in ClickFix delivery chains (BAITSWITCH/SIMPLEFIX/NOROBOT). Domain/user-agent filtering not native in ENS Firewall; use Web Control add-on for precision. Tune for legitimate web traffic patterns."
+  },
+  {
+    "type": "expert",
+    "name": "Detect COLDRIVER PowerShell Reconnaissance Activity",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"powershell.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*whoami /all*\"\n         Include -command_line \"*ipconfig /all*\"\n         Include -command_line \"*systeminfo*\"\n         Include -command_line \"*net share*\"\n         Include -command_line \"*net session*\"\n         Include -command_line \"*netstat -ano*\"\n         Include -command_line \"*arp -a*\"\n         Include -command_line \"*net user*\"\n         Include -command_line \"*.pdf*\"\n         Include -command_line \"*.doc*\"\n         Include -command_line \"*.xls*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects PowerShell executing reconnaissance (system/network/user info) and file enumeration (.pdf/.doc/.xls) — common in COLDRIVER ClickFix payloads (LOSTKEYS, BAITSWITCH, SIMPLEFIX) for target profiling and document theft. Broad rule; may FP on admin scripts — add exclusions for known legitimate PowerShell activity or users."
+  }
+]

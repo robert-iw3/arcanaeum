@@ -1,0 +1,72 @@
+rule HighEntropyExecutablePerformingProcessInjection {
+  meta:
+    name = "High Entropy Executable Performing Process Injection"
+    author = "RW"
+    date = "2025-08-02"
+    description = "Detects executable files with high entropy (packed/encrypted) that perform process injection activities, indicating malicious loaders attempting to evade analysis."
+    tactic = "Defense Evasion"
+    technique = "T1027"
+    false_positive_sensitivity = "Medium. Legitimate packed/DRM software may trigger this, but correlation with injection reduces FPs. Tuning exclusions is required."
+    severity = "HIGH"
+
+  // --- Configuration ---
+  strings:
+    // Define the entropy threshold. A value > 7.0 (out of 8.0) is typically considered high.
+    $entropy_threshold = 7.2
+    // Define the time window to correlate the file's existence with the injection activity (1 day in milliseconds).
+    $time_frame_ms = 86400000
+
+  events:
+    // Event 1: Process Injection Activity
+    $injection_event.metadata.event_type = "PROCESS_CREATE_REMOTE_THREAD" or // CreateRemoteThreadApiCall
+                                         $injection_event.metadata.event_type = "PROCESS_THREAD_APCALL_REMOTE" or // QueueApcThreadApiCall
+                                         $injection_event.metadata.event_type = "PROCESS_MEMORY_ALLOCATION_REMOTE" // RemoteVirtualAllocApiCall
+    $injection_event.principal.process.file.sha256 != "" // Use SHA256 as UDM standard, assuming conversion/availability
+
+    // Event 2: File Entropy Information
+    // NOTE: This relies on entropy information being available in UDM.
+    // It's likely found in the `FILE_ARTIFACT` event type or potentially `PROCESS_LAUNCH`
+    // if your EDR collects and maps it to UDM. The exact field might vary.
+    // We assume `security_result.attribute.entropy` exists for simplicity, but it might need adjustment.
+    $file_entropy_info.metadata.event_type = "FILE_ARTIFACT" // Or potentially "PROCESS_LAUNCH"
+    $file_entropy_info.file.sha256 = $injection_event.principal.process.file.sha256 // Correlate by file hash
+    $file_entropy_info.security_result.attribute.entropy > $entropy_threshold // Assuming entropy is stored here
+
+    // Correlate the injection event with the file entropy info based on SHA256 and time
+    $file_entropy_info.file.sha256 = $injection_event.principal.process.file.sha256 // Hash matching is explicit
+    $injection_event.metadata.event_timestamp between $file_entropy_info.metadata.event_timestamp - $time_frame_ms and $file_entropy_info.metadata.event_timestamp + $time_frame_ms
+
+
+  match:
+    // No specific `group by` needed here as the correlation happens directly between events
+    // and the `outcome` summarizes the findings based on the matched events.
+
+  outcome:
+    $injection_timestamp = $injection_event.metadata.event_timestamp
+    $file_info_timestamp = $file_entropy_info.metadata.event_timestamp
+    $device_name = $injection_event.principal.asset.hostname
+    $initiating_process_file_name = $injection_event.principal.process.file.full_path
+    $initiating_process_command_line = $injection_event.principal.process.command_line
+    $initiating_process_sha256 = $injection_event.principal.process.file.sha256
+    $file_entropy = $file_entropy_info.security_result.attribute.entropy // Capture entropy value
+    $injection_types = array_distinct(if($injection_event.metadata.event_type = "PROCESS_CREATE_REMOTE_THREAD", "CreateRemoteThread"),
+                                     if($injection_event.metadata.event_type = "PROCESS_THREAD_APCALL_REMOTE", "QueueApcThread"),
+                                     if($injection_event.metadata.event_type = "PROCESS_MEMORY_ALLOCATION_REMOTE", "RemoteVirtualAlloc"))
+
+    // Targets are more complex to list directly from correlated events without specific UDM fields,
+    // so we'll collect the target process file names.
+    $target_processes = array_distinct($injection_event.target.process.file.full_path) limit 5
+
+    // Further tuning: Exclude known legitimate software that uses packers and might perform injection-like behavior.
+    // This could be done with a Reference List like %legitimate_packed_apps
+    // if not ($initiating_process_file_name in %legitimate_packed_apps)
+
+  condition:
+    // Trigger the rule if both injection event and high-entropy file info are found
+    $injection_event and $file_entropy_info
+}
+
+// Reference List (Optional):
+// 1.  **legitimate_packed_apps:** Create a Chronicle Reference List named `legitimate_packed_apps` and populate it with
+//     file names of legitimate, packed applications known to cause false positives.
+//     e.g., legit_packed_app.exe, some_installer.exe

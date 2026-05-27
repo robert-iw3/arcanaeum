@@ -1,0 +1,87 @@
+{
+  "name": "Linux Rootkit and Anti-Forensic Activity (DPRK Stealth Rootkit)",
+  "message": "DPRK Rootkit Activity: {{distinct_count}} pattern(s) on host {{@host}} by user {{@user.name}}: {{case_names}}. Details: {{@details}}, Suspicious Process: {{@process.name}}, Command Line: {{@process.command_line}}, Parent: {{@parent_process.name}}",
+  "isEnabled": true,
+  "type": "signal_correlation",
+  "tags": [
+    "security:attack",
+    "technique:T1564.001",
+    "technique:T1547.006",
+    "technique:T1070.004",
+    "technique:T1070.006",
+    "technique:T1562.003"
+  ],
+  "options": {
+    "evaluationWindow": 3600,
+    "keepAlive": 10800,
+    "maxSignalDuration": 21600
+  },
+  "queries": [
+    {
+      "name": "Hidden Rootkit Artifact Detected",
+      "query": "source:(sysmon OR endpoint OR edr) (@process.path:(/usr/lib64/tracker-fs OR /usr/include/tracker-fs/tracker-efs OR /etc/init.d/tracker-fs OR /etc/rc[235].d/S55tracker-fs OR /proc/acpi/pcicard) OR @process.name:(/usr/lib64/tracker-fs OR /usr/include/tracker-fs/tracker-efs OR /etc/init.d/tracker-fs OR /etc/rc[235].d/S55tracker-fs OR /proc/acpi/pcicard) OR @file.path:(/usr/lib64/tracker-fs OR /usr/include/tracker-fs/tracker-efs OR /etc/init.d/tracker-fs OR /etc/rc[235].d/S55tracker-fs OR /proc/acpi/pcicard))",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name",
+        "@parent_process.name"
+      ]
+    },
+    {
+      "name": "Kernel Tainted by Unsigned Module",
+      "query": "source:syslog @process.name:kernel @message:*tainting\\ kernel* -@message:(*nvidia* OR *vboxdrv* OR *zfs*)",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name",
+        "@parent_process.name"
+      ]
+    },
+    {
+      "name": "Network Connection Without Associated Process",
+      "query": "source:(network OR endpoint) @os:Linux AND @event.action:(allowed OR success) AND (@process.name:NULL OR @process.pid:0) AND -@network.destination.ip:(127.0.0.0/8 OR 10.0.0.0/8 OR 172.16.0.0/12 OR 192.168.0.0/16)",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name",
+        "@parent_process.name"
+      ]
+    },
+    {
+      "name": "Anti-Forensic History Disabling",
+      "query": "source:(sysmon OR endpoint OR edr) @os:Linux AND (@process.name:(sh OR bash OR dash OR zsh OR ksh OR csh OR tcsh) AND @process.command_line:(--noprofile OR --norc OR HISTFILE=/dev/null OR HISTORY=/dev/null OR BASH_HISTORY=/dev/null OR unset\\ HISTFILE OR unset\\ HISTORY OR TMOUT=0)) OR (@process.name:ln AND @process.command_line:(-sf*/dev/null*) AND @process.command_line:(*.bash_history OR *.zsh_history OR *.zhistory OR *.history OR *.sh_history))",
+      "aggregation": "event_count",
+      "data_source": "logs",
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@process.name",
+        "@parent_process.name"
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "status": "high",
+      "condition": "event_count(\"Hidden Rootkit Artifact Detected\") >= 1"
+    },
+    {
+      "status": "high",
+      "condition": "event_count(\"Kernel Tainted by Unsigned Module\") >= 1"
+    },
+    {
+      "status": "medium",
+      "condition": "event_count(\"Network Connection Without Associated Process\") >= 1"
+    },
+    {
+      "status": "medium",
+      "condition": "event_count(\"Anti-Forensic History Disabling\") >= 1"
+    }
+  ]
+}

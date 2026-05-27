@@ -1,0 +1,28 @@
+title: OAI Reverse Proxy User Agent Detected in AWS
+id: e207e9db-89b0-4a56-b06a-a98f1abe42d8
+status: experimental
+description: >-
+  Detects the user agent of the 'OAI Reverse Proxy' tool. This tool is known to be used by attackers in LLMjacking campaigns to manage and monetize access to compromised cloud accounts with enabled Large Language Model (LLM) services.
+references:
+  - https://www.sysdig.com/blog/llmjacking-stolen-cloud-credentials-used-in-new-ai-attack
+author: RW
+date: 2025-08-19
+tags:
+  - attack.command_and_control
+  - attack.t1102
+  - cloud
+  - aws
+  - aws.bedrock
+  - ai.llm
+logsource:
+  service: cloudtrail
+detection:
+  selection:
+    # The user agent for the OAI Reverse Proxy tool
+    userAgent|contains: 'OAI Reverse Proxy'
+    # Scoping to Bedrock API calls as seen in the LLMjacking campaign
+    eventSource: 'bedrock.amazonaws.com'
+  condition: selection
+falsepositives:
+  - The 'OAI Reverse Proxy' is an open-source tool that could potentially be used for legitimate purposes, such as creating a unified API endpoint for various LLM services. However, its presence in an enterprise environment warrants investigation.
+level: medium

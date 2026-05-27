@@ -1,0 +1,50 @@
+// Name: Kerberoasting Attempt
+// Author: RW
+// Date: 2025-08-04
+// Description: Detects a potential Kerberoasting attack where a single account requests an unusually high number of
+//              Kerberos service tickets (TGS) for different services, particularly those using weaker RC4 encryption.
+//              This behavior can indicate an adversary is attempting to harvest service account credentials for offline cracking.
+// MITRE ATT&CK: T1558.003
+// False Positive Sensitivity: Medium
+// Tags: Privilege Escalation, T1558.003
+
+// Define the time window for the search.
+let timeWindow = 1h;
+// Define the threshold for the number of unique service tickets requested by a single account.
+// This may need tuning based on your environment's baseline activity.
+let serviceCountThreshold = 10;
+// Placeholder for accounts that are known to legitimately request many service tickets (e.g., monitoring tools, specific admin accounts).
+let AccountExclusionList = dynamic([]);
+// Placeholder for Service Principal Names (SPNs) that are commonly requested and can be excluded to reduce noise.
+let ServiceExclusionList = dynamic([]);
+
+SecurityEvent
+| where TimeGenerated > ago(timeWindow)
+// Filter for Kerberos service ticket request events.
+| where EventID == 4769
+// A strong indicator of Kerberoasting is the request for tickets with weak RC4 encryption (0x17), which are easier to crack offline.
+| where TicketEncryptionType == "0x17"
+// Exclude machine accounts, which often perform legitimate service ticket requests.
+| where not(Account endswith "$")
+// Exclude known-good accounts and services to reduce false positives.
+| where Account !in (AccountExclusionList)
+| where ServiceName !in (ServiceExclusionList)
+// Summarize by the requesting account to find those requesting many tickets.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    UniqueServiceCount = dcount(ServiceName),
+    TargetedServices = make_set(ServiceName, 100),
+    RequestingIPs = make_set(IpAddress, 10)
+    by Account, Computer
+// Apply the threshold to identify suspicious activity.
+| where UniqueServiceCount > serviceCountThreshold
+// Project the relevant fields for the alert.
+| project
+    StartTime,
+    EndTime,
+    Account,
+    Computer,
+    RequestingIPs,
+    UniqueServiceCount,
+    TargetedServices

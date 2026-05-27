@@ -1,0 +1,120 @@
+name: ESQL Pipeline Automation
+
+on:
+  push:
+    branches: [ release ]
+    paths:
+      - 'elastic-security/queries/*'
+  pull_request:
+    branches: [ release ]
+    paths:
+      - 'elastic-security/queries/*'
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: ./elastic-security
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: elastic-security/requirements.txt
+
+      - name: Build Docker image
+        run: |
+          docker build -t esql-pipeline:latest .
+
+      - name: Run unit tests in Docker
+        run: |
+          docker run --rm esql-pipeline:latest python -m unittest test_esql_pipeline.py -v
+
+      - name: Run pipeline in Docker
+        env:
+          KIBANA_URL: ${{ secrets.KIBANA_URL }}
+          KIBANA_API_KEY: ${{ secrets.KIBANA_API_KEY }}
+          ES_HOST: ${{ secrets.ES_HOST }}
+          ES_INDEX: ${{ vars.ES_INDEX }}
+          STREAM_TO: ${{ vars.STREAM_TO }}
+          OVERWRITE: ${{ vars.OVERWRITE }}
+          CA_CERT_PATH: ${{ secrets.CA_CERT_PATH }}
+        run: |
+          docker run --rm \
+            -e KIBANA_URL="${KIBANA_URL}" \
+            -e KIBANA_API_KEY="${KIBANA_API_KEY}" \
+            -e ES_HOST="${ES_HOST}" \
+            -e ES_INDEX="${ES_INDEX}" \
+            -e STREAM_TO="${STREAM_TO}" \
+            -e OVERWRITE="${OVERWRITE}" \
+            -e CA_CERT_PATH="${CA_CERT_PATH}" \
+            -v ${{ github.workspace }}/ca.crt:/app/ca.crt:ro \
+            esql-pipeline:latest \
+            python esql_pipeline.py --verbose --compress --max-workers 4 \
+            --kibana-url "${KIBANA_URL}" \
+            --api-key "${KIBANA_API_KEY}" \
+            --es-host "${ES_HOST}" \
+            --es-index "${ES_INDEX}" \
+            --stream-to "${STREAM_TO}" \
+            --overwrite="${OVERWRITE}" \
+            --ca-cert-path="${CA_CERT_PATH}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: esql-rules
+          path: import/final/combined_esql_rules.ndjson.gz
+          retention-days: 7
+
+      - name: Upload CA certificate artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ca-certificate
+          path: ca.crt
+          retention-days: 7
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-logs
+          path: import/final/pipeline.log
+          retention-days: 7
+
+      - name: Scan Docker image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'esql-pipeline:latest'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+
+      - name: Notify on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v2
+        with:
+          slack-bot-token: ${{ secrets.SLACK_BOT_TOKEN }}
+          channel-id: 'pipeline-notifications'
+          text: 'ESQL Pipeline failed for ${{ github.repository }} on branch ${{ github.ref }}. Check logs for details.'

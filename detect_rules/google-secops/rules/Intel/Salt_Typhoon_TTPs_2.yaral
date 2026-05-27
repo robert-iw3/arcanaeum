@@ -1,0 +1,65 @@
+rule salt_typhoon_ttp_2 {
+  meta:
+    description = "Detects a collection of Tactics, Techniques, and Procedures (TTPs) associated with the Salt Typhoon APT group. This includes use of LOLBINs, specific data staging methods, persistence via registry keys and services, and execution of known backdoors."
+    author = "RW"
+    date = "2025-08-19"
+    tags = "SALT_TYPHOON, APT, CHINA, LOLBIN, PERSISTENCE, EXFILTRATION, BACKDOOR"
+    tactic = "TA0002, TA0003, TA0010, TA0011"
+    technique = "T1218, T1059, T1560.001, T1105, T1547.001, T1543.003"
+    false_positives = "Legitimate administrative activities, such as software installation or system administration scripts, may trigger parts of this rule, especially the LOLBIN, service creation, or registry key modifications. Tuning may be required based on environmental norms."
+
+  events:
+    // Detects abuse of common Living-Off-the-Land Binaries (LOLBINs)
+    // This may be noisy and require tuning to filter legitimate admin activity.
+    $lolbin.metadata.event_type = "PROCESS_LAUNCH"
+    $lolbin.principal.hostname = $hostname
+    (
+      $lolbin.target.process.file.path endswith "\\bitsadmin.exe" or
+      $lolbin.target.process.file.path endswith "\\certutil.exe" or
+      $lolbin.target.process.file.path endswith "\\powershell.exe"
+    )
+
+    // Detects data staging with rar.exe or remote file copy with copy.exe
+    $staging_and_copy.metadata.event_type = "PROCESS_LAUNCH"
+    $staging_and_copy.principal.hostname = $hostname
+    (
+      // Specific staging directory used by Salt Typhoon
+      ($staging_and_copy.target.process.file.path endswith "\\rar.exe" and re.regex($staging_and_copy.target.process.command_line, `C:\\Users\\Public\\Music`)) or
+      // Copying from a remote network share
+      ($staging_and_copy.target.process.file.path endswith "\\copy.exe" and re.regex($staging_and_copy.target.process.command_line, `\\\\.+`))
+    )
+
+    // Detects execution of known Salt Typhoon backdoors
+    $backdoor.metadata.event_type = "PROCESS_LAUNCH"
+    $backdoor.principal.hostname = $hostname
+    re.regex($backdoor.target.process.file.path, `JumbledPath|GhostSpider`) or re.regex($backdoor.target.process.command_line, `JumbledPath|GhostSpider`)
+
+    // Detects persistence via registry run keys. Can be common with software installers.
+    $registry.metadata.event_type = "REGISTRY_MODIFICATION"
+    $registry.principal.hostname = $hostname
+    re.regex($registry.target.registry.key, `\\SOFTWARE\\(Wow6432Node\\)?Microsoft\\Windows\\CurrentVersion\\(Run|RunOnce)$`)
+
+    // Detects persistence via new Windows Service creation. Common legitimate behavior.
+    $service.metadata.event_type = "SERVICE_CREATE"
+    $service.principal.hostname = $hostname
+
+  match:
+    $hostname over 1h
+
+  outcome:
+    $risk_score = 65
+    $principal_hostname = $hostname
+    // Collect command lines from various suspicious process events
+    $suspicious_processes = array_distinct($lolbin.target.process.command_line, $staging_and_copy.target.process.command_line, $backdoor.target.process.command_line)
+    // Collect registry keys modified for persistence
+    $persistence_registry_keys = array_distinct($registry.target.registry.key)
+    // Collect names of newly created services for persistence
+    $persistence_service_names = array_distinct($service.target.service.name)
+    // Collect associated users
+    $user_accounts = array_distinct($lolbin.principal.user.userid, $staging_and_copy.principal.user.userid, $backdoor.principal.user.userid, $registry.principal.user.userid, $service.principal.user.userid)
+
+
+  condition:
+    // Alert if any of the defined Salt Typhoon TTPs are observed on a host
+    $lolbin or $staging_and_copy or $backdoor or $registry or $service
+}

@@ -1,0 +1,34 @@
+rule DCSync_Attempt_From_Non_DC {
+  meta:
+    author = "RW"
+    description = "Detects potential DCSync attacks by identifying Event ID 4662 where specific DS-Replication access rights are used by a non-domain controller."
+    severity = "CRITICAL"
+
+  events:
+    $e.metadata.event_type = "LDAP_MODIFICATION" // UDM event type related to Active Directory object operations.
+    $e.metadata.event_code = 4662 // Windows Event ID 4662.
+    $e.target.resource.attribute.value = /.*1131f6ad-9c07-11d1-f79f-00c04fc2dcd2.*/ nocase or // DS-Replication-Get-Changes.
+    $e.target.resource.attribute.value = /.*1131f6aa-9c07-11d1-f79f-00c04fc2dcd2.*/ nocase or // DS-Replication-Get-Changes-All.
+    $e.target.resource.attribute.value = /.*9923a32a-3607-11d2-b9be-0000f87a36b2.*/ nocase // DS-Replication-Get-Changes-In-Filtered-Set.
+
+    // Chronicle UDM, 'principal.ip' represents the source IP that performed the action.
+    // You will need to create a reference list named "domain_controllers_ips" and add the IPs of your legitimate DCs.
+    not $e.principal.ip in %domain_controllers_ips
+
+    // Exclude common false positives and machine accounts.
+    // Use a reference list for whitelisted accounts/IPs if tuning is needed for specific applications like Azure AD Connect.
+    not $e.principal.user.userid = /.*DWM-1/ nocase and
+    not $e.principal.user.userid = /.*UMFD-1/ nocase and
+    not $e.principal.user.userid = /.*\$?/ // Exclude machine accounts (ending in $).
+
+  outcome:
+    $first_seen = $e.metadata.event_timestamp.epoch_seconds // UDM field for event timestamp.
+    $last_seen = $e.metadata.event_timestamp.epoch_seconds // In single-event rule, first and last are the same.
+    $domain_controller = $e.target.hostname // The host where the operation was performed
+    $actor_account = $e.principal.user.userid // The account that performed the operation
+    $source_ip = $e.principal.ip // The source IP of the actor.
+    $object_accessed = $e.target.resource.name // The object that was accessed
+
+  condition:
+    $e
+}

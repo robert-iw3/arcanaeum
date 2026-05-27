@@ -1,0 +1,126 @@
+// Name: LockBit Ransomware TTPs and IOCs
+// Author: RW
+// Date: 2025-08-19
+// Description: This query detects multiple Tactics, Techniques, and Procedures (TTPs) and Indicators of Compromise (IOCs) associated
+// with LockBit ransomware campaigns as described in recent threat intelligence. It covers DLL sideloading, process masquerading,
+// credential theft tools, discovery commands, persistence via NSSM, PsExec usage, and specific PowerShell-based encryption activity.
+// False Positive Sensitivity: Medium. Some TTPs, like discovery commands or PsExec usage, may be legitimate in some environments.
+// Please review and tune exclusions for known administrative activity.
+// References: https://www.security.com/threat-intelligence/lockbit-ransomware-attack-techniques
+
+// Define known malicious file hashes from the report
+let MaliciousHashes = dynamic([
+    "f689ee9af94b00e9e3f0bb072b34caaf207f32dcb4f5782fc9ca351df9a06c97", // Nssm.exe
+    "5ca8e1d001a2c3800afce017424ca471f3cba41f9089791074a9cb7591956430", // Tokenutils.exe
+    "0201a6dbe62d35b81d7cd7d7a731612458644b5e3b1abe414b0ea86d3266ab03", // sd1.exe
+    "1cd644b750884906b707419c8f40598c04f1402e4e93cbf4a33f3254846dc870", // <domain>.exe (Masqueraded MpCmdRun.exe)
+    "edcf76600cd11ef7d6a5c319087041abc604e571239fe2dae4bca83688821a3a", // mpclient.dll
+    "011b31d7e12a2403507a71deb33335d0e81f626d08ff68575a298edac45df4cb", // <domain>access.exe (Masqueraded clink_x86.exe)
+    "4147589aa11732438751c2ecf3079fb94fa478a01ac4f08d024fb55f7ffb52f3", // clink_dll_x86.dll
+    "10f1a789e515fdaf9c04e56b8a5330cfb1995825949e6db8c9eaba4ea9914c97", // jarsigner.exe
+    "086567b46fca2a27d404d9b61bdb482394e1591dc13f1302b813bb2ddf5e54cf", // jli.dll
+    "6285d32a9491a0084da85a384a11e15e203badf67b1deed54155f02b7338b108", // nxc.exe
+    "785e5aaecd9430451f4b0bad637658e6afeea1e722b3d0dd674cb6a11f4ce286", // encth.exe, dwa.exe
+    "24480dbe306597da1ba393b6e30d542673066f98826cc07ac4b9033137f37dbf"  // o.exe, edge.exe.exe
+]);
+// Define known DLL sideloading pairs
+let SideloadingPairs = datatable(LegitProcess:string, MaliciousDll:string) [
+    "jarsigner.exe", "jli.dll",
+    "MpCmdRun.exe", "mpclient.dll",
+    "clink_x86.exe", "clink_dll_x86.dll"
+];
+// Define known C2 domains
+let C2Domains = dynamic([
+    "msupdate.updatemicfosoft.com"
+]);
+// Define common user-writable paths for masquerading checks
+let SuspiciousPaths = dynamic([
+    "C:\\Users\\",
+    "C:\\ProgramData\\",
+    "C:\\Perflogs\\",
+    "C:\\Temp\\"
+]);
+// Start of detection logic
+(union isfuzzy=true
+    (
+        // Logic for Hash-based IOCs
+        union DeviceProcessEvents, DeviceFileEvents
+        | where SHA256 in (MaliciousHashes) or InitiatingProcessSHA256 in (MaliciousHashes)
+        | extend Tactic = "Execution", Technique = "T1059", DetectionMethod = "IOC - Known Malicious Hash"
+    ),
+    (
+        // Logic for Network-based IOCs
+        DeviceNetworkEvents
+        | where RemoteUrl in (C2Domains) or RemoteIP in (C2Domains)
+        | extend Tactic = "Command and Control", Technique = "T1071", DetectionMethod = "IOC - C2 Domain"
+    ),
+    (
+        // Logic for DLL Sideloading TTP
+        // Note: Attackers may rename the legitimate executable (e.g., MpCmdRun.exe to <domain>.exe), which may evade this specific logic.
+        DeviceImageLoadEvents
+        | join kind=inner SideloadingPairs on $left.FileName == $right.MaliciousDll and $left.InitiatingProcessFileName == $right.LegitProcess
+        // Key condition: DLL is loaded from the same directory as the executable.
+        | where InitiatingProcessFolderPath == FolderPath
+        | extend Tactic = "Defense Evasion; Persistence; Privilege Escalation", Technique = "T1574.002", DetectionMethod = "TTP - DLL Sideloading"
+    ),
+    (
+        // Logic for Masquerading TTP
+        DeviceProcessEvents
+        | where
+            // svchost.exe should only run from system32
+            (FileName =~ "svchost.exe" and FolderPath !~ @"C:\\Windows\\System32\\") or
+            // Look for other common system processes in suspicious user-writable locations
+            (FileName in ("explorer.exe", "cmd.exe") and FolderPath has_any (SuspiciousPaths))
+        | extend Tactic = "Defense Evasion", Technique = "T1036.005", DetectionMethod = "TTP - Masquerading as System Process"
+    ),
+    (
+        // Logic for PsExec for Privilege Escalation TTP
+        DeviceProcessEvents
+        | where (FileName has "psexec" or InitiatingProcessFileName has "psexesvc") and ProcessCommandLine has "-s"
+        | extend Tactic = "Execution; Privilege Escalation; Lateral Movement", Technique = "T1569.002", DetectionMethod = "TTP - PsExec with System privileges"
+    ),
+    (
+        // Logic for NSSM for Persistence TTP
+        DeviceProcessEvents
+        | where InitiatingProcessFileName =~ "nssm.exe" and ProcessCommandLine has_any ("install", "start")
+        // The article mentions specific names, but this is a more generic approach.
+        | where FileName in~ ("edge.exe.exe", "o.exe") or FolderPath has_any (SuspiciousPaths)
+        | extend Tactic = "Persistence; Privilege Escalation", Technique = "T1543.003", DetectionMethod = "TTP - NSSM Service Installation"
+    ),
+    (
+        // Logic for Discovery Commands TTP
+        DeviceProcessEvents
+        | where (FileName =~ "net.exe" and ProcessCommandLine has_any("user", "group")) or
+                (FileName =~ "nltest.exe" and ProcessCommandLine has "/domain_trusts") or
+                (FileName =~ "query.exe" and ProcessCommandLine has "user")
+        // Filter for suspicious parent processes to reduce FPs from legitimate admin activity
+        | where InitiatingProcessFileName in ("psexesvc.exe", "wsmprovhost.exe", "wmiprvse.exe") or InitiatingProcessParentFileName in ("psexesvc.exe", "wsmprovhost.exe", "wmiprvse.exe")
+        | extend Tactic = "Discovery", Technique = "T1087; T1069", DetectionMethod = "TTP - Reconnaissance Commands"
+    ),
+    (
+        // Logic for Credential Theft Tools TTP
+        DeviceProcessEvents
+        | where FileName in~ ("TokenUtils.exe", "sd1.exe")
+        | extend Tactic = "Credential Access", Technique = "T1555", DetectionMethod = "TTP - Known Credential Theft Tool"
+    ),
+    (
+        // Logic for Obfuscated PowerShell TTP
+        DeviceProcessEvents
+        | where FileName =~ "powershell.exe" and ProcessCommandLine has_all ("RSACryptoServiceProvider", "FromXmlString", "Encrypt", "gci", "Recurse") and ProcessCommandLine has ".xlockxlock"
+        | extend Tactic = "Impact", Technique = "T1486", DetectionMethod = "TTP - PowerShell Ransomware Script"
+    )
+)
+| project-reorder
+    TimeGenerated,
+    DeviceName,
+    DetectionMethod,
+    Tactic,
+    Technique,
+    FileName,
+    FolderPath,
+    ProcessCommandLine,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    SHA256,
+    RemoteUrl,
+    RemoteIP

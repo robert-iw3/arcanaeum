@@ -1,0 +1,27 @@
+// Name: Suspicious Certutil Download
+// Author: RW
+// Date: 2025-08-08
+// Description: Detects the use of certutil.exe to download a file from a remote URL using the -urlcache, -split, and -f flags.
+// This technique is commonly used by threat actors to download additional payloads or tools from the internet.
+// False Positive Sensitivity: Medium
+// Tactics: Command and Control, Defense Evasion
+// Techniques: T1105
+
+DeviceProcessEvents
+// Identifies the execution of certutil.exe
+| where ProcessVersionInfoOriginalFileName =~ "certutil.exe" or FileName =~ "certutil.exe"
+// Looks for the specific combination of arguments used for downloading and saving files from a URL
+| where ProcessCommandLine has_all ("-urlcache", "-f", "-split") and ProcessCommandLine has_any ("http://", "https://")
+// FP Tuning: Legitimate administration scripts or software installers may use certutil for downloads.
+// If this generates noise, consider filtering by parent process or excluding known/trusted domains.
+// For example: where InitiatingProcessFileName !in ("legit_updater.exe", "legit_script.ps1")
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    ProcessCommandLine,
+    InitiatingProcessCommandLine,
+    InitiatingProcessFileName,
+    ReportId,
+    ProcessId,
+    InitiatingProcessId

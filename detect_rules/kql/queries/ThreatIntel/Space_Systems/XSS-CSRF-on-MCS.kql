@@ -1,0 +1,60 @@
+// Name: Potential XSS or CSRF-like Attack on Mission Control Software
+// Author: RW
+// Date: 2025-08-15
+// Description: Detects potential Cross-Site Scripting (XSS) or CSRF-like attacks targeting known Mission Control Software (MCS) like YAMCS and OpenC3.
+// The detection looks for common XSS payloads in URLs directed at specific MCS web application paths.
+// This is based on recent vulnerability disclosures (e.g., CVE-2023-45279, CVE-2025-28380) affecting these systems.
+// False Positive Sensitivity: Medium
+// Tactic: Initial Access
+// Technique: T1190 - Exploit Public-Facing Application
+
+let timeframe = 1d;
+// Define common XSS patterns. This list can be expanded for broader coverage.
+let xss_patterns = dynamic([
+    "<script",
+    "javascript:",
+    "onerror=",
+    "onload=",
+    "onmouseover=",
+    "alert(",
+    "<img>",
+    "<iframe>",
+    "prompt(",
+    "confirm(",
+    "document.cookie",
+    "eval(",
+    "atob(",
+    "String.fromCharCode",
+    "xss.rocks", // Common XSS testing domain
+    "burpcollaborator.net" // Burp Suite Collaborator domain
+]);
+// Define URL path segments that may indicate Mission Control Software (MCS).
+// FP Tuning: This list is critical for accuracy. Customize it to match the specific MCS applications and paths in your environment.
+let mcs_paths = dynamic([
+    "/yamcs/",
+    "/openc3/",
+    "yamcs.html",
+    "cosmos.html"
+]);
+// Use UrlLogs which captures web traffic from endpoints. CommonSecurityLog or other proxy/firewall logs can also be used.
+UrlLogs
+| where TimeGenerated > ago(timeframe)
+// Filter for URLs that likely target the specified MCS applications.
+| where Url has_any (mcs_paths)
+// Decode URL-encoded characters to reveal potential obfuscated payloads.
+| extend DecodedUrl = url_decode(Url)
+// Search for XSS patterns in both the original and decoded URL.
+| where Url has_any (xss_patterns) or DecodedUrl has_any (xss_patterns)
+// FP Tuning: Legitimate security scanning or benign parameters might trigger this.
+// Consider adding filters to exclude known safe source IPs, user agents, or specific benign URL patterns if noise is high.
+// For example: `| where RemoteIP !in ('192.168.1.100', '10.0.0.5')`
+| project
+    TimeGenerated,
+    DeviceName,
+    Url,
+    DecodedUrl,
+    NetworkMessageId,
+    RemoteIP,
+    InitiatingProcessAccountName,
+    InitiatingProcessParentFileName,
+    InitiatingProcessFileName

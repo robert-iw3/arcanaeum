@@ -1,0 +1,10 @@
+rudder_version: "1.25.0"
+image_registry: "docker.io"
+namespace: "rudderstack"
+replicas: 2
+vault:
+  url: "http://vault:8200"
+  secret_path: "secret/rudderstack"
+enable_logging: false
+enable_telemetry: true
+config_backend_url: "https://api.rudderstack.com"

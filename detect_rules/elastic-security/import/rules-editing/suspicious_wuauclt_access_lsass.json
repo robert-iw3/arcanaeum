@@ -1,0 +1,73 @@
+{
+  "rule_id": "suspicious_wuauclt_access_lsass",
+  "name": "Suspicious Wuauclt.exe Access to LSASS.exe",
+  "description": "Detects the Windows Update client, wuauclt.exe, accessing the LSASS process with elevated permissions. This is a highly suspicious behavior that could indicate an attacker using a compromised system process to perform credential dumping.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "FROM * | WHERE event.action = 'access' AND process.name = 'wuauclt.exe' AND process.target.name = 'lsass.exe' AND process.target.access_mask RLIKE '(0x1010|0x1410|0x1fffff)' | STATS count = COUNT(*), process = ARRAY_AGG(process.command_line) BY host.name, user.name, process.parent.name, process.target.access_mask | keep host.name, user.name, process.parent.name, process, process.target.access_mask, count",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0006",
+        "name": "Credential Access",
+        "reference": "https://attack.mitre.org/tactics/TA0006/"
+      },
+      "technique": [
+        {
+          "id": "T1003",
+          "name": "OS Credential Dumping",
+          "reference": "https://attack.mitre.org/techniques/T1003/"
+        },
+        {
+          "id": "T1003.001",
+          "name": "LSASS Memory",
+          "reference": "https://attack.mitre.org/techniques/T1003/001/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0005",
+        "name": "Defense Evasion",
+        "reference": "https://attack.mitre.org/tactics/TA0005/"
+      },
+      "technique": [
+        {
+          "id": "T1036",
+          "name": "Masquerading",
+          "reference": "https://attack.mitre.org/techniques/T1036/"
+        },
+        {
+          "id": "T1036.002",
+          "name": "Right-to-Left Override",
+          "reference": "https://attack.mitre.org/techniques/T1036/002/"
+        }
+      ]
+    }
+  ],
+  "interval": "5m",
+  "from": "now-5m",
+  "max_signals": 100,
+  "risk_score": 90,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://detection.fyi/elastic/detection-rules/windows/credential_access_suspicious_lsass_access_generic/",
+    "https://www.elastic.co/guide/en/security/current/lsass-memory-dump-creation.html"
+  ],
+  "tags": [
+    "Credential Access",
+    "LSASS",
+    "Windows",
+    "Defense Evasion"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "host.name, user.name, process.parent.name"
+}

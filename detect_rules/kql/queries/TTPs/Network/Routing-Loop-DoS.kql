@@ -1,0 +1,43 @@
+//    Routing Loop DoS Attack
+//    The attack leverages specially crafted IPv6 packets (IPv4-compatible addresses) to cause a packet loop on vulnerable
+//    tunneling interfaces, leading to a denial of service.
+//    Tactics = "Denial of Service"
+//    Techniques = "Network Denial of Service"
+//    RW
+// The Routing Loop DoS attack is a newly identified threat that can cause significant disruption by looping packets on a
+// tunneling interface until the hop limit is reached, leading to a trivial DoS attack. Detecting this pattern is crucial to prevent service outages.
+
+let timeframe = 10m;
+// The threshold is set in bytes. 100MB is a starting point.
+// This may need to be tuned based on normal traffic patterns in your environment to reduce potential false positives.
+let volume_threshold = 100000000;
+// This query leverages the VMConnection table, which is populated by the Dependency Agent.
+// If you use a different network logging solution (e.g., Palo Alto, Zscaler, Cisco),
+// you will need to adapt the query to use the appropriate table and field names.
+VMConnection
+| where TimeGenerated > ago(timeframe)
+| where Direction == "outbound"
+// The Routing Loop DoS attack uses a specially crafted IPv6 destination address.
+// The pattern is an IPv4-compatible address (::/96 prefix), which causes a loop on vulnerable Linux-based tunneling interfaces.
+| where isnotempty(RemoteIp) and RemoteIp contains ":" and ipv6_is_in_range(RemoteIp, '::/96')
+// Exclude standard IPv4-mapped addresses (prefixed with ::ffff:) as they are not part of this specific attack pattern.
+| where not(ipv6_is_in_range(RemoteIp, '::ffff:0:0/96'))
+// Exclude the loopback and unspecified addresses to prevent false positives from local traffic.
+| where RemoteIp !in ('::1', '::')
+// Aggregate traffic from a single source to identify high-volume data transfer indicative of a DoS loop.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    TotalBytesSent = sum(BytesSent),
+    DestinationIpSet = make_set(RemoteIp, 10),
+    DestinationPortSet = make_set(RemotePort, 10)
+    by Computer, bin(TimeGenerated, timeframe)
+// Alert if the total outbound traffic volume exceeds the defined threshold.
+| where TotalBytesSent > volume_threshold
+| project
+    StartTime,
+    EndTime,
+    Computer,
+    TotalBytesSent,
+    DestinationIpSet,
+    DestinationPortSet

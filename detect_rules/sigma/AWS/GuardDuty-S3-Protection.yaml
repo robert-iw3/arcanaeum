@@ -1,0 +1,36 @@
+title: AWS GuardDuty S3 Protection Disabled
+id: 5c716d3d-f396-4681-a165-58b5ba9db609
+status: experimental
+description: >-
+  Detects attempts to disable AWS GuardDuty S3 data event monitoring at the detector or organization level. Attackers may perform this action to avoid detection when accessing or modifying data in S3 buckets. This is a common defense evasion technique used before data exfiltration or ransomware attacks.
+references:
+  - https://rhinosecuritylabs.com/aws/s3-ransomware-part-2-prevention-and-defense/
+  - https://docs.aws.amazon.com/guardduty/latest/ug/s3-protection.html
+  - https://docs.aws.amazon.com/guardduty/latest/APIReference/API_UpdateDetector.html
+  - https://docs.aws.amazon.com/guardduty/latest/APIReference/API_UpdateOrganizationConfiguration.html
+author: RW
+date: 2025-08-19
+tags:
+  - attack.defense_evasion
+  - attack.t1562
+  - attack.t1562.008
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection_update_detector:
+    # Detects disabling S3 Logs data source for a specific detector
+    eventName: 'UpdateDetector'
+    requestParameters.dataSources.s3Logs.enable: 'false'
+  selection_update_org_config:
+    # Detects disabling automatic S3 Logs data source for new accounts in an organization
+    eventName: 'UpdateOrganizationConfiguration'
+    requestParameters.dataSources.s3Logs.autoEnable: 'false'
+  filter_successful:
+    # Rule should only trigger on successful API calls
+    errorCode:
+  condition: (1 of selection_update_detector or 1 of selection_update_org_config) and filter_successful
+falsepositives:
+  - Legitimate administrative action to disable GuardDuty S3 protection, which should be a rare and documented event.
+  - Automated scripts or tools making intended configuration changes. It is recommended to filter by known user agents or IAM roles if necessary.
+level: high

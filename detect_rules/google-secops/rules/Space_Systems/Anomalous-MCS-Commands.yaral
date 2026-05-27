@@ -1,0 +1,48 @@
+rule anomalous_mcs_commands_or_data_transfer {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects anomalous command frequency or large data transfers from Spacecraft Operator workstations to the Mission Control Centre (MCC). This could indicate a compromised operator workstation being used for unauthorized command injection or data exfiltration."
+    false_positive_sensitivity = "Medium"
+    references = "https://www.blackhat.com/us-25/briefings/schedule/#burning-trashing-spacecraft-crashing-a-collection-of-vulnerabilities-that-will-end-your-space-mission-41536"
+    tactic = "TA0008, TA0010"
+    technique = "T1021, T1030"
+
+  events:
+    // Filter for network connection events.
+    $e.metadata.event_type = "NETWORK_CONNECTION"
+
+    // Match placeholder variables for correlation.
+    $src_ip = $e.principal.ip
+    $dest_ip = $e.target.ip
+
+    // FP Tuning: Define the IP ranges for your operator workstations and MCC servers.
+    // These lists should be as specific as possible to your environment.
+    net.ip_in_range_cidr($src_ip, "10.1.1.0/24")
+    net.ip_in_range_cidr($dest_ip, "10.2.2.0/24")
+
+  match:
+    // Group events by source and destination over a 10 minute window.
+    $src_ip, $dest_ip over 10m
+
+  outcome:
+    $risk_score = 55
+    $detection_name = "Anomalous MCS Commands or Data Transfer"
+    $description_out = "Anomalous command frequency or large data transfer observed from an Operator Workstation to the Mission Control Centre."
+
+    // FP Tuning: Adjust thresholds based on established operational baselines for your environment.
+    $connection_threshold = 500
+    $bytes_threshold = 104857600  // 100 MB
+
+    // Aggregate connection count and total bytes sent.
+    $connection_count = count($e.metadata.id)
+    $total_bytes_sent = sum($e.network.sent_bytes)
+
+    $principal_hostname = array_distinct($e.principal.hostname)
+    $target_hostname = array_distinct($e.target.hostname)
+    $user_id = array_distinct($e.principal.user.userid)
+
+  condition:
+    // Alert if either the connection count or data volume exceeds the defined threshold.
+    $connection_count > $connection_threshold or $total_bytes_sent > $bytes_threshold
+}

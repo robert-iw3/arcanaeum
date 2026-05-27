@@ -1,0 +1,26 @@
+{
+  "type": "detection-engine.rule",
+  "id": "sql-injection-detection",
+  "attributes": {
+    "risk_score": 80,
+    "enabled": true,
+    "name": "SQL Injection (SQLi) Detection",
+    "description": "Detects various types of SQL injection attempts, including authentication bypass, time-based blind, error-based, database reconnaissance, and general patterns across web, DNS, and endpoint logs.",
+    "rule_id": "sql_injection_detection",
+    "index": [
+      "logs-iis.*",
+      "logs-apache.*",
+      "logs-paloalto.*",
+      "logs-aws.waf.*",
+      "logs-azuresql.*",
+      "logs-ms_aad.*",
+      "logs-azurediagnostics.*"
+    ],
+    "language": "kuery",
+    "query": "(event.outcome:(\"0\" OR \"success\" OR \"allow\" OR \"accepted\") AND (user.name:\"*' or *\" OR user.name:\"*'or'--*\" OR user.name:\"* or 1=1*\" OR user.name:\"*admin'--*\")) OR (http.response.time_taken:>5 AND (url.full:\"*sleep(*)*\" OR url.full:\"*waitfor delay*\" OR url.full:\"*benchmark(*)*\" OR url.full:\"*pg_sleep(*)*\")) OR (http.response.body.content:\"*error in your sql syntax*\" OR http.response.body.content:\"*unclosed quotation mark*\" OR http.response.body.content:/\\*ora-[0-9][0-9][0-9][0-9][0-9]*/ OR http.response.body.content:\"*invalid column name*\") OR (sql.query:(\"*information_schema*\" OR \"*sys.objects*\" OR \"*pg_catalog*\" OR \"*sqlite_master*\")) OR (url.full:\"*' or *\" OR url.full:\"* union *select *\" OR url.full:\"*--*\" OR url.full:/\\*\\/\\*%*\\/ OR url.full:\"*';*\")",
+    "interval": "15m",
+    "severity": "high",
+    "type": "query",
+    "version": "1"
+  }
+}

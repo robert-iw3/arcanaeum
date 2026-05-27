@@ -1,0 +1,65 @@
+[
+  {
+    "type": "firewall",
+    "name": "Detect Suspicious Network Connections to Salt Typhoon C2 Domains (T1190)",
+    "application": "**\\**.exe",
+    "direction": "out",
+    "protocol": "TCP",
+    "port": "80,443,53",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects outbound connections on HTTP/HTTPS (80/443) and DNS (53) ports potentially to Salt Typhoon C2 infrastructure (e.g., overlapping with UNC4841 domains like interlinks.top, historical C2 for GhostSpider/Demodex). Group uses encrypted channels, multi-hop proxies, and legitimate services. Domain-specific filtering not supported in ENS Firewall; use Web Control for URL/domain blocking and precision. Tune for baseline legitimate traffic."
+  },
+  {
+    "type": "firewall",
+    "name": "Detect C2 Communications with Suspicious Name Servers",
+    "application": "**\\**.exe",
+    "direction": "out",
+    "protocol": "UDP",
+    "port": "53",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Reports outbound DNS queries (UDP 53) — Salt Typhoon leverages DNS for C2 resolution, tunneling (e.g., Iodine-like), and infrastructure pivoting. Specific NS/WHOIS enrichment not supported in ENS; correlate with external DNS logs or threat intel feeds for suspicious domains (e.g., ProtonMail-registered). Tune for normal DNS patterns."
+  },
+  {
+    "type": "firewall",
+    "name": "Detect Persistence Malware C2 Activity (Salt Typhoon Backdoors)",
+    "application": "**\\**.exe",
+    "direction": "out",
+    "protocol": "TCP",
+    "port": "80,443",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects outbound HTTP/HTTPS traffic potentially to C2 associated with Salt Typhoon persistence malware (e.g., GhostSpider backdoor, Demodex rootkit). Group uses encrypted C2, cloud proxies, and legitimate services for stealth. Similar to first rule; use Web Control for domain/user-agent filtering and tuning to reduce noise."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Credential Dumping from Browser Files (TrillClient-like)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n      Exclude OBJECT_NAME { -v \"C:\\\\Program Files\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe\" -v \"C:\\\\Program Files (x86)\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe\" -v \"C:\\\\Program Files\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe\" -v \"C:\\\\Program Files (x86)\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe\" -v \"C:\\\\Program Files\\\\Mozilla Firefox\\\\firefox.exe\" -v \"C:\\\\Program Files (x86)\\\\Mozilla Firefox\\\\firefox.exe\" -v \"C:\\\\Program Files\\\\BraveSoftware\\\\Brave-Browser\\\\Application\\\\brave.exe\" -v \"C:\\\\Program Files (x86)\\\\BraveSoftware\\\\Brave-Browser\\\\Application\\\\brave.exe\" -v \"C:\\\\Program Files\\\\Opera\\\\opera.exe\" -v \"C:\\\\Program Files (x86)\\\\Opera\\\\opera.exe\" -v \"C:\\\\Program Files\\\\Vivaldi\\\\Application\\\\vivaldi.exe\" -v \"C:\\\\Program Files (x86)\\\\Vivaldi\\\\Application\\\\vivaldi.exe\" }\n   }\n   Target {\n      Match FILE {\n         Include OBJECT_NAME { -v \"C:\\\\Users\\\\**\\\\AppData\\\\Local\\\\Google\\\\Chrome\\\\User Data\\\\Default\\\\Login Data\" -v \"C:\\\\Users\\\\**\\\\AppData\\\\Local\\\\Google\\\\Chrome\\\\User Data\\\\Default\\\\Web Data\" -v \"C:\\\\Users\\\\**\\\\AppData\\\\Local\\\\Google\\\\Chrome\\\\User Data\\\\Default\\\\Cookies\" -v \"C:\\\\Users\\\\**\\\\AppData\\\\Local\\\\Microsoft\\\\Edge\\\\User Data\\\\Default\\\\Login Data\" -v \"C:\\\\Users\\\\**\\\\AppData\\\\Local\\\\Microsoft\\\\Edge\\\\User Data\\\\Default\\\\Web Data\" -v \"C:\\\\Users\\\\**\\\\AppData\\\\Local\\\\Microsoft\\\\Edge\\\\User Data\\\\Default\\\\Cookies\" -v \"C:\\\\Users\\\\**\\\\AppData\\\\Roaming\\\\Mozilla\\\\Firefox\\\\Profiles\\\\**\\\\key4.db\" -v \"C:\\\\Users\\\\**\\\\AppData\\\\Roaming\\\\Mozilla\\\\Firefox\\\\Profiles\\\\**\\\\logins.json\" -v \"C:\\\\Users\\\\**\\\\AppData\\\\Local\\\\BraveSoftware\\\\Brave-Browser\\\\User Data\\\\Default\\\\Login Data\" -v \"C:\\\\Users\\\\**\\\\AppData\\\\Local\\\\BraveSoftware\\\\Brave-Browser\\\\User Data\\\\Default\\\\Web Data\" -v \"C:\\\\Users\\\\**\\\\AppData\\\\Local\\\\BraveSoftware\\\\Brave-Browser\\\\User Data\\\\Default\\\\Cookies\" -v \"C:\\\\Users\\\\**\\\\AppData\\\\Local\\\\Opera Software\\\\Opera Stable\\\\Login Data\" -v \"C:\\\\Users\\\\**\\\\AppData\\\\Local\\\\Opera Software\\\\Opera Stable\\\\Web Data\" -v \"C:\\\\Users\\\\**\\\\AppData\\\\Local\\\\Opera Software\\\\Opera Stable\\\\Cookies\" -v \"C:\\\\Users\\\\**\\\\AppData\\\\Local\\\\Vivaldi\\\\User Data\\\\Default\\\\Login Data\" -v \"C:\\\\Users\\\\**\\\\AppData\\\\Local\\\\Vivaldi\\\\User Data\\\\Default\\\\Web Data\" -v \"C:\\\\Users\\\\**\\\\AppData\\\\Local\\\\Vivaldi\\\\User Data\\\\Default\\\\Cookies\" }\n         Include -access \"READ\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects non-browser processes reading credential/cookie files from major browsers (Chrome, Edge, Firefox, Brave, Opera, Vivaldi) — matches Salt Typhoon use of custom stealers like TrillClient to harvest browser-stored credentials/session tokens. High-fidelity; low false positives with exclusions for legitimate browsers. Tune if third-party tools access these paths."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Network Device Configuration Changes for Lateral Movement (Placeholder)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**.exe\" }\n         Include -access \"CREATE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "Medium",
+    "enabled": true,
+    "description": "Placeholder rule for detecting process creation potentially related to network device config tools (e.g., scripts modifying routers/switches). Salt Typhoon heavily alters network configs (ACLs, SSH ports, Guest Shell on Cisco, routing tables) for persistence/lateral movement. ENS is endpoint-focused; true detection requires network device logs (syslog, config change monitoring). Tune or replace with device-specific logging."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Log Clearing Attempts (Anti-Forensics)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"rm.exe\" -v \"shred.exe\" -v \"truncate.exe\" -v \"bash.exe\" -v \"sh.exe\" -v \"zsh.exe\" -v \"ksh.exe\" }\n   }\n   Target {\n      Match FILE {\n         Include OBJECT_NAME { -v \"/home/**/.bash_history\" -v \"/var/log/auth.log\" -v \"/var/log/lastlog\" -v \"/var/log/wtmp\" -v \"/var/log/btmp\" }\n         Include -access \"WRITE,DELETE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects processes (rm/shred/truncate, shells) writing/deleting critical log files (.bash_history, auth.log, wtmp/btmp) — Salt Typhoon clears/disables logs to cover tracks and maintain stealth. Command-line matching limited; approximates via process/file access on Linux endpoints. Tune for legitimate admin cleanup scripts."
+  }
+]

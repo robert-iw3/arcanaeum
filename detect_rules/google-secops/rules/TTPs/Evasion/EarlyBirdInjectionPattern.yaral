@@ -1,0 +1,56 @@
+rule EarlyBirdInjectionPattern {
+  meta:
+    name = "EarlyBird Injection Pattern Detected"
+    author = "RW"
+    date = "2025-08-02"
+    description = "Detects a sequence of events indicative of the EarlyBird process injection technique, involving remote executable memory allocation followed by queuing an Asynchronous Procedure Call (APC)."
+    tactic = "Defense Evasion, Privilege Escalation"
+    technique = "T1055.001, T1055.004"
+    false_positive_sensitivity = "Medium. Legitimate applications like debuggers or security software may exhibit similar behavior. Tuning exclusions is crucial."
+    severity = "HIGH" // Setting severity to HIGH due to the nature of this technique
+
+  // --- Rule Tuning ---
+  strings:
+    // Define the time window for event correlation (5 minutes in milliseconds).
+    $time_frame_ms = 300000
+
+  events:
+    // Event 1: Remote Executable Memory Allocation (VirtualAllocEx)
+    $remote_mem_alloc.metadata.event_type = "PROCESS_MEMORY_ALLOCATION_REMOTE" // UDM event for remote memory allocation
+    // Check for allocation with execute permissions
+    $remote_mem_alloc.memory.protection in ("PAGE_EXECUTE", "PAGE_EXECUTE_READ", "PAGE_EXECUTE_READWRITE", "PAGE_EXECUTE_WRITECOPY")
+    // Filter out common system processes from initiating the injection.
+    not $remote_mem_alloc.principal.process.file.full_path in %initiating_process_allowlist
+
+    // Event 2: Queue APC Thread (QueueUserAPC or NtQueueApcThread)
+    $apc_queue.metadata.event_type = "PROCESS_THREAD_APCALL_REMOTE" // UDM event for remote APC queueing
+
+    // Correlate the two events by Initiating Process ID and Target Process ID
+    $remote_mem_alloc.principal.process.product_id = $apc_queue.principal.process.product_id
+    $remote_mem_alloc.target.process.product_id = $apc_queue.target.process.product_id
+
+  match:
+    // Ensure the APC is queued *after* the memory is allocated, within the defined timeframe.
+    $apc_queue.metadata.event_timestamp > $remote_mem_alloc.metadata.event_timestamp and
+    $apc_queue.metadata.event_timestamp < $remote_mem_alloc.metadata.event_timestamp + $time_frame_ms
+
+  outcome:
+    $injection_timestamp = $remote_mem_alloc.metadata.event_timestamp
+    $apc_queue_timestamp = $apc_queue.metadata.event_timestamp
+    $device_name = $remote_mem_alloc.principal.asset.hostname
+    $initiating_process_filename = $remote_mem_alloc.principal.process.file.full_path
+    $initiating_process_command_line = $remote_mem_alloc.principal.process.command_line
+    $target_process_filename = $remote_mem_alloc.target.process.file.full_path
+    $target_process_command_line = $remote_mem_alloc.target.process.command_line
+    $initiating_process_id = $remote_mem_alloc.principal.process.product_id
+    $target_process_id = $remote_mem_alloc.target.process.product_id
+
+  condition:
+    // Trigger if both events are found and the time condition is met
+    $remote_mem_alloc and $apc_queue
+}
+
+// Reference List (to be created in Chronicle):
+// 1.  **initiating_process_allowlist:** Create a Chronicle Reference List named `initiating_process_allowlist` and populate it with:
+//     csrss.exe, lsass.exe, smss.exe, wininit.exe
+//     (Add any other legitimate processes in your environment that are known to initiate this pattern, e.g., security software, debuggers)

@@ -1,0 +1,35 @@
+// Name: SQL Server Startup Procedure Execution
+// Author: RW
+// Date: 2025-08-23
+// Description: Detects the execution of a SQL Server startup procedure. Startup procedures automatically run when the SQL service starts
+// and can be abused by attackers as a persistence mechanism. This rule flags procedures with suspicious names.
+// MITRE ATT&CK: T1543.003
+
+let suspicious_keywords = dynamic([
+    "xp_",
+    "sp_",
+    "cmdshell",
+    "shell",
+    "exec"
+]);
+
+Event
+// Filter for SQL Server event indicating a startup procedure was launched.
+| where Provider == "MSSQLSERVER" and EventID == 17135
+// Parse the startup procedure name from the event data.
+| extend EventDataXml = parse_xml(EventData)
+| extend StartupProcedure = tostring(EventDataXml.EventData.Data)
+// Look for suspicious keywords in the procedure name.
+| where StartupProcedure has_any (suspicious_keywords)
+// FP Tuning: Legitimate startup procedures may exist in your environment.
+// Consider excluding known, approved procedure names to reduce noise.
+// For example: | where StartupProcedure !in ("sp_my_legit_proc", "sp_another_proc")
+| project
+    TimeGenerated,
+    Computer,
+    EventID,
+    RenderedDescription,
+    StartupProcedure
+| extend
+    HostName = Computer,
+    timestamp = TimeGenerated

@@ -1,0 +1,49 @@
+title: Lateral Movement to Cloud VM via Remote Services
+id: cf15685a-f9e2-4b21-b166-9d74cdce0fd4
+status: experimental
+description: Detects lateral movement from a cloud control plane to a virtual machine using native remote administration services. Adversaries leverage services like AWS SSM, Azure Run Command, and GCP metadata modification (for serial console or startup scripts) to execute code on VMs without direct network access.
+references:
+  - Threat Intel ID: 6e487ba759c8e80223efef2a739cd68b6586a6454f568bafdb580d896b47660a
+author: RW
+date: 2025-08-19
+tags:
+  - attack.lateral_movement
+  - attack.t1021
+logsource:
+  category: cloud
+detection:
+  # AWS: Remote command execution services
+  aws_remote_exec:
+    product: aws
+    service: cloudtrail
+    aws.eventName:
+      - 'SendCommand' # AWS Systems Manager (SSM) Run Command
+      - 'SendSSHPublicKey' # EC2 Instance Connect
+      - 'SendSerialConsoleSSHPublicKey' # EC2 Serial Console Access
+
+  # Azure: Remote command execution on a VM
+  azure_remote_exec:
+    product: azure
+    service: auditlogs
+    operationName: 'Microsoft.Compute/virtualMachines/runCommand/action'
+    status: 'Succeeded'
+
+  # GCP: Enabling serial port access, modifying startup scripts, or adding credentials via metadata
+  gcp_metadata_modification:
+    product: gcp
+    service: gcp.audit
+    gcp.method_name: 'v1.compute.instances.setMetadata'
+    # Note: This detects the API call. The specific metadata key being modified should be inspected for full context.
+    gcp.request.metadata.items.key|contains:
+      - 'serial-port-enable' # Enables interactive access to the serial console
+      - 'startup-script' # Executes a script on next boot
+      - 'ssh-keys' # Adds SSH keys for user access
+      - 'windows-keys' # Adds/resets credentials for Windows users
+
+  condition: 1 of them
+falsepositives:
+  - Legitimate remote administration by system administrators or SREs for troubleshooting or management.
+  - Automated configuration management tools (e.g., Ansible, Chef) that use these services to manage fleets of VMs.
+  - CI/CD pipelines deploying or configuring applications.
+  - It is recommended to baseline usage and filter out known service principals or administrative users who perform these actions regularly.
+level: medium

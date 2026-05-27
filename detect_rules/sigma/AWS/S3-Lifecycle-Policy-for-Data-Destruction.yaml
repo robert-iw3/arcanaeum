@@ -1,0 +1,37 @@
+title: AWS S3 Bucket Lifecycle Policy Set for Rapid Data Deletion
+id: b7066f03-2918-4b7b-bd3b-3eefe95ef9c4
+status: experimental
+description: >-
+  Detects the creation or modification of an S3 bucket lifecycle policy that sets object expiration to 1 day.
+  Attackers can abuse this feature for rapid and silent data destruction, as seen with tools like AWSDoor.
+  This bypasses standard deletion safeguards and can lead to significant data loss if not detected promptly.
+author: RW
+date: 2025-09-21
+tags:
+  - attack.impact
+  - attack.t1485
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    # Detects the API call to set a bucket's lifecycle configuration
+    eventName: 'PutBucketLifecycleConfiguration'
+    eventSource: 's3.amazonaws.com'
+    # Ensure the API call was successful
+    errorCode:
+    # Checks for a rule that is active
+    requestParameters.lifecycleConfiguration.rules.status: 'Enabled'
+    # The most critical part: checks for an expiration policy of 1 day, the minimum allowed.
+    # This is highly indicative of malicious intent for data destruction.
+    requestParameters.lifecycleConfiguration.rules.expiration.days: 1
+  condition: selection
+fields:
+  - userIdentity.arn
+  - userIdentity.principalId
+  - requestParameters.bucketName
+  - requestParameters.lifecycleConfiguration
+  - sourceIPAddress
+falsepositives:
+  - Legitimate, but rare, use cases for short-term data retention (e.g., temporary data staging buckets). All alerts should be investigated as this is a high-risk configuration.
+level: high

@@ -1,0 +1,35 @@
+// Name: Suspicious Svchost Making Telegram C2 Connections
+// Author: RW
+// Date: 2025-08-12
+// MITRE ATT&CK: T1036.003, T1574.001, T1071.001, T1572
+// Description: Detects a process named svchost.exe executing from the C:\Windows\Temp directory that subsequently makes network connections
+//              to the Telegram Bot API (api.telegram.org). This is a high-fidelity indicator of compromise, as threat actors use this combination
+//              of techniques for persistence and C2 communications.
+// False Positive Sensitivity: Low. The combination of these two anomalous behaviors is highly indicative of malicious activity.
+// However, it's theoretically possible for a legitimate but poorly written application to exhibit this behavior.
+
+// Find instances of svchost.exe running from the Temp directory.
+let suspiciousSvchost =
+    DeviceProcessEvents
+    | where ProcessFileName =~ "svchost.exe"
+    | where FolderPath =~ @"C:\Windows\Temp\"
+    | project ProcessCreationTime = TimeGenerated, DeviceId, ProcessId, ProcessCommandLine, FolderPath, SHA1;
+// Join the suspicious processes with network events going to the Telegram API.
+suspiciousSvchost
+| join kind=inner (
+    DeviceNetworkEvents
+    | where RemoteUrl has "api.telegram.org"
+    | project NetworkEventTime = TimeGenerated, DeviceId, InitiatingProcessId, RemoteUrl, RemoteIP, AccountName, DeviceName
+) on $left.DeviceId == $right.DeviceId and $left.ProcessId == $right.InitiatingProcessId
+| project
+    ProcessCreationTime,
+    NetworkEventTime,
+    DeviceName,
+    AccountName,
+    ProcessFileName = "svchost.exe",
+    FolderPath,
+    ProcessCommandLine,
+    SHA1,
+    RemoteUrl,
+    RemoteIP,
+    ProcessId

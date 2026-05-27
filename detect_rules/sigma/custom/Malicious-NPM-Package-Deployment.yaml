@@ -1,0 +1,52 @@
+title: Malicious NPM Package Deployed via Serverless Function Configuration
+id: f05310a9-309f-40f3-8bc7-8001a3967e36
+status: experimental
+description: >-
+  Detects the creation or update of a serverless function (e.g., GCP Cloud Function, AWS Lambda, Azure Function) where the `package.json` configuration
+  contains suspicious enumeration commands within `preinstall` or `postinstall` scripts. This technique is used by adversaries to perform reconnaissance
+  within the function's execution environment.
+references:
+  - https://blog.talosintelligence.com/duping-cloud-functions-an-emerging-serverless-attack-vector/
+author: RW
+date: 2025-08-20
+tags:
+  - attack.t1592
+  - attack.discovery
+  - cloud
+logsource:
+  category: cloud
+  service: audit
+detection:
+    # This rule inspects the body of cloud configuration change events.
+    # The field containing the package.json content may vary by cloud provider (e.g., `requestParameters` in AWS, `protoPayload.request` in GCP).
+    # Map this to the relevant field in your environment.
+  selection_script_context:
+        # Detects the presence of pre/post-install script hooks in package.json
+    cloud.request.body|contains:
+      - '"preinstall":'
+      - '"postinstall":'
+  selection_recon_commands:
+        # Detects common reconnaissance commands seen in the research
+    cloud.request.body|contains:
+      - 'cat /etc/passwd'
+      - 'cat /etc/shadow'
+      - 'cat /proc/1/sched'
+      - 'cat /proc/self/mountinfo'
+      - 'cat /etc/os-release'
+      - 'uname -a'
+      - 'whoami'
+      - 'groups'
+      - 'ip addr show'
+      - 'ip route'
+      - 'ss -tuln'
+      - '/.dockerenv'
+  selection_exfil_pattern:
+        # Detects the use of curl to exfiltrate the command output
+    cloud.request.body|contains|all:
+      - 'curl'
+      - '--data-urlencode'
+  condition: all of selection_*
+falsepositives:
+  - Legitimate `preinstall` or `postinstall` scripts may use some of these commands for benign purposes, such as environment setup. However, the combination with an exfiltration pattern (`curl --data-urlencode`) significantly increases the fidelity of the detection.
+  - Consider tuning the `selection_recon_commands` list to better fit your environment's normal build processes.
+level: high

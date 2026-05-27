@@ -1,0 +1,45 @@
+// Name: SQL Injection Authentication Bypass Attempt
+// Author: RW
+// Date: 2025-08-23
+
+// Define common SQLi patterns used for authentication bypass.
+let sqli_auth_bypass_patterns = dynamic([
+    "' or ",
+    "'or'",
+    " or 1=1",
+    " or true",
+    "'--",
+    "';--",
+    "'#",
+    "admin'--"
+]);
+
+// Define the time window for the search.
+let lookback = 1d;
+
+// Search Azure AD Sign-in logs for successful logins where the username contains an SQLi pattern.
+SigninLogs
+| where TimeGenerated > ago(lookback)
+// Filter for successful authentication events (ResultType 0 indicates success).
+| where ResultType == 0
+// Normalize the username for case-insensitive matching.
+| extend UserPrincipalNameLower = tolower(UserPrincipalName)
+// Core detection logic: Look for SQLi auth bypass patterns in the username field of a successful login.
+| where UserPrincipalNameLower has_any (sqli_auth_bypass_patterns)
+// FP Tuning:
+// - This pattern is a high-confidence indicator of an attack. False positives are unlikely but possible with unusual usernames.
+// - If a specific application or test account generates false positives, consider excluding it by name.
+//   Example: | where AppDisplayName != "Test Application"
+// Extract the specific pattern that was matched for easier analysis.
+| extend MatchedPattern = extract_all(strcat_array(sqli_auth_bypass_patterns, "|"), UserPrincipalNameLower)
+// Project key fields for investigation.
+| project
+    Timestamp = TimeGenerated,
+    UserPrincipalName,
+    MatchedPattern,
+    AppDisplayName,
+    IPAddress,
+    UserAgent,
+    Location = LocationDetails.countryOrRegion,
+    ResultDescription,
+    CorrelationId

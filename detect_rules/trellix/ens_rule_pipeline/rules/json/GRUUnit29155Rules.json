@@ -1,0 +1,137 @@
+[
+  {
+    "type": "expert",
+    "name": "Detect WhisperGate PowerShell Execution (Encoded Sleep)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"powershell.exe\" -v \"pwsh.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*-enc UwB0AGEAcgB0AC0AUwBsAGUAZQBwACAALQBzACAAMQAwAA==*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "Critical",
+    "enabled": true,
+    "description": "Detects PowerShell with Base64-encoded 'Start-Sleep -s 10' command — direct, high-fidelity IOC from WhisperGate stage 2 (2022 destructive wiper attributed to Russian actors). Extremely specific; very low false positives unless legitimate scripts use identical encoding. Tune minimally."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Windows Defender Exclusion Modification (WhisperGate)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"powershell.exe\" -v \"pwsh.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*Set-MpPreference*ExclusionPath*C:\\\\*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects PowerShell modifying Windows Defender exclusions (e.g., path C:\\) — key defense evasion step in WhisperGate and similar wipers. High value when chained with other indicators. Tune for legitimate Defender management scripts."
+  },
+  {
+    "type": "expert",
+    "name": "Detect AdvancedRun Defender Disabling (WhisperGate)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"AdvancedRun.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*stop WinDefend*\"\n         Include -command_line \"*rmdir *C:\\\\ProgramData\\\\Microsoft\\\\Windows Defender*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects AdvancedRun.exe stopping WinDefend service or deleting Defender directories — observed in WhisperGate campaigns for AMSI/Defender bypass. Very high fidelity; tune for rare legitimate admin use of AdvancedRun."
+  },
+  {
+    "type": "expert",
+    "name": "Detect InstallUtil from Temp Directory (WhisperGate Final Stage)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"InstallUtil.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"C:\\\\Users\\\\**\\\\AppData\\\\Local\\\\Temp\\\\**\" -v \"C:\\\\Windows\\\\Temp\\\\**\" }\n         Include -access \"CREATE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects InstallUtil.exe execution from user or system Temp folders — signature of WhisperGate final payload deployment (.NET loader). High-fidelity; low FPs unless legitimate .NET deployment tools run from Temp."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Impacket Script Execution (Credential Dumping/Lateral Movement)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"python.exe\" -v \"python3.exe\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*secretsdump.py*\"\n         Include -command_line \"*psexec.py*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects Python execution of Impacket tools (secretsdump.py for NTDS dumping, psexec.py for lateral movement) — common in Russian APT and ransomware chains (including Unit 29155). Highly specific; tune for any legitimate Impacket testing."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Rclone Exfiltration to MEGA",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"rclone.exe\" -v \"rclone\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*mega*.nz*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects Rclone commands targeting mega.nz domains — popular exfiltration method in ransomware and destructive campaigns (2025 variants). Can be noisy with legitimate cloud sync; add exclusions for known rclone configs/users."
+  },
+  {
+    "type": "expert",
+    "name": "Detect GOST Tunneling via Java",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"java.exe\" -v \"java\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*-L*socks5://*\"\n         Include -command_line \"*-L*rtcp://*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects GOST tunneling commands (socks5/rtcp forwarding) executed via java — observed in Russian APT lateral movement and C2 (2024-2025). Tune for legitimate Java proxy/tunnel tools."
+  },
+  {
+    "type": "expert",
+    "name": "Detect ProxyChains Usage",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*proxychains*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "Medium",
+    "enabled": true,
+    "description": "Detects ProxyChains execution — used for anonymized C2/lateral movement in many APT/ransomware ops. Broad rule; prone to FPs with legitimate proxy tools — tune with parent process or user exclusions."
+  },
+  {
+    "type": "expert",
+    "name": "Detect su-bruteforce Tool Execution",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*su-bruteforce*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects su-bruteforce tool — specific brute-force utility for Linux privilege escalation. Highly specific; very low false positives unless legitimate pentest/red-team tools are in use."
+  },
+  {
+    "type": "expert",
+    "name": "Detect LinPEAS Execution (Privilege Escalation Recon)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*linpeas.sh*\"\n         Include -command_line \"*linpeas.py*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects LinPEAS script execution (linpeas.sh/py) — popular Linux priv-esc enumeration tool used in post-exploitation (including Russian APT chains). Highly specific; tune only for authorized red-team activity."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Known GOST Tool File (Hash-Based)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match FILE {\n         Include -hash \"896e0f54fc67d72d94b40d7885f10c51\"\n         Include -access \"CREATE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects file creation matching MD5 hash 896e0f54fc67d72d94b40d7885f10c51 — associated with malicious GOST tunneling binary (used in 2024-2025 lateral movement). High-fidelity if ENS supports hash matching; complement with EDR for full validation."
+  },
+  {
+    "type": "firewall",
+    "name": "Detect Connections to Unit 29155 C2 Infrastructure",
+    "application": "**",
+    "direction": "out",
+    "protocol": "TCP",
+    "port": "80,443",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects outbound HTTP/HTTPS to known Unit 29155 (GRU) C2 infrastructure (e.g., interlinks.top, cdn.discordapp.com proxies). From 2024-2025 CISA advisories (AA24-249A). Domain/IP filtering not native; use Web Control for precision. Tune for legitimate traffic."
+  },
+  {
+    "type": "firewall",
+    "name": "Detect Ngrok and Proxy Connections (Jump Host Tooling)",
+    "application": "**",
+    "direction": "out",
+    "protocol": "TCP",
+    "port": "80,443",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects connections to ngrok.com or 3proxy.ru — common for attacker jump hosts/C2 in 2025 campaigns. Can be noisy with legitimate services; tune exclusions or use Web Control for domain blocking."
+  },
+  {
+    "type": "firewall",
+    "name": "Detect Iodine DNS Tunneling",
+    "application": "**",
+    "direction": "out",
+    "protocol": "UDP",
+    "port": "53",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects DNS traffic potentially for Iodine tunneling (e.g., suspicious subdomains like dns.test*.domain.me). Used in advanced persistence/lateral movement. Specific domain filtering not supported; enrich with external DNS logs. Tune for normal DNS patterns."
+  }
+]

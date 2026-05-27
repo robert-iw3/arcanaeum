@@ -1,0 +1,103 @@
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - '*.kql'
+      - 'sentinel_pipeline.py'
+      - 'tests/*'
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  pythonVersion: '3.11'
+  pipCacheDir: $(Pipeline.Workspace)/.pip
+
+steps:
+- task: UsePythonVersion@0
+  inputs:
+    versionSpec: '$(pythonVersion)'
+    addToPath: true
+
+- task: Cache@2
+  inputs:
+    key: 'pip | "$(pythonVersion)" | requirements.txt'
+    path: '$(pipCacheDir)'
+    cacheHitVar: 'CACHE_RESTORED'
+
+- script: |
+    python -m pip install --upgrade pip
+    pip install -r requirements.txt
+    pip install flake8
+  displayName: 'Install dependencies'
+
+- script: |
+    flake8 sentinel_pipeline.py tests/ --max-line-length=120
+  displayName: 'Run static code analysis'
+
+- script: |
+    for file in $(find . -name "*.kql"); do
+      if ! grep -q "TimeGenerated" "$file"; then
+        echo "Error: $file missing TimeGenerated filter"
+        exit 1
+      fi
+      if grep -qi "search" "$file"; then
+        echo "Error: $file contains deprecated 'search' operator"
+        exit 1
+      fi
+    done
+  displayName: 'Lint KQL files'
+
+- script: |
+    pip install safety
+    safety check -r requirements.txt
+  displayName: 'Scan dependencies for vulnerabilities'
+
+- script: |
+    pytest tests/ --cov=sentinel_pipeline --cov-report=xml --cov-fail-under=90 --junitxml=test-results.xml
+    coverage report -m
+  displayName: 'Run unit tests with coverage'
+
+- task: PublishCodeCoverageResults@2
+  inputs:
+    codeCoverageTool: 'Cobertura'
+    summaryFileLocation: '$(System.DefaultWorkingDirectory)/coverage.xml'
+
+- task: PublishTestResults@2
+  inputs:
+    testResultsFormat: 'JUnit'
+    testResultsFiles: '$(System.DefaultWorkingDirectory)/test-results.xml'
+    failTaskOnFailedTests: true
+
+- task: AzureCLI@2
+  inputs:
+    azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      export SUBSCRIPTION_ID=$(AZURE_SUBSCRIPTION_ID)
+      export RESOURCE_GROUP_NAME=$(RESOURCE_GROUP_NAME)
+      export WORKSPACE_NAME=$(WORKSPACE_NAME)
+      export AZURE_LOCATION=$(AZURE_LOCATION)
+      export QUERY_PACK_NAME=$(QUERY_PACK_NAME)
+      python sentinel_pipeline.py
+  displayName: 'Run Sentinel Pipeline'
+  env:
+    AZURE_SUBSCRIPTION_ID: $(AZURE_SUBSCRIPTION_ID)
+    RESOURCE_GROUP_NAME: $(RESOURCE_GROUP_NAME)
+    WORKSPACE_NAME: $(WORKSPACE_NAME)
+    AZURE_LOCATION: $(AZURE_LOCATION)
+    QUERY_PACK_NAME: $(QUERY_PACK_NAME)
+
+- task: PublishPipelineArtifact@1
+  inputs:
+    targetPath: '$(System.DefaultWorkingDirectory)'
+    artifact: 'pipeline-artifacts'
+    publishLocation: 'pipeline'
+    includePatterns: |
+      sentinel_pipeline.log
+      coverage.xml
+      test-results.xml
+  condition: always()

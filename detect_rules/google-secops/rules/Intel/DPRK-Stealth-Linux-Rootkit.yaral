@@ -1,0 +1,102 @@
+rule linux_dprk_rootkit_activity {
+  meta:
+    author = "RW"
+    date = "2025-08-14"
+    description = "Detects multiple patterns of activity associated with a North Korean Linux rootkit, including use of specific file paths, kernel tainting, hidden network connections, and anti-forensic techniques."
+    references = [
+        "https://sandflysecurity.com/blog/leaked-north-korean-linux-stealth-rootkit-analysis",
+        "https://www.kernel.org/doc/html/latest/admin-guide/tainted-kernels.html"
+    ]
+    mitre_ttp = ["T1564.001", "T1547.006", "T1070.004", "T1070.006", "T1562.003"]
+    severity = "HIGH"
+    priority = "HIGH"
+
+  events:
+    // Pattern 1: Hidden Rootkit Artifacts (IOCs)
+    // Detects file or process events related to known malicious paths from the rootkit.
+    $malicious_path_regex = /(\/usr\/lib64\/tracker-fs|\/usr\/include\/tracker-fs\/tracker-efs|\/etc\/init.d\/tracker-fs|\/etc\/rc[235]\.d\/S55tracker-fs|\/proc\/acpi\/pcicard)/i
+
+    $artifact.metadata.hostname = $hostname
+    (
+      $artifact.metadata.event_type = "PROCESS_LAUNCH" and
+      (
+        re.regex($artifact.principal.process.file.full_path, $malicious_path_regex) or
+        re.regex($artifact.principal.process.command_line, $malicious_path_regex)
+      )
+    ) or
+    (
+      $artifact.metadata.event_type in {"FILE_CREATION", "FILE_MODIFICATION"} and
+      re.regex($artifact.target.file.full_path, $malicious_path_regex)
+    )
+
+    // Pattern 2: Kernel Tainted by Unsigned Module
+    // Detects when the Linux kernel is tainted, often by an unsigned kernel module.
+    $taint.metadata.event_type = "GENERIC_EVENT"
+    $taint.metadata.hostname = $hostname
+    $taint.principal.process.name = "kernel"
+    $taint.security_result.description nocase = "tainting kernel"
+    // FP Tuning: Add legitimate module names here to prevent FPs.
+    not ($taint.security_result.description nocase = "nvidia" or
+         $taint.security_result.description nocase = "vboxdrv" or
+         $taint.security_result.description nocase = "zfs")
+
+    // Pattern 3: Network Connection Without Associated Process
+    // Detects network activity without a corresponding process, a key sign of a process-hiding rootkit.
+    $net.metadata.event_type = "NETWORK_CONNECTION"
+    $net.metadata.hostname = $hostname
+    // This logic is most effective on Linux systems.
+    // A process path and PID of empty/0 indicates the OS could not attribute the connection.
+    ($net.principal.process.file.full_path = "" or not $net.principal.process.file.full_path) and
+    $net.principal.process.pid = 0
+    // FP Tuning: Some legitimate low-level kernel or container networking tasks might trigger this.
+    // Filter out common noise from private/loopback ranges.
+    not (net.is_private($net.target.ip) or net.is_loopback($net.target.ip))
+
+    // Pattern 4: Anti-Forensic History Disabling
+    // Detects attempts to disable shell command history logging.
+    $shell_proc_regex = /(\/sh|\/bash|\/dash|\/zsh|\/ksh|\/csh|\/tcsh)$/
+    $anti_forensic_cmd_regex = /(--noprofile|--norc|HISTFILE=\/dev\/null|HISTORY=\/dev\/null|BASH_HISTORY=\/dev\/null|unset HISTFILE|unset HISTORY|TMOUT=0)/i
+    $ln_history_regex = /ln\s+.*-sf\s+.*\/dev\/null\s+.*(\.bash_history|\.zsh_history|\.zhistory|\.history|\.sh_history)/i
+
+    $antiforensic.metadata.event_type = "PROCESS_LAUNCH"
+    $antiforensic.metadata.hostname = $hostname
+    (
+      (
+        re.regex($antiforensic.principal.process.file.full_path, $shell_proc_regex) and
+        re.regex($antiforensic.principal.process.command_line, $anti_forensic_cmd_regex)
+      ) or
+      (
+        // FP Tuning: Legitimate scripts may use --noprofile or --norc. Exclude known benign parent processes if they cause noise.
+        $antiforensic.principal.process.file.full_path endswith "/ln" and
+        re.regex($antiforensic.principal.process.command_line, $ln_history_regex)
+      )
+    )
+
+  match:
+    $hostname over 1h
+
+  outcome:
+    $risk_score = max(
+        if($artifact, 95, 0),
+        if($taint, 60, 0),
+        if($net, 75, 0),
+        if($antiforensic, 65, 0)
+    )
+    $detection_pattern = array_distinct(
+        if($artifact, "Hidden Rootkit Artifact Detected", ""),
+        if($taint, "Kernel Tainted by Unsigned Module", ""),
+        if($net, "Network Connection Without Associated Process", ""),
+        if($antiforensic, "Anti-Forensic History Disabling", "")
+    )
+    $principal_hostname = array_distinct($hostname)
+    $principal_user = array_distinct($artifact.principal.user.userid, $antiforensic.principal.user.userid)
+    $suspicious_process_path = array_distinct($artifact.principal.process.file.full_path, $antiforensic.principal.process.file.full_path)
+    $suspicious_commandline = array_distinct($artifact.principal.process.command_line, $antiforensic.principal.process.command_line)
+    $suspicious_file_path = array_distinct($artifact.target.file.full_path)
+    $taint_details = array_distinct($taint.security_result.description)
+    $network_target_ip = array_distinct($net.target.ip)
+    $network_target_port = array_distinct($net.target.port.number)
+
+  condition:
+    $artifact or $taint or $net or $antiforensic
+}

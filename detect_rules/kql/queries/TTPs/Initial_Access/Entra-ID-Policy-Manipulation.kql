@@ -1,0 +1,55 @@
+// Name: Entra ID Policy Manipulation for Backdoor or Bypass
+// Author: RW
+// Date: 2025-08-09
+// Description: This rule detects suspicious modifications to critical Entra ID policies, such as Conditional Access, Seamless SSO,
+//              and External Authentication Methods. Such changes can indicate an attacker is attempting to create a backdoor,
+//              disable security controls, or establish an MFA bypass, as detailed in advanced hybrid attack research.
+// MITRE ATT&CK: T1098 - Account Manipulation
+// False Positive Sensitivity: Medium. Legitimate administrative changes to these policies will be detected. It is recommended to create an exclusion list of administrator accounts or service principals that are authorized to perform these actions to reduce noise.
+// Tags: Identity, Entra ID, Policy, Conditional Access, MFA Bypass, T1098
+
+AuditLogs
+| where Result == "Success"
+| where Category == "Policy"
+// Filter for key policy manipulation operations.
+| where OperationName in~ (
+    "Update policy",
+    "Delete policy",
+    "Add External Authentication Method",
+    "Update External Authentication Method"
+    )
+// Focus on specific, high-impact policy changes that could create backdoors or disable security.
+| where
+    // Detects updates to the SSO policy, which could be used to add backdoor keys.
+    (OperationName == "Update policy" and TargetResources has "On-Premise Authentication Flow Policy") or
+    // Detects addition of a new MFA provider, which could be a fake one for bypass.
+    (OperationName in~ ("Add External Authentication Method", "Update External Authentication Method")) or
+    // Detects when a Conditional Access policy is disabled or deleted.
+    (TargetResources has "Conditional Access Policy" and (OperationName == "Delete policy" or TargetResources has "\"State\",\"newValue\":\"\\\"disabled\\\"\"")) or
+    // Detects policy changes by the Exchange Online principal, a sign of S2S token abuse.
+    (InitiatedBy.user.displayName == "Office 365 Exchange Online")
+| extend
+    Reason = case(
+        TargetResources has "On-Premise Authentication Flow Policy", "Seamless SSO policy was updated, potentially to add a backdoor key.",
+        OperationName contains "External Authentication Method", "An External Authentication Method was added or modified, potentially creating an MFA bypass.",
+        TargetResources has "disabled", "A Conditional Access policy was disabled.",
+        OperationName == "Delete policy", "A Conditional Access policy was deleted.",
+        InitiatedBy.user.displayName == "Office 365 Exchange Online", "Policy modified by Exchange Online principal, indicating possible S2S token abuse.",
+        "Suspicious Policy Modification"
+    ),
+    Actor = todynamic(InitiatedBy),
+    Target = todynamic(TargetResources)[0]
+| project
+    TimeGenerated,
+    Reason,
+    OperationName,
+    ActorDisplayName = Actor.user.displayName,
+    ActorUPN = Actor.user.userPrincipalName,
+    ActorIpAddress = Actor.ipAddress,
+    TargetDisplayName = Target.displayName,
+    TargetModifiedProperties = Target.modifiedProperties,
+    CorrelationId
+| extend
+    timestamp = TimeGenerated,
+    AccountCustomEntity = ActorUPN,
+    IPCustomEntity = ActorIpAddress

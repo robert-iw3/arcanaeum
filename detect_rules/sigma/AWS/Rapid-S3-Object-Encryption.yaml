@@ -1,0 +1,37 @@
+title: High Volume of S3 Object Modifications by a Single User
+id: f0d65d4d-4201-4137-9b65-5498d32fcfef
+status: experimental
+description: >-
+  Detects a high volume of S3 object modification or deletion events (PutObject, CopyObject, DeleteObject, DeleteObjectVersion) performed by a single user identity on a single bucket within a short time frame. This could indicate an S3 ransomware attack where an attacker is rapidly encrypting or deleting objects in a bucket.
+references:
+  - https://rhinosecuritylabs.com/aws/s3-ransomware-part-1-attack-vector/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.impact
+  - attack.t1486
+logsource:
+  product: aws
+  service: s3
+detection:
+  # Detects key S3 object modification and deletion events
+  selection:
+    eventName:
+      - 'CopyObject'
+      - 'DeleteObject'
+      - 'DeleteObjectVersion'
+      - 'PutObject'
+  # Correlates events by user and target bucket over a short time window
+  # The condition counts if a single user performs more than 100 actions on a single bucket in 10 minutes.
+  # This threshold is a starting point and may need tuning based on your environment's baseline activity.
+  aggregation:
+    group-by:
+      - userIdentity.arn
+      - requestParameters.bucketName
+    timespan: 10m
+    condition: count() > 100
+  condition: selection and aggregation
+falsepositives:
+  - Legitimate high-volume data operations, such as application logging, data pipeline jobs, or large data migrations.
+  - The threshold for the event count will likely need to be tuned based on normal activity within the environment to reduce noise.
+level: medium

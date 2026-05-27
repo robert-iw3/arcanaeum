@@ -1,0 +1,66 @@
+{
+  "name": "Combined SQL Injection (SQLi) Detection",
+  "queries": [
+    {
+      "name": "sqli_authentication_bypass",
+      "query": "@event.outcome:(0 OR success OR allow OR accepted) AND @user.name:(*'\\ or\\ * OR \"*'or'--\"* OR *\\ or\\ 1=1* OR \"*admin'--*\")",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "time_based_blind_sqli",
+      "query": "@http.response.time_taken:>5 AND @http.url:(*sleep\\(* OR \"*waitfor delay*\" OR *benchmark\\(* OR *pg_sleep\\(*)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "error_based_sqli",
+      "query": "@http.response.body:(*\"error in your sql syntax\"* OR *unclosed\\ quotation\\ mark* OR *ora-[0-9][0-9][0-9][0-9][0-9]* OR *invalid\\ column\\ name*)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "sqli_db_reconnaissance",
+      "query": "@sql.query:* AND @sql.query:(*information_schema* OR *sys.objects* OR *pg_catalog* OR *sqlite_master*)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "general_sqli_attempt",
+      "query": "@http.url:(*'\\ or\\ * OR *\\ union\\ *select\\ * OR *--* OR *\\/\\** OR *';*)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    }
+  ],
+  "cases": [
+    {
+      "name": "Combined SQL Injection (SQLi) Detection",
+      "status": "high",
+      "condition": "event_count_0 >= 1 OR event_count_1 >= 1 OR event_count_2 >= 1 OR event_count_3 >= 1 OR event_count_4 >= 1"
+    }
+  ],
+  "options": {
+    "evaluation_window": 3600,
+    "keep_alive": 3600,
+    "max_signal_duration": 3600,
+    "correlation_based_signal": {
+      "correlation_inputs": [
+        {
+          "rule_id": "sqli_detection_correlation"
+        }
+      ],
+      "correlated_by_fields": [
+        "@host",
+        "@user.name",
+        "@destination.ip"
+      ],
+      "distinct_fields": [
+        "case_id"
+      ]
+    }
+  },
+  "message": "SQLi Attempt: {{distinct_count}} type(s) from source {{client.ip}} by user {{user.name}} to destination {{destination.ip}}: {{case_names}}",
+  "type": "correlation_based_signal",
+  "tags": [],
+  "is_enabled": true
+}

@@ -1,0 +1,62 @@
+rule dga_detection_by_lexical_and_nxdomain_analysis {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects potential Domain Generation Algorithm (DGA) activity by identifying a client making numerous DNS queries to domains with high lexical randomness (high entropy, high numeric ratio) that result in a high rate of NXDOMAIN responses. This pattern is a strong indicator of malware attempting to contact a command-and-control (C2) server."
+    tags = "DNS, C2, DGA, MALWARE"
+    tactic = "TA0011"
+    technique = "T1568.002"
+    false_positives = "Content Delivery Networks (CDNs), ad trackers, or domain parking services that use algorithmically generated domain names. Misconfigured clients attempting to resolve non-existent internal resources."
+    severity = "MEDIUM"
+
+  events:
+    $dns.metadata.event_type = "NETWORK_DNS"
+    $dns.principal.ip = $ip
+    $domain_name = $dns.network.dns.question.name
+
+    // Extract the first label of the domain, as this is typically the randomly generated part in DGA.
+    $first_label = re.capture($domain_name, `^([^.]+)`)
+
+    // Calculate lexical features to identify randomness.
+    $first_label_len = strings.length($first_label)
+    $entropy = math.entropy($first_label)
+    $numeric_count = re.char_count($first_label, "0123456789")
+    // Avoid division by zero for empty or single-character labels.
+    $numeric_ratio = if($first_label_len > 1, math.abs($numeric_count) / math.abs($first_label_len), 0)
+
+    // Define thresholds for what constitutes a "DGA-like" domain.
+    // These can be tuned to adjust sensitivity.
+    $entropy_threshold = 3.5
+    $min_label_length_for_entropy = 10 // Apply entropy check only to longer labels to reduce FPs.
+    $numeric_ratio_threshold = 0.4
+
+    // Flag if the domain meets lexical criteria for DGA.
+    (
+      ($entropy > $entropy_threshold and $first_label_len > $min_label_length_for_entropy) or
+      $numeric_ratio > $numeric_ratio_threshold
+    )
+
+    // Flag if the query resulted in a non-existent domain response.
+    $is_nxdomain = $dns.network.dns.response_code = "NXDOMAIN"
+
+  match:
+    // Group events by the source IP over a 15 minute window.
+    $ip over 15m
+
+  outcome:
+    $risk_score = 50
+    $principal_ip = array_distinct($dns.principal.ip)
+    $principal_hostname = array_distinct($dns.principal.hostname)
+    $process_path = array_distinct($dns.principal.process.file.full_path)
+    $process_command_line = array_distinct($dns.principal.process.command_line)
+    $dga_like_domains = array_distinct($dns.network.dns.question.name)
+    $total_dga_like_queries = count_distinct($dns.metadata.id)
+    $nxdomain_count = count_distinct($dns.metadata.id, $is_nxdomain)
+    // Calculate the ratio of failed queries to total suspicious queries.
+    $nxdomain_ratio = math.abs($nxdomain_count) / math.abs($total_dga_like_queries)
+
+  condition:
+    // Trigger an alert if a client makes a high number of DGA-like queries
+    // AND a significant percentage of them fail (NXDOMAIN).
+    $total_dga_like_queries > 5 and $nxdomain_ratio > 0.5
+}

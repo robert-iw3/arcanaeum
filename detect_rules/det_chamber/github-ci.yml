@@ -1,0 +1,65 @@
+name: CI Pipeline for malware_sandbox
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install flake8 pylint psscriptanalyzer
+      - name: Lint Python scripts
+        run: |
+          flake8 malware_sandbox.py compile_yara_rules.py
+          pylint malware_sandbox.py compile_yara_rules.py
+      - name: Lint PowerShell scripts
+        run: psscriptanalyzer -Path malware_sandbox.ps1 filter_yara_rules.ps1 download_tools.ps1
+
+  test-python:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r requirements.txt  # Assume requirements.txt with psutil, etc.
+      - name: Run Python unit tests
+        run: |
+          python -m unittest discover -p '*_test.py'  # Assume unit test files in directory
+
+  test-powershell:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run PowerShell unit tests
+        run: powershell -File test_malware_sandbox.ps1  # Assume a test script for malware_sandbox.ps1
+
+  build:
+    runs-on: windows-latest
+    needs: [lint, test-python, test-powershell]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build Docker image
+        run: docker build -t ${{ github.repository }}:${{ github.sha }} .
+
+  deploy:
+    runs-on: windows-latest
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    steps:
+      - name: Deploy to registry
+        run: docker push ${{ github.repository }}:${{ github.sha }}
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}

@@ -1,0 +1,25 @@
+title: AWS EC2 Serial Console Access via SSH Key Push
+id: d1973021-8327-466a-a8c2-4e5ea6c953d0
+status: experimental
+description: >-
+  Detects the use of the EC2 Instance Connect service to push a public SSH key for serial console access. Attackers with sufficient IAM permissions can use this method to gain interactive shell access to an instance, bypassing network-level controls like security groups.
+references:
+  - https://unit42.paloaltonetworks.com/cloud-lateral-movement-techniques/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.lateral_movement
+  - attack.t1098.004
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    eventName: 'SendSerialConsoleSSHPublicKey' # API call to push an SSH key for serial console access
+    eventSource: 'ec2-instance-connect.amazonaws.com'
+    errorCode:      # Filter for successful API calls
+  condition: selection
+falsepositives:
+  - Legitimate use by administrators for troubleshooting instances that are unreachable over the network.
+  - It is recommended to filter out trusted roles or user identities that are authorized to perform this action.
+level: medium

@@ -1,0 +1,49 @@
+rule AMSI_Bypass_VEH2_Technique_Detection {
+  meta:
+    author = "RW"
+    description = "Detects the AMSI bypass technique (VEH2) by correlating multiple Vectorized Exception Handler registrations, a debug break, and the loading of amsi.dll within the same process."
+    severity = "CRITICAL"
+
+  events:
+    // Event 1: AddVectoredExceptionHandler API call (multiple instances)
+    $veh_reg_api.metadata.event_type = "API_CALL"
+    $veh_reg_api.api.function_name = "AddVectoredExceptionHandler"
+
+    // Event 2: DebugBreak API call (at least one instance)
+    $debug_break_api.metadata.event_type = "API_CALL"
+    $debug_break_api.api.function_name = "DebugBreak"
+
+    // Event 3: amsi.dll module load (at least one instance)
+    $amsi_load.metadata.event_type = "MODULE_LOAD"
+    $amsi_load.target.process.file.full_path = /.*\\amsi\.dll/ nocase
+
+    // Correlate events by process and user
+    $veh_reg_api.principal.hostname = $debug_break_api.principal.hostname
+    $veh_reg_api.principal.process.product_object_id = $debug_break_api.principal.process.product_object_id
+    $veh_reg_api.principal.user.userid = $debug_break_api.principal.user.userid
+
+    $debug_break_api.principal.hostname = $amsi_load.principal.hostname
+    $debug_break_api.principal.process.product_object_id = $amsi_load.principal.process.product_object_id
+    $debug_break_api.principal.user.userid = $amsi_load.principal.user.userid
+
+  match:
+    // Correlation window: 5 minutes (adjust as needed for your environment)
+    // All events ($veh_reg_api, $debug_break_api, $amsi_load) occur within a 5-minute window relative to each other.
+    $veh_reg_api and $debug_break_api and $amsi_load over 5m
+
+  outcome:
+    $firstTime = min($veh_reg_api.metadata.event_timestamp.epoch_seconds, $debug_break_api.metadata.event_timestamp.epoch_seconds, $amsi_load.metadata.event_timestamp.epoch_seconds)
+    $lastTime = max($veh_reg_api.metadata.event_timestamp.epoch_seconds, $debug_break_api.metadata.event_timestamp.epoch_seconds, $amsi_load.metadata.event_timestamp.epoch_seconds)
+    $host = $veh_reg_api.principal.hostname
+    $user = $veh_reg_api.principal.user.userid
+    $parent_process = $veh_reg_api.principal.process.parent_process.file.full_path
+    $process = $veh_reg_api.principal.process.file.full_path
+    $process_guid = $veh_reg_api.principal.process.product_object_id
+    $veh_registration_count = count($veh_reg_api) // Count multiple VEH registrations
+    $debug_break_count = count($debug_break_api)
+    $amsi_load_count = count($amsi_load)
+
+  condition:
+    // Apply thresholds: more than 1 VEH registration, at least 1 debug break, at least 1 amsi load
+    $veh_registration_count > 1 and $debug_break_count > 0 and $amsi_load_count > 0
+}

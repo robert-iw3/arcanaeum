@@ -1,0 +1,13 @@
+public class Vulnerable {
+    public void vulnerable() {
+        String secret = "xyz123";
+        System.getProperty("user.dir");
+        Runtime.getRuntime().exec("cmd.exe");
+        javax.servlet.http.HttpSession session;
+        session.setAttribute("user", secret);
+    }
+}
+// Simulate large file
+{{ '{{' }}% for i in range(200000) %{{ '}}' }}
+// Comment line {{ '{{' }} i {{ '}}' }}
+{{ '{{' }}% endfor %{{ '}}' }}

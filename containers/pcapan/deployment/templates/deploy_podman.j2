@@ -1,0 +1,11 @@
+---
+- hosts: localhost
+  tasks:
+    - name: Build Rust Podman
+      command: podman build -t pcapan:{{ image_tag }} ../rust-app
+    - name: Build Web Podman
+      command: podman build -t pcapan-web:{{ image_tag }} ../web-app
+    - name: Run Analysis
+      command: podman run --rm -v {{ pcap_dir }}:/pcaps pcapan:{{ image_tag }} --dir /pcaps --whitelist /whitelist.yaml
+    - name: Run Web App
+      command: podman run -d -p 3000:3000 -v {{ pcap_dir }}:/pcaps -e JWT_SECRET={{ jwt_secret }} pcapan-web:{{ image_tag }}

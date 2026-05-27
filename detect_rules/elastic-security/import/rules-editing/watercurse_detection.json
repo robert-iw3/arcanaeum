@@ -1,0 +1,22 @@
+{
+  "type": "detection-engine.rule",
+  "id": "watercurse-detection",
+  "attributes": {
+    "risk_score": 95,
+    "enabled": true,
+    "name": "WaterCurse Detection",
+    "description": "Detects WaterCurse malware activity, including initial execution via MSBuild, defense evasion tactics, privilege escalation, persistence mechanisms, reconnaissance, and C2 communication.",
+    "rule_id": "watercurse_detection",
+    "index": [
+      "logs-endpoint.events.*",
+      "logs-network.*",
+      "logs-registry.*"
+    ],
+    "language": "kuery",
+    "query": "(/* Initial execution via malicious Visual Studio project file */ (process.parent.name:\"MSBuild.exe\" AND process.name:\"cmd.exe\" AND process.command_line:/\\/c*/ AND process.command_line:/\\*.exec.cmd*/ AND process.command_line:/\\*Temp\\\\MSBuildTemp*/) OR /* Defense Evasion via PowerShell to disable Windows Defender and System Restore */ (process.name:\"powershell.exe\" AND (process.command_line:/\\*Set-MpPreference* -ExclusionPath*C:\\\\*\\/ OR process.command_line:/\\*vssadmin*delete*shadows*\\/all*/ OR process.command_line:/\\*Set-ItemProperty*HKLM:\\\\SOFTWARE\\\\Policies\\\\Microsoft\\\\Windows NT\\\\SystemRestore*DisableSR*/) ) OR /* UAC Bypass via ms-settings protocol handler hijack */ (registry.path:/\\*\\\\Software\\\\Classes\\\\ms-settings\\\\shell\\\\open\\\\command*/ AND (registry.value:\"(Default)\" OR registry.value:\"DelegateExecute\")) OR /* Persistence via unusually configured Scheduled Task */ (process.name:\"schtasks.exe\" AND process.command_line:/\\*\\/create*/ AND (process.command_line:/\\*\\/du 9999:59*/ OR (process.command_line:\"*BitLocker Encrypt All Drives*\" AND process.command_line:/\\*\\\\OneDriveCloud\\\\taskhostw.exe*/))) OR /* Data Staging and Reconnaissance */ (process.name:\"7z.exe\" AND process.executable:/C:\\\\ProgramData\\\\sevenZip\\\\*/ AND process.command_line:/\\*-p*/) OR (process.parent.name:\"NVIDIA Control Panel.exe\" AND process.parent.executable:/\\*\\\\Microsoft\\\\Vault\\\\UserRoamingTiles\\\\NVIDIAContainer*/ AND process.name:(\"curl.exe\" OR \"wmic.exe\" OR \"tasklist.exe\")) OR /* Malicious File Artifacts Creation */ (file.path:/\\*\\\\.vs-script\\\\*\\/ AND file.name:(\"antiDebug.ps1\" OR \"disabledefender.ps1\")) OR (file.path:/\\*\\\\AppData\\\\Local\\\\Temp\\\\*\\/ AND file.name:\"SearchFilter.exe\") OR (file.path:/\\*\\\\Microsoft\\\\Vault\\\\UserRoamingTiles\\\\NVIDIAContainer*/ AND file.name:\"NVIDIA Control Panel.exe\") OR /* C2 and Exfiltration Network Activity */ (url.full:(\"*store-eu-par-2.gofile.io*\" OR \"*api.telegram.org*\" OR \"*popcorn-soft.glitch.me*\" OR \"*pastejustit.com*\" OR \"*pastesio.com*\") OR destination.ip:\"46.101.236.176\" OR process.name:\"RegAsm.exe\"))",
+    "interval": "15m",
+    "severity": "critical",
+    "type": "query",
+    "version": "1"
+  }
+}

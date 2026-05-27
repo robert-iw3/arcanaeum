@@ -1,0 +1,24 @@
+{
+  "type": "detection-engine.rule",
+  "id": "impossible-travel-phishing-detection",
+  "attributes": {
+    "risk_score": 75,
+    "enabled": true,
+    "name": "Impossible Travel, Phishing, and Cryptocurrency Detection",
+    "description": "Detects various security threats including impossible travel (authentication events), phishing link clicks, suspicious TLD visits, malicious process execution, new service/scheduled task creation, and cryptocurrency site access.",
+    "rule_id": "impossible_travel_phishing",
+    "index": [
+      "logs-authentication.*",
+      "logs-web.*",
+      "logs-dns.*",
+      "logs-endpoint.events.*",
+      "logs-vulnscan.*"
+    ],
+    "language": "kuery",
+    "query": "(/* Impossible Travel */ (event.category:\"authentication\" AND event.outcome:\"success\") OR /* Phishing Link Click */ (event.category:\"web\" AND vulnerability.category:(\"Phishing & Fraud\" OR \"Malware\")) OR /* Suspicious TLD Visited */ (url.domain:/\\*.(xyz|top|online|club|live|icu|gq|buzz)/) OR /* Suspicious Process Execution */ ((process.name:(\"powershell.exe\" OR \"pwsh.exe\") AND (process.command_line:/\\* -enc */ OR process.command_line:/\\* -encoded */ OR process.command_line:/\\* -w hidden */ OR process.command_line:/\\* IEX */ OR process.command_line:/\\* Invoke-Expression */)) OR (process.name:\"mshta.exe\" AND (process.command_line:\"*http:*\" OR process.command_line:\"*https:*\" OR process.command_line:\"*javascript:*\"))) OR /* New Service Created */ (winlog.event_id:4697) OR /* New Scheduled Task Created */ (winlog.event_id:106 AND winlog.channel:\"Microsoft-Windows-TaskScheduler/Operational\") OR /* Cryptocurrency Site Visited */ (url.full:(\"*binance.com*\" OR \"*coinbase.com*\" OR \"*kraken.com*\" OR \"*kucoin.com*\" OR \"*bybit.com*\" OR \"*metamask.io*\")))",
+    "interval": "15m",
+    "severity": "medium",
+    "type": "query",
+    "version": "1"
+  }
+}

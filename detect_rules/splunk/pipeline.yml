@@ -1,0 +1,31 @@
+name: Splunk Query Pipeline
+on:
+  push:
+  schedule:
+    - cron: '0 0 * * *'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for .env and config.json files and required variables
+        run: |
+          if [ ! -f .env ]; then
+            echo "Error: .env file not found"
+            exit 1
+          fi
+          if [ ! -f config.json ]; then
+            echo "Error: config.json file not found"
+            exit 1
+          fi
+          required_vars=("SPLUNK_HOST" "SPLUNK_PORT" "SPLUNK_USER" "SPLUNK_PASSWORD" "APP_CONTEXT" "SPLUNK_SSL_VERIFY" "CLEANUP_JSON" "POOL_SIZE" "RATE_LIMIT_CALLS" "RATE_LIMIT_PERIOD" "API_TIMEOUT" "MAX_FILES" "VALIDATE_API" "CONFIG_PATH")
+          for var in "${required_vars[@]}"; do
+            if ! grep -q "^${var}=" .env; then
+              echo "Error: Required variable ${var} not found in .env"
+              exit 1
+            fi
+          done
+      - name: Build Docker
+        run: docker build -t splunk-pipeline -f pipeline.Dockerfile .
+      - name: Run Pipeline
+        run: docker run --env-file .env -v $(pwd)/import:/import -v $(pwd):/import/src --secret splunk_password splunk-pipeline

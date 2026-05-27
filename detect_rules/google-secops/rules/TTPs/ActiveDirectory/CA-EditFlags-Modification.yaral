@@ -1,0 +1,35 @@
+rule CA_EditFlags_Registry_Modification_Detection {
+  meta:
+    author = "RW"
+    description = "Detects modifications to a Certificate Authority's 'EditFlags' registry value, which can indicate critical misconfigurations related to ESC6 (EDITF_ATTRIBUTESUBJECTALTNAME2) or ESC16 (changes related to binding enforcement)."
+    severity = "CRITICAL"
+
+  events:
+    $e.metadata.event_type = "REGISTRY_SET_VALUE" // Sysmon Event ID 13 maps to REGISTRY_SET_VALUE.
+    $e.metadata.vendor_name = "Microsoft"
+    $e.metadata.product_name = "Sysmon"
+    $e.metadata.event_code = 13 // Sysmon Event ID for registry value modification.
+
+    // TargetObject field contains the registry path.
+    $e.target.registry_key = /.*\\SYSTEM\\CurrentControlSet\\Services\\CertSvc\\Configuration\\.*\\PolicyModules\\CertificateAuthority_MicrosoftDefault\.Policy\\EditFlags/ nocase
+
+    // Extract the CA name from the registry path.
+    re.regex($e.target.registry_key, `Configuration\\\\(?<ca_name>[^\\\\]+)\\\\PolicyModules`)
+
+    // Filter out potential false positives. This typically involves using a Chronicle Reference List.
+    // Example: not $e.principal.user.userid in %pki_admin_whitelist
+    // Example: not $e.process.file.full_path in %whitelisted_pki_processes
+
+  outcome:
+    $event_time = $e.metadata.event_timestamp.epoch_seconds // _time
+    $host = $e.principal.hostname // host
+    $user = $e.principal.user.userid // user
+    $process_name = $e.principal.process.file.full_path // process_name (Full path of the process that modified the registry)
+    $ca_name = $ca_name // Extracted CA name
+    $target_object = $e.target.registry_key // TargetObject
+    $details = $e.target.registry_value_data // Details (new value written to the registry key)
+    // Note: The 'Details' field in Sysmon Event 13 corresponds to RegistryValueData.
+
+  condition:
+    $e
+}

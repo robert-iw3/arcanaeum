@@ -1,0 +1,45 @@
+title: Suspicious Entra ID OAuth Token Usage for First-Party Applications
+id: c782fd64-3504-4ff9-95af-c0debb3b7243
+status: experimental
+description: |-
+  Hypothesis: An adversary who has successfully phished a user for an OAuth authorization code or refresh token may use it in a non-interactive sign-in to abuse trusted first-party Microsoft applications for persistence or data exfiltration.
+
+  This rule detects two primary scenarios observed in such campaigns:
+  1. A refresh token issued to the Microsoft Authentication Broker is used to access the Device Registration Service (DRS) with the 'adrs_access' scope. This is indicative of an adversary registering a new device to gain persistence via a Primary Refresh Token (PRT).
+  2. A token is used by the Visual Studio Code application to access the Microsoft Graph API. This can be used by an attacker who has phished an authorization code to exfiltrate data like emails.
+references:
+  - https://www.elastic.co/security-labs/entra-id-oauth-phishing-detection?linkId=834541216
+  - https://www.volexity.com/blog/2025/04/22/phishing-for-codes-russian-threat-actors-target-microsoft-365-oauth-workflows/
+author:
+date: 2025-07-09
+tags:
+  - attack.persistence
+  - attack.t1528
+  - attack.t1136.003
+logsource:
+  product: azure
+  service: signinlogs
+  category: NonInteractiveUserSignInLogs
+detection:
+  selection_drs:
+    # AppId for Microsoft Authentication Broker used for device registration
+    AppId: '29d9ed98-a469-4536-ade2-f981bc1d605e'
+    # ResourceId for Device Registration Service (DRS)
+    ResourceID: '01cb2876-7ebd-4aa4-9cc9-d28bd4d359a9'
+    # Indicates a refresh token was used for authentication
+    IncomingTokenType: 'refreshToken'
+    # The 'adrs_access' scope is specific to Azure DRS access
+    AuthenticationProcessingDetails|contains: 'adrs_access'
+  selection_graph:
+    # AppId for Visual Studio Code
+    AppId: 'aebc6443-996d-45c2-90f0-388ff96faa56'
+    # ResourceId for Microsoft Graph
+    ResourceID: '00000003-0000-0000-c000-000000000000'
+  filter:
+    # Focus on user accounts, not service principals
+    UserType: 'Member'
+  condition: (selection_drs or selection_graph) and filter
+falsepositives:
+  - Legitimate but rare device registration flows might trigger the 'selection_drs' logic.
+  - Automated workflows or extensions within Visual Studio Code that interact with Microsoft Graph could trigger the 'selection_graph' logic. However, these are typically associated with interactive sign-ins or service principals, which should be filtered out.
+level: high

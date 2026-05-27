@@ -1,0 +1,63 @@
+{
+  "rule_id": "aws_policy_grants_delegated_admin_permission",
+  "name": "AWS Policy Grants organizations:RegisterDelegatedAdministrator",
+  "description": "Detects the creation or modification of IAM policies that grant the 'organizations:RegisterDelegatedAdministrator' permission. This could be an attacker attempting to establish persistence or elevate privileges within the AWS Organization by delegating administrative authority.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "from logs-aws.cloudtrail-* | where event.action in ('CreatePolicy', 'CreatePolicyVersion', 'PutUserPolicy', 'PutRolePolicy', 'PutGroupPolicy') and aws.cloudtrail.requestParameters.policyDocument like '%organizations:RegisterDelegatedAdministrator%' and aws.cloudtrail.requestParameters.policyDocument like '%\"Resource\":\"*\"%' and aws.cloudtrail.requestParameters.policyDocument like '%\"Effect\":\"Allow\"%' | eval target_name = COALESCE(aws.cloudtrail.requestParameters.policyName, aws.cloudtrail.requestParameters.userName, aws.cloudtrail.requestParameters.roleName, aws.cloudtrail.requestParameters.groupName) | keep event.action, aws.cloudtrail.aws_account_id, aws.cloudtrail.userIdentity.arn, source.ip, target_name",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0004",
+        "name": "Privilege Escalation",
+        "reference": "https://attack.mitre.org/tactics/TA0004/"
+      },
+      "technique": [
+        {
+          "id": "T1078.004",
+          "name": "Valid Accounts: Cloud Accounts",
+          "reference": "https://attack.mitre.org/techniques/T1078/004/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0003",
+        "name": "Persistence",
+        "reference": "https://attack.mitre.org/tactics/TA0003/"
+      },
+      "technique": [
+        {
+          "id": "T1078.004",
+          "name": "Valid Accounts: Cloud Accounts",
+          "reference": "https://attack.mitre.org/techniques/T1078/004/"
+        }
+      ]
+    }
+  ],
+  "interval": "10m",
+  "from": "now-10m",
+  "max_signals": 100,
+  "risk_score": 95,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://docs.aws.amazon.com/organizations/latest/userguide/orgs_delegate_admin.html"
+  ],
+  "tags": [
+    "AWS",
+    "CloudTrail",
+    "IAM",
+    "Privilege Escalation",
+    "Persistence"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "aws.cloudtrail.userIdentity.arn, target_name, event.action"
+}

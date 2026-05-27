@@ -1,0 +1,51 @@
+// Name: LOLBin Writes Suspiciously Long Registry Value
+// Author: RW
+// Date: 2025-08-08
+// Description: Detects when a common LOLBin writes a registry value to HKCU that is statistically longer than its typical behavior
+//              over a 1-day window. This can indicate the staging of encoded payloads or other malicious data.
+// MITRE ATT&CK: T1112 (Modify Registry)
+
+let lookback = 1d; // Time window to establish the baseline and look for events.
+let stdev_threshold = 2.0; // Number of standard deviations above the average to be considered an outlier. Adjust as needed for your environment.
+let lolbins = dynamic(["powershell.exe", "pwsh.exe", "powershell_ise.exe", "wscript.exe", "cscript.exe", "mshta.exe", "rundll32.exe", "reg.exe"]);
+
+// Calculate the baseline average and standard deviation of registry value lengths for each LOLBin.
+let RegValueStats = DeviceRegistryEvents
+    | where Timestamp > ago(lookback)
+    | where InitiatingProcessFileName in~ (lolbins)
+    | where ActionType == "RegistryValueSet"
+    | where RegistryKey has "HKEY_CURRENT_USER"
+    | where isnotempty(RegistryValueData)
+    | extend RegValueLength = strlen(RegistryValueData)
+    | summarize AvgLength = avg(RegValueLength), StdevLength = stdev(RegValueLength) by InitiatingProcessFileName
+    | where StdevLength > 0; // Exclude processes with no variance in value length to avoid division by zero.
+
+// Identify registry write events where the value length is a statistical outlier compared to the baseline.
+DeviceRegistryEvents
+| where Timestamp > ago(lookback)
+| where InitiatingProcessFileName in~ (lolbins)
+| where ActionType == "RegistryValueSet"
+| where RegistryKey has "HKEY_CURRENT_USER"
+| where isnotempty(RegistryValueData)
+| extend RegValueLength = strlen(RegistryValueData)
+// Join with the calculated stats for each process.
+| join kind=inner (RegValueStats) on InitiatingProcessFileName
+// Calculate how many standard deviations the current event's length is from the average.
+| extend Deviations = (RegValueLength - AvgLength) / StdevLength
+// Filter for events that exceed the defined standard deviation threshold.
+| where Deviations > stdev_threshold
+// Potential for False Positives: Some legitimate software installers or configuration scripts may write long registry values.
+// Consider adding exclusions for known benign processes, command lines, or registry key paths to improve fidelity.
+// Example: | where not (InitiatingProcessFileName == 'powershell.exe' and RegistryKey contains 'SomeBenignSoftware')
+| project
+    Timestamp,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RegistryKey,
+    RegistryValueName,
+    RegistryValueData,
+    RegValueLength,
+    AvgLength,
+    StdevLength,
+    Deviations

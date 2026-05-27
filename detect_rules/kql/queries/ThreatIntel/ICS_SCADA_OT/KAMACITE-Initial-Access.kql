@@ -1,0 +1,51 @@
+// Name: KAMACITE Initial Access and Credential Harvesting
+// Author: RW
+// Date: 2025-08-17
+// Description: Detects credential harvesting techniques commonly used by threat actors like KAMACITE (APT44) after gaining
+// initial access to IT networks that bridge to OT/ICS environments. This rule identifies LSASS memory dumping and registry
+// hive dumping, which are critical steps for adversaries to escalate privileges and move laterally. Detecting these activities
+// is crucial to preventing deeper compromise of OT/ICS environments.
+// False Positive Sensitivity: Medium
+// Tactic: Credential Access
+// Technique: T1003.001, T1003.002
+
+let timeframe = 1d;
+// FP Tuning: Populate this with hostnames of jump servers, EWS, or other critical systems that bridge IT and OT.
+// Leaving this list empty will cause the rule to run against all systems.
+let critical_systems = dynamic([]);
+
+// Pattern 1: LSASS memory dumping for credential access.
+let lsass_dumping =
+DeviceProcessEvents
+| where TimeGenerated > ago(timeframe)
+| where
+    // Detects procdump targeting the LSASS process.
+    (InitiatingProcessFileName =~ "procdump.exe" and ProcessCommandLine has_all ("-ma", "lsass.exe")) or
+    // Detects rundll32 using comsvcs.dll to dump LSASS memory.
+    (InitiatingProcessFileName =~ "rundll32.exe" and ProcessCommandLine matches regex @"comsvcs\.dll.*MiniDump") or
+    // Detects direct memory access to LSASS from a suspicious process.
+    (TargetProcessFileName =~ "lsass.exe" and InitiatingProcessFileName !in ("smss.exe", "wininit.exe", "services.exe", "csrss.exe", "winlogon.exe", "LogonUI.exe", "vmtoolsd.exe"))
+| extend Pattern = "LSASS Memory Dumping", TechniqueId = "T1003.001";
+
+// Pattern 2: Dumping registry hives for offline credential extraction.
+let registry_hive_dumping =
+DeviceProcessEvents
+| where TimeGenerated > ago(timeframe)
+| where FileName =~ "reg.exe" and ProcessCommandLine has "save"
+| where ProcessCommandLine has_any ("hklm\\sam", "hklm\\security", "hklm\\system")
+| extend Pattern = "Registry Hive Dumping", TechniqueId = "T1003.002";
+
+// Union the patterns and filter for critical systems.
+union lsass_dumping, registry_hive_dumping
+| where array_length(critical_systems) == 0 or DeviceName in (critical_systems)
+| project
+    TimeGenerated,
+    DeviceName,
+    Pattern,
+    TechniqueId,
+    AccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    FileName,
+    ProcessCommandLine,
+    TargetProcessFileName

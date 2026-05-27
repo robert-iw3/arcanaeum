@@ -1,0 +1,63 @@
+rule waiting_thread_hijacking_full_api_sequence {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects a specific WTH sequence including a check for THREAD_GET_CONTEXT access and two separate writes, indicating a more deliberate attempt to find and overwrite a thread's return address."
+    tactic = "TA0005"
+    technique = "T1055"
+    false_positives = "Advanced debuggers or diagnostic tools might perform this sequence. The check for GrantedAccess may need to be tuned based on your log source."
+
+  events:
+    // Event 1: Open thread handle with THREAD_GET_CONTEXT (0x8) permission.
+    $open.metadata.event_type = "PROCESS_API_CALL"
+    $open.security_result.action_details = "OpenThread"
+    // UDM does not have a standard field for GrantedAccess. This regex is a placeholder.
+    // Adjust this to parse the correct field from your EDR logs.
+    re.regex($open.raw_log, `GrantedAccess.*0x8`)
+    $open.principal.process.pid = $source_pid
+    $open.target.process.pid = $target_pid
+
+    // Event 2: Allocate memory in the target process.
+    $alloc.metadata.event_type = "PROCESS_API_CALL"
+    $alloc.security_result.action_details = "VirtualAllocEx"
+    $alloc.principal.process.pid = $source_pid
+    $alloc.target.process.pid = $target_pid
+
+    // Events 3 & 4: Two separate writes to the target process.
+    $write.metadata.event_type = "PROCESS_API_CALL"
+    $write.security_result.action_details = "WriteProcessMemory"
+    $write.principal.process.pid = $source_pid
+    $write.target.process.pid = $target_pid
+
+    // Filter out self-injection and known benign processes.
+    $source_pid != $target_pid
+    not strings.ends_with($open.principal.process.file.full_path, "\\procexp.exe")
+    and not strings.ends_with($open.principal.process.file.full_path, "\\procmon.exe")
+    and not strings.ends_with($open.principal.process.file.full_path, "\\windbg.exe")
+    and not strings.ends_with($open.principal.process.file.full_path, "\\x64dbg.exe")
+    and not strings.ends_with($open.principal.process.file.full_path, "\\ollydbg.exe")
+    and not strings.ends_with($open.principal.process.file.full_path, "\\perfview.exe")
+    and not strings.ends_with($open.principal.process.file.full_path, "\\ProcessHacker.exe")
+    and not strings.ends_with($open.principal.process.file.full_path, "\\SystemInformer.exe")
+
+  match:
+    $source_pid, $target_pid over 15m
+
+  outcome:
+    $risk_score = 70
+    $technique = "WTH - Full API Sequence"
+    $principal_process_path = array_distinct($open.principal.process.file.full_path)
+    $principal_process_pid = $source_pid
+    $principal_process_cmdline = array_distinct($open.principal.process.command_line)
+    $target_process_path = array_distinct($alloc.target.process.file.full_path)
+    $target_process_pid = $target_pid
+    $target_process_cmdline = array_distinct($alloc.target.process.command_line)
+    $write_count = count_distinct($write.metadata.id)
+
+  condition:
+    // Check for the full sequence: Open -> Alloc -> Write (x2)
+    $open and $alloc and #write >= 2 and
+    $alloc.metadata.collected_timestamp.seconds > $open.metadata.collected_timestamp.seconds and
+    // Ensure at least two writes happened after the allocation.
+    any $w in $write: $w.metadata.collected_timestamp.seconds > $alloc.metadata.collected_timestamp.seconds
+}

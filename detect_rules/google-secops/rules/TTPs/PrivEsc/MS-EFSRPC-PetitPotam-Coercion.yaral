@@ -1,0 +1,52 @@
+rule ms_efsrpc_petitpotam_coercion {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects a potential MS-EFSRPC (PetitPotam) or similar coercion attack. The rule identifies when a remote system accesses a sensitive named pipe (like efsrpc, lsarpc) on a host, which is immediately followed by an outbound authentication attempt (e.g., SMB) from that host back to the original remote system. This pattern is characteristic of an attacker coercing a machine to authenticate to a system they control."
+    tactic = "TA0008"
+    technique = "T1210"
+    false_positives = "Legitimate remote administration tools, security scanners, or monitoring software might perform similar actions. To reduce noise, add trusted administrative server IPs to a reference list and exclude them from the detection."
+
+  events:
+    // Event 1: Access to a sensitive named pipe, initiated by the attacker.
+    $pipe_access.metadata.product_event_type = "5145" // A network share object was checked for access.
+    $pipe_access.metadata.event_type = "FILE_ACCESS"
+    // The pipe name is key. efsrpc is for PetitPotam, others are for similar coercion techniques.
+    $pipe_name = re.capture($pipe_access.target.file.path, `(?i)(efsrpc|lsarpc|lsass|samr|netlogon)$`)
+    $pipe_name != "" // Ensure a capture was made.
+
+    // Define placeholders for correlation.
+    $attacker_ip = $pipe_access.principal.ip
+    $coerced_host = $pipe_access.target.hostname
+
+    // Event 2: Outbound connection from the coerced host back to the attacker.
+    $outbound_conn.metadata.event_type = "NETWORK_CONNECTION"
+    // The Local Security Authority Subsystem Service is responsible for the authentication.
+    re.regex($outbound_conn.principal.process.file.path, `lsass.exe$`)
+    // The coerced authentication is often over SMB.
+    $outbound_conn.target.port = 445
+
+    // Correlate with the same entities from Event 1.
+    $outbound_conn.principal.hostname = $coerced_host
+    $outbound_conn.target.ip = $attacker_ip
+
+  match:
+    // Correlate the pipe access and outbound connection over a short time window.
+    $attacker_ip, $coerced_host over 2m
+
+  outcome:
+    // Increase risk score if the coerced host is a domain controller.
+    // This requires a reference list named 'domain_controllers'.
+    $risk_score = if($coerced_host in %domain_controllers, 90, 75)
+
+    // Consolidate key fields for investigation.
+    $principal_ip = array_distinct($attacker_ip)
+    $target_hostname = array_distinct($coerced_host)
+    $accessed_pipe = array_distinct($pipe_name)
+    $initiating_process = array_distinct($outbound_conn.principal.process.file.path)
+
+  condition:
+    // The pipe access must be followed by the outbound connection.
+    $pipe_access.metadata.event_timestamp < $outbound_conn.metadata.event_timestamp and
+    $pipe_access and $outbound_conn
+}

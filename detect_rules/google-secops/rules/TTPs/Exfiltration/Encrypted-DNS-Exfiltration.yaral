@@ -1,0 +1,76 @@
+rule encrypted_dns_exfiltration_anomaly {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects anomalous patterns in encrypted DNS (DoH/DoT) traffic, such as high data upload volumes or the use of multiple, potentially randomized TLS fingerprints (JA3). These patterns are indicative of data exfiltration or C2 activity using encrypted channels to evade inspection."
+    tags = "DNS, TLS, DOH, DOT, EXFILTRATION, C2"
+    tactic = "TA0010, TA0011"
+    technique = "T1071.004, T1572"
+    false_positives = "Legitimate software that uses custom TLS libraries and communicates with servers hosted on IPs that are also DoH resolvers. Some browser extensions or security tools might generate diverse TLS traffic. The thresholds may need tuning based on baseline network activity."
+    severity = "MEDIUM"
+
+  events:
+    // Event variable for TLS connections. This rule requires UDM events with TLS and network flow data.
+    $tls.metadata.event_type = "NETWORK_TLS"
+    $tls.principal.ip = $ip
+    $tls.network.tls.ja3 = $ja3
+
+    // Identify DoH (DNS over HTTPS) or DoT (DNS over TLS) traffic.
+    (
+      // DoT traffic on its standard port.
+      $tls.target.port = 853
+      or
+      // DoH traffic to known public resolvers on the HTTPS port.
+      // This list should be maintained and expanded, or converted to a reference list.
+      (
+        $tls.target.port = 443 and
+        $tls.target.ip in [
+          "8.8.8.8", "8.8.4.4",       // Google
+          "1.1.1.1", "1.0.0.1",       // Cloudflare
+          "9.9.9.9", "149.112.112.112", // Quad9
+          "208.67.222.222", "208.67.220.220" // OpenDNS
+        ]
+      )
+    )
+
+    // Flow-based anomaly: Calculate upload/download ratio, avoiding division by zero.
+    $upload_ratio = if($tls.network.received_bytes > 0, $tls.network.sent_bytes / $tls.network.received_bytes, 999)
+    // Flag connections with a high upload volume and ratio, which is abnormal for DNS.
+    $is_high_upload = $tls.network.sent_bytes > 4096 and $upload_ratio > 5.0
+
+  match:
+    // Correlate events from the same source IP over 30 minutes.
+    $ip over 30m
+
+  outcome:
+    $risk_score = 65
+    $principal_ip = array_distinct($ip)
+    $principal_hostname = array_distinct($tls.principal.hostname)
+    $principal_process_path = array_distinct($tls.principal.process.file.full_path)
+    $total_encrypted_dns_connections = count_distinct($tls.metadata.id)
+
+    // Summarize flow-based anomalies.
+    $high_upload_connections_count = count_distinct($tls.metadata.id, $is_high_upload)
+    $total_bytes_sent = sum($tls.network.sent_bytes)
+    $total_bytes_received = sum($tls.network.received_bytes)
+
+    // Summarize TLS fingerprint anomalies.
+    $distinct_ja3_hashes = array_distinct($ja3)
+    $distinct_ja3_count = count_distinct($ja3)
+
+    // Provide clear reasons for the alert.
+    $alert_reason = array_distinct(
+        if($high_upload_connections_count > 2, "High data upload volume detected over encrypted DNS.", ""),
+        if($distinct_ja3_count > 3, "High variation in TLS fingerprints (JA3) to encrypted DNS services.", "")
+    )
+
+  condition:
+    // Alert if either a flow-based or fingerprint-based anomaly is detected.
+    (
+      // Condition 1: At least 3 connections show high upload volumes.
+      $high_upload_connections_count > 2
+      or
+      // Condition 2: More than 3 different JA3 hashes are used from the same source.
+      $distinct_ja3_count > 3
+    )
+}

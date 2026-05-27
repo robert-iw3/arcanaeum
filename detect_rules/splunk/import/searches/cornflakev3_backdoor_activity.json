@@ -1,0 +1,17 @@
+[
+  {
+    "name": "CORNFLAKE Malware Detection (Sysmon)",
+    "search": "sourcetype IN (XmlWinEventLog:Microsoft-Windows-Sysmon/Operational, wineventlog:microsoft-windows-sysmon/operational) | eval detection_reason=case(EventCode=1 AND match(ParentImage, \"(?i)\\\\powershell\\.exe$\") AND match(Image, \"(?i)\\\\AppData\\\\Roaming\") AND ((match(Image, \"(?i)\\\\node\\.exe$\") AND match(CommandLine, \"(?i)-e\\s+\")) OR (match(Image, \"(?i)\\\\php\\.exe$\") AND match(CommandLine, \"(?i)-d\\s+\") AND match(CommandLine, \"(?i)\\s1$\"))), \"Execution: CORNFLAKE.V3 (Node.js/PHP) spawned from PowerShell\", EventCode=1 AND match(ParentImage, \"(?i)\\\\AppData\\\\Roaming\\\\.*(node|php)\\.exe$\") AND match(Image, \"(?i)\\\\(cmd|powershell)\\.exe$\") AND match(CommandLine, \"(?i)systeminfo|tasklist|arp\\s-a|nltest|setspn|whoami\\s/all|Get-LocalGroup|KerberosRequestorSecurityToken\"), \"Post-Exploitation: CORNFLAKE process spawning shell for reconnaissance\", EventCode IN (12, 13) AND match(TargetObject, \"(?i)HKU.*\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run\") AND match(Details, \"(?i)AppData\\\\Roaming\\\\.*(node|php)\\.exe\"), \"Persistence: Registry Run Key points to CORNFLAKE in AppData\", EventCode=3 AND (DestinationIp IN (\"138.199.161.141\", \"159.69.3.151\", \"167.235.235.151\", \"128.140.120.188\", \"177.136.225.135\") OR DestinationHostname IN (\"varying-rentals-calgary-predict.trycloudflare.com\", \"dnsmicrosoftds-data.com\", \"windows-msg-as.live\")), \"C2: Network connection to known CORNFLAKE infrastructure\", EventCode IN (1, 11) AND match(Hashes, \"(?i)MD5=(04668c6f39b0a67c4bd73d5459f8c3a3|bcdffaaf882582941af152d8028d1abe|ec82216a2b42114d23d59eecb876ccfc)\"), \"IOC: Known CORNFLAKE or WINDYTWIST file hash detected\", EventCode=3 AND match(Image, \"(?i)\\\\powershell\\.exe$|(?i)\\\\mshta\\.exe$\") AND DestinationHostname IN (\"nodejs.org\", \"windows.php.net\"), \"Initial Access: PowerShell/MSHTA downloading Node.js/PHP runtime\", EventCode=1 AND match(Image, \"(?i)\\\\rundll32\\.exe$\") AND match(CommandLine, \"(?i)\\\\AppData\\\\Roaming\\\\.*\\.png\"), \"Execution: Rundll32 executing a .png file from AppData (WINDYTWIST.SEA)\", 1=1, null()) | where isnotnull(detection_reason) | stats count min(_time) as firstTime max(_time) as lastTime values(detection_reason) as detection_reasons values(ParentImage) as parent_process values(Image) as process values(CommandLine) as command_line values(TargetObject) as registry_path values(Details) as registry_details values(DestinationIp) as dest_ip values(DestinationHostname) as dest_hostname values(Hashes) as file_hashes by Computer, User | rename Computer as host, User as user",
+    "description": "Detects various tactics, techniques, and procedures (TTPs) associated with CORNFLAKE malware, including execution, persistence, C2 communication, and post-exploitation activities based on Sysmon events.",
+    "is_scheduled": 1,
+    "disabled": 0,
+    "cron_schedule": "*/30 * * * *",
+    "dispatch.earliest_time": "-24h",
+    "dispatch.latest_time": "now",
+    "sharing": "global",
+    "acl": {
+      "read": ["power", "admin"],
+      "write": ["admin"]
+    }
+  }
+]

@@ -1,0 +1,73 @@
+{
+  "rule_id": "powershell_amsiutils_reflection_bypass",
+  "name": "PowerShell AMSIUtils Reflection Bypass",
+  "description": "Detects attempts to bypass the Antimalware Scan Interface (AMSI) via reflection by looking for the modification of the 'amsiInitFailed' field in the 'AmsiUtils' type. This is a well-known technique to disable AMSI scanning for PowerShell scripts.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "FROM * | WHERE @timestamp IS NOT NULL AND event.action == 'PowerShellScriptBlock' AND powershell.script_block.text IS NOT NULL AND powershell.script_block.text LIKE '%AmsiUtils%' AND powershell.script_block.text LIKE '%amsiInitFailed%' AND (powershell.script_block.text LIKE '%GetField%' OR powershell.script_block.text LIKE '%SetValue%' OR powershell.script_block.text LIKE '%NonPublic%' OR powershell.script_block.text LIKE '%Static%') | KEEP host.name, user.name, process.parent.name, process.parent.command_line, powershell.script_block.text",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0005",
+        "name": "Defense Evasion",
+        "reference": "https://attack.mitre.org/tactics/TA0005/"
+      },
+      "technique": [
+        {
+          "id": "T1562",
+          "name": "Impair Defenses",
+          "reference": "https://attack.mitre.org/techniques/T1562/"
+        },
+        {
+          "id": "T1562.001",
+          "name": "Disable or Modify Tools",
+          "reference": "https://attack.mitre.org/techniques/T1562/001/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0002",
+        "name": "Execution",
+        "reference": "https://attack.mitre.org/tactics/TA0002/"
+      },
+      "technique": [
+        {
+          "id": "T1059",
+          "name": "Command and Scripting Interpreter",
+          "reference": "https://attack.mitre.org/techniques/T1059/"
+        },
+        {
+          "id": "T1059.001",
+          "name": "PowerShell",
+          "reference": "https://attack.mitre.org/techniques/T1059/001/"
+        }
+      ]
+    }
+  ],
+  "interval": "5m",
+  "from": "now-5m",
+  "max_signals": 100,
+  "risk_score": 90,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://www.ghostlulz.com/blog/powershell-amsi-bypass",
+    "https://arttoolkit.github.io/wadcoms/AMSI-Bypass-amsiInitFailed/"
+  ],
+  "tags": [
+    "Powershell",
+    "AMSI Bypass",
+    "Reflection",
+    "Defense Evasion"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "host.name, user.name, powershell.script_block.text"
+}

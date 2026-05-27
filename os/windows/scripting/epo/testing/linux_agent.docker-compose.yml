@@ -1,0 +1,35 @@
+# docker-compose.yml - For Testing Trellix in Containers
+# Mount logs to host for persistence and same paths.
+version: '3.8'
+
+services:
+  trellix-linux:
+    image: trellix-linux  # Build from Linux Dockerfile
+    privileged: true
+    pid: host
+    network_mode: host
+    ipc: host
+    volumes:
+      - /sys:/sys
+      - /proc:/proc
+      - /dev:/dev
+      - ./var_McAfee:/var/McAfee  # Host path for logs
+      - ./opt_McAfee:/opt/McAfee  # Agent install path
+    environment:
+      - SOURCE_PATH=http://internal.site/MAxxxLNX.zip
+      - EPO_SERVER=epo.server.com
+      - EPO_PORT=443
+
+  trellix-windows:
+    image: trellix-windows  # Build from Windows Dockerfile
+    isolation: hyperv  # For better kernel access; requires Windows host with Hyper-V
+    volumes:
+      - ./ProgramData_McAfee:C:\ProgramData\McAfee  # Logs
+      - ./ProgramFiles_McAfee:C:\Program Files\McAfee  # Install path
+    environment:
+      - SourcePath=\\server\share\FramePkg.exe
+      - ePOServer=epo.server.com
+      - ePOPort=443
+
+# To run: docker-compose up -d
+# Stop container to test if issues resolve (troubleshooting benefit).

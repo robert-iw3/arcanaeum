@@ -1,0 +1,73 @@
+// Name: Time-Based Blind SQL Injection Attempt
+// Author: RW
+// Date: 2025-08-23
+
+// Define patterns for time-based SQL injection functions
+let time_based_sqli_patterns = dynamic([
+    "sleep",
+    "pg_sleep",
+    "waitfor",
+    "benchmark"
+]);
+
+// Define the response time threshold in milliseconds. This is a critical tuning parameter.
+// A value between 3-10 seconds (3000-10000ms) is a common starting point.
+// Adjust this based on your application's normal baseline response times.
+let response_time_threshold_ms = 5000;
+
+// Define the time window for the search
+let lookback = 1h;
+
+// Search across common web log tables that contain response time information.
+union isfuzzy=true W3CIISLog, AppServiceHTTPLogs, AzureDiagnostics
+| where TimeGenerated > ago(lookback)
+// For AzureDiagnostics, filter to Application Gateway WAF logs which contain response time.
+| where TableName != "AzureDiagnostics" or Category == "ApplicationGatewayFirewallLog"
+// Normalize the request URI/query into a single searchable field.
+| extend
+    SearchableString = tolower(case(
+        TableName == "W3CIISLog", strcat(csUriStem, "?", csUriQuery),
+        TableName == "AppServiceHTTPLogs", strcat(CsHost, CsUriStem, CsUriQuery),
+        TableName == "AzureDiagnostics", requestUri_s,
+        ""
+    )),
+    // Normalize the response time field from different tables into milliseconds.
+    ResponseTimeMs = toreal(case(
+        TableName == "W3CIISLog", TimeTaken,
+        TableName == "AppServiceHTTPLogs", TimeTaken,
+        TableName == "AzureDiagnostics", todouble(time_taken_s) * 1000, // time_taken_s is in seconds, convert to ms
+        0
+    ))
+// Core detection logic: Look for time-based SQLi patterns AND a response time exceeding the threshold.
+| where SearchableString has_any (time_based_sqli_patterns) and ResponseTimeMs > response_time_threshold_ms
+// FP Tuning:
+// - The primary tuning mechanism is the 'response_time_threshold_ms' variable.
+// - Exclude known slow application endpoints that may coincidentally match patterns.
+//   Example: | where SearchableString !has "/api/long_running_report"
+// - Exclude known vulnerability scanners by IP or User Agent.
+//   Example: | where ClientIP !in ("<scanner_IP_1>")
+// Extract and normalize fields for investigation
+| extend
+    Timestamp = TimeGenerated,
+    RequestURL = SearchableString,
+    ClientIP = case(
+        isnotempty(c_ip), c_ip,
+        isnotempty(cIP), cIP,
+        isnotempty(clientIp_s), clientIp_s,
+        ""
+    ),
+    UserAgent = case(
+        isnotempty(cs_User_Agent_s), cs_User_Agent_s,
+        isnotempty(csUserAgent), csUserAgent,
+        isnotempty(CsUserAgent), CsUserAgent,
+        ""
+    )
+| where isnotempty(RequestURL) and isnotempty(ClientIP)
+// Project the most relevant fields for analysis.
+| project
+    Timestamp,
+    ClientIP,
+    UserAgent,
+    RequestURL,
+    ResponseTimeMs,
+    TableName

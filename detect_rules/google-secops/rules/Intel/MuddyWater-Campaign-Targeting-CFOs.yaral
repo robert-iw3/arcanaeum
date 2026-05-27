@@ -1,0 +1,103 @@
+rule muddywater_campaign_netbird_and_vbscript_activity {
+
+  meta:
+    author = "RW"
+    date = "2025-08-21"
+    description = "Detects TTPs and IOCs associated with a MuddyWater campaign targeting CFOs. The campaign involves multi-stage phishing, VBScript downloaders, and the abuse of legitimate tools like NetBird and OpenSSH for persistence."
+    reference = "https://hunt.io/blog/apt-muddywater-deploys-multi-stage-phishing-to-target-cfos"
+    severity = "HIGH"
+    priority = "HIGH"
+    tactic = "TA0002, TA0003, TA0005, TA0007, TA0008, TA0011"
+    technique = "T1059.005, T1566, T1071.001, T1204.002, T1136.001, T1564.002, T1218.007, T1572, T1053.005, T1021.001"
+    tags = "attack.g0069, attack.t1566, attack.t1071.001, attack.t1204.002, attack.t1059.005, attack.t1136.001, attack.t1564.002, attack.t1218.007, attack.t1572, attack.t1053.005, attack.t1021.001"
+
+  events:
+    // IOC: Malicious Hashes
+    (
+      $file_ioc.metadata.event_type = "FILE_CREATION" or
+      $file_ioc.metadata.event_type = "PROCESS_LAUNCH"
+    ) and
+    (
+      $file_ioc.target.file.md5 in (
+        "23dda825f91be93f5de415886f17ad4a", // F-144822.zip
+        "5325de5231458543349152f0ea1cc3df", // F-144822.vbs
+        "0aa883cd659ef9957fded2516b70c341", // cis.vbs
+        "7ddc947ce8999c8a4a36ac170dcd7505", // CERT_LOCT_C3860_012025.vbs
+        "2cddc7a31ea289e8c1e5469f094e975a", // ATTESTATION_LETPOLC3860_13891333.vbs
+        "f359f20dbd4b1cb578d521052a1b0e9f"  // VIN_SELECTION_C3860_102024.vbs
+      )
+    )
+
+    // IOC: C2 Network Connections
+    $net_ioc.metadata.event_type = "NETWORK_CONNECTION" and
+    (
+      $net_ioc.network.destination.ip in ("192.3.95.152", "198.46.178.135") or
+      $net_ioc.network.destination.hostname in (
+        "googl-6c11f.firebaseapp.com", "googl-6c11f.web.app", "googl-165a0.web.app",
+        "cloud-ed980.firebaseapp.com", "cloud-ed980.web.app", "cloud-233f9.firebaseapp.com",
+        "cloud-233f9.web.app", "my1cloudlive.com", "my2cloudlive.com", "web-16fe.app",
+        "my-sharepoint-inc.com"
+      )
+    )
+
+    // TTP: VBScript downloader creating a second stage payload
+    $vbs_download.metadata.event_type = "FILE_CREATION" and
+    re.regex($vbs_download.principal.process.file.full_path, `.*\\(wscript|cscript)\.exe$`) and
+    re.regex($vbs_download.target.file.full_path, `C:\\bin\\.*\.vbs`)
+
+    // TTP: Creation of the specific hidden admin user
+    $user_creation.metadata.event_type = "PROCESS_LAUNCH" and
+    re.regex($user_creation.target.process.file.full_path, `.*\\net1?\.exe$`) and
+    re.regex($user_creation.target.process.command_line, `(?i)user\s+user\s+Bs@202122\s+/add`)
+
+    // TTP: Adding user to local admin group
+    $admin_privs.metadata.event_type = "PROCESS_LAUNCH" and
+    re.regex($admin_privs.target.process.file.full_path, `.*\\net1?\.exe$`) and
+    re.regex($admin_privs.target.process.command_line, `(?i)localgroup\s+(Administrators|Administrateurs)\s+user\s+/add`)
+
+    // TTP: Registry modification to hide the user account from the login screen
+    $hide_user_reg.metadata.event_type = "REGISTRY_MODIFICATION" and
+    re.regex($hide_user_reg.target.registry.key, `.*\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon\\SpecialAccounts\\UserList\\user$`)
+
+    // TTP: Silent installation of NetBird or OpenSSH
+    // This may be noisy if these tools are legitimately deployed via scripts.
+    $silent_install.metadata.event_type = "PROCESS_LAUNCH" and
+    re.regex($silent_install.target.process.file.full_path, `.*\\msiexec\.exe$`) and
+    re.regex($silent_install.target.process.command_line, `(?i).*(netbird|OpenSSH)\.msi.*`) and
+    re.regex($silent_install.target.process.command_line, `(?i).*(/qn|/quiet|/norestart).*`)
+
+    // TTP: NetBird execution with the specific setup key
+    $netbird_exec.metadata.event_type = "PROCESS_LAUNCH" and
+    re.regex($netbird_exec.target.process.file.full_path, `.*\\netbird\.exe$`) and
+    strings.contains($netbird_exec.target.process.command_line, "E48E4A70-4CF4-4A77-946B-C8E50A60855A", nocase)
+
+    // TTP: Persistence via scheduled tasks for NetBird
+    $netbird_persist.metadata.event_type = "PROCESS_LAUNCH" and
+    re.regex($netbird_persist.target.process.file.full_path, `.*\\schtasks\.exe$`) and
+    re.regex($netbird_persist.target.process.command_line, `(?i)/create.*(Start Netbird|ForceNetbirdRestart)`) and
+    re.regex($netbird_persist.target.process.command_line, `(?i).*net start netbird.*`)
+
+    // TTP: RDP being enabled via registry key modification
+    $rdp_enable_reg.metadata.event_type = "REGISTRY_MODIFICATION" and
+    re.regex($rdp_enable_reg.target.registry.key, `.*\\SYSTEM\\CurrentControlSet\\Control\\Terminal Server\\fDenyTSConnections$`) and
+    (
+      $rdp_enable_reg.target.registry.data.strings[0] = "0" or
+      $rdp_enable_reg.target.registry.data.cardinal = 0
+    )
+
+  outcome:
+    // Using a risk score of 85 for high-confidence IOCs and TTPs
+    $risk_score = 85
+    $principal_hostname = array_distinct(coalesce($file_ioc.principal.hostname, $net_ioc.principal.hostname, $vbs_download.principal.hostname, $user_creation.principal.hostname, $admin_privs.principal.hostname, $hide_user_reg.principal.hostname, $silent_install.principal.hostname, $netbird_exec.principal.hostname, $netbird_persist.principal.hostname, $rdp_enable_reg.principal.hostname))
+    $principal_process_path = array_distinct(coalesce($vbs_download.principal.process.file.full_path, $user_creation.principal.process.file.full_path, $admin_privs.principal.process.file.full_path, $silent_install.principal.process.file.full_path, $netbird_exec.principal.process.file.full_path, $netbird_persist.principal.process.file.full_path))
+    $target_process_command_line = array_distinct(coalesce($user_creation.target.process.command_line, $admin_privs.target.process.command_line, $silent_install.target.process.command_line, $netbird_exec.target.process.command_line, $netbird_persist.target.process.command_line))
+    $target_file_path = array_distinct(coalesce($file_ioc.target.file.full_path, $vbs_download.target.file.full_path))
+    $target_file_md5 = array_distinct($file_ioc.target.file.md5)
+    $network_destination_ip = array_distinct($net_ioc.network.destination.ip)
+    $network_destination_hostname = array_distinct($net_ioc.network.destination.hostname)
+    $registry_key = array_distinct(coalesce($hide_user_reg.target.registry.key, $rdp_enable_reg.target.registry.key))
+    $registry_value = array_distinct(coalesce($rdp_enable_reg.target.registry.data.strings[0], strings.itoa($rdp_enable_reg.target.registry.data.cardinal)))
+
+  condition:
+    $file_ioc or $net_ioc or $vbs_download or $user_creation or $admin_privs or $hide_user_reg or $silent_install or $netbird_exec or $netbird_persist or $rdp_enable_reg
+}

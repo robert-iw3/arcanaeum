@@ -1,0 +1,56 @@
+# syntax=docker/dockerfile:1
+# kube-bench: Checks whether Kubernetes is deployed according to security best practices as defined in the CIS Kubernetes Benchmark.
+ARG repo="docker.io" \
+    base_image="alpine:3.23" \
+    image_hash="4d889c14e7d5a73929ab00be2ef8ff22437e7cbc545931e52554a7b00e123d8b"
+
+FROM ${repo}/${base_image}@sha256:${image_hash} AS go-builder
+
+ENV GOPATH=/usr/local/bin/go \
+    KBENCH_VER=0.14.0
+
+RUN \
+    apk add --no-cache -t .kbench-deps \
+        ca-certificates \
+        go \
+        git; \
+    mkdir -p ${GOPATH}/src/github.com/kube-bench; \
+    cd ${GOPATH}/src/github.com/kube-bench; \
+    git clone --depth 1 --branch v${KBENCH_VER} https://github.com/aquasecurity/kube-bench; \
+    cd kube-bench/; \
+    make build-fips; \
+    cp kube-bench ${GOPATH}/bin/kube-bench; \
+    apk del --purge .kbench-deps; \
+    rm -rf /var/cache/apk/*
+
+ARG ubi_image="registry.access.redhat.com/ubi9/ubi-minimal" \
+    ubi_hash="3660caede14750ab8df58f780016be487e490055acf07f67333c0001c661c913"
+
+FROM ${ubi_image}@sha256:${ubi_hash}
+
+RUN \
+    microdnf install -y \
+        findutils \
+        openssl \
+        glibc \
+        procps \
+        jq; \
+    microdnf update -y; \
+    microdnf clean all; \
+    mkdir /host; \
+    rm -rf /var/cache/yum /var/cache/dnf /var/cache/microdnf /tmp/* /var/tmp/*; \
+    truncate -s 0 /var/log/*log
+
+WORKDIR /opt/kube-bench/
+
+ENV PATH=$PATH:/usr/local/mount-from-host/bin \
+    RUNNING_IN_A_CONTAINER=true
+
+COPY --from=go-builder /usr/local/bin/go/src/github.com/kube-bench/kube-bench/LICENSE /licenses/LICENSE
+COPY --chmod=755 --from=go-builder /usr/local/bin/go/bin/kube-bench /usr/local/bin/kube-bench
+COPY --chmod=755 --from=go-builder /usr/local/bin/go/src/github.com/kube-bench/kube-bench/cfg/ /host/cfg/
+
+RUN cp /usr/local/bin/kube-bench /host; chown -R 1000:root /host
+
+USER 1000
+CMD [ "sh" ]

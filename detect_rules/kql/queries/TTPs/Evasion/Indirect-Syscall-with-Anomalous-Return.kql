@@ -1,0 +1,30 @@
+// Name: Indirect Syscall with Anomalous Return
+// Author: RW
+// Date: 2025-08-02
+// Description: Detects a potential indirect syscall EDR evasion technique. This occurs when a function within ntdll.dll returns execution to the process's main executable module instead of another system library. Legitimate call stacks typically flow between system DLLs (e.g., ntdll.dll -> kernelbase.dll). A return directly to the .exe from ntdll.dll is anomalous and suggests that the executable is manually orchestrating syscalls to bypass hooks.
+// Tactic: Defense Evasion
+// Technique: T1055 Process Injection
+// False Positive Sensitivity: Medium
+
+DeviceEvents
+// This detection relies on a populated CallStack field, which may only be available for specific event types or EDR configurations.
+| where isnotempty(CallStack)
+// Parse the call stack into individual frames. The most recent call is the first element.
+| extend StackFrames = split(CallStack, '\n')
+// The logic requires at least two frames to analyze the return path from ntdll.dll.
+| where array_length(StackFrames) >= 2
+// This identifies the core anomalous pattern: the top of the stack is ntdll.dll, and the second frame (the return location) is the process executable itself.
+| where StackFrames[0] has "ntdll.dll" and StackFrames[1] has InitiatingProcessFileName
+// FP Mitigation: Some legitimate software, especially programs using packers, DRM, or custom runtimes, might exhibit this behavior.
+// Exclude known legitimate processes to reduce noise.
+| where not(InitiatingProcessFileName in~ ('known_good_app1.exe', 'known_good_app2.exe')) // Placeholder for FP tuning
+| project
+    TimeGenerated,
+    DeviceName,
+    ActionType,
+    InitiatingProcessFileName,
+    InitiatingProcessFolderPath,
+    InitiatingProcessCommandLine,
+    CallStack,
+    ReportId,
+    SHA1

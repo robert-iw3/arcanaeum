@@ -1,0 +1,44 @@
+// Name: HVCI Disable Attempt via Registry Modification
+// Author: RW
+// Date: 2025-08-03
+// Description: Detects attempts to disable Hardware-enforced Code Integrity (HVCI) or its parent feature,
+//              Virtualization Based Security (VBS), by modifying their registry settings. Techniques like
+//              "Hells Hollow" are limited by HVCI, so an attacker may attempt to disable it to enable their
+//              rootkit. A reboot is required for this change to take effect, but the modification itself
+//              is a strong indicator of malicious intent or misconfiguration.
+// False Positive Sensitivity: Medium
+// Legitimate system administrators or configuration management tools may modify these settings.
+// However, such changes should be rare and are worth investigating to ensure they are authorized.
+
+DeviceRegistryEvents
+// Filter for registry value set events.
+| where ActionType == "RegistryValueSet"
+// The core detection logic: identify modifications that disable HVCI or VBS.
+| where
+    // Scenario 1: Direct attempt to disable HVCI.
+    (
+        RegistryKey has_suffix @"SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity"
+        and RegistryValueName == "Enabled"
+        and RegistryValueData in ("0", "0x00000000")
+    )
+    or
+    // Scenario 2: Attempt to disable the parent feature, VBS, which also disables HVCI.
+    (
+        RegistryKey has_suffix @"SYSTEM\CurrentControlSet\Control\DeviceGuard"
+        and RegistryValueName == "EnableVirtualizationBasedSecurity"
+        and RegistryValueData in ("0", "0x00000000")
+    )
+| project
+    TimeGenerated,
+    DeviceName,
+    DeviceId,
+    ActionType,
+    RegistryKey,
+    RegistryValueName,
+    RegistryValueData,
+    InitiatingProcessAccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessId,
+    InitiatingProcessParentId,
+    InitiatingProcessParentFileName

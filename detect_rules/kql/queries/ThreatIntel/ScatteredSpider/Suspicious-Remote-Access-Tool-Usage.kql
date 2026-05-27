@@ -1,0 +1,53 @@
+// title: Suspicious Remote Access Tool Execution
+// description: Detects the execution of legitimate remote access tools that are often abused by threat actors like Scattered Spider (UNC3944, Oktapus) for initial access, persistence, and lateral movement.
+// author: RW
+// date: 2025-07-31
+// references:
+//   - https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-320a
+// tags:
+//   - attack.t1219
+//   - attack.command_and_control
+//   - attack.persistence
+//   - attack.initial_access
+//   - group.scattered_spider
+let remote_access_tools = dynamic([
+    "AnyDesk.exe",
+    "TeamViewer.exe",
+    "TeamViewer_Service.exe",
+    "Splashtop Streamer.exe",
+    "ScreenConnect.Client.exe",
+    "ScreenConnect.ClientService.exe",
+    "Pulseway.exe",
+    "PCMonitor.Service.exe",
+    "level-agent.exe",
+    "fleetdeck-agent.exe",
+    "ngrok.exe",
+    "tacticalrmm.exe",
+    "tailscale.exe",
+    "tailscaled.exe",
+    "tsh.exe",
+    "teleport.exe"
+]);
+// --_comment: To reduce false positives, populate this list with accounts authorized to use these tools (e.g., IT admins, help desk).
+let authorized_users = dynamic([]);
+// --_comment: To reduce false positives, populate this list with legitimate parent processes that may install or run these tools (e.g., software deployment systems).
+let authorized_parents = dynamic(["msiexec.exe", "IntuneManagementExtension.exe", "ccmexec.exe"]);
+DeviceProcessEvents
+| where TimeGenerated > ago(1d)
+// --_comment: Filter for the execution of the specified remote access tools.
+| where FileName in~ (remote_access_tools)
+// --_comment: Exclude executions by authorized users or from authorized parent processes. This is a key tuning point.
+| where AccountName !in~ (authorized_users) and InitiatingProcessFileName !in~ (authorized_parents)
+// --_comment: Focus on executions from non-standard locations like user profiles or temp directories, which may indicate a portable version dropped by an attacker.
+| where FolderPath has_any (@"\Users\", @"\Temp\", @"\Downloads\", @"\AppData\") and not(FolderPath has_any (@"\Program Files\", @"\Program Files (x86)\"))
+| project-reorder
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    FileName,
+    ProcessCommandLine,
+    FolderPath,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    MD5,
+    SHA256

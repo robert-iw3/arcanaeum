@@ -1,0 +1,48 @@
+title: Unauthorized CIP Device Configuration Change
+status: experimental
+description: >-
+  Detects alerts for critical Common Industrial Protocol (CIP) device configuration changes
+  (e.g., program downloads, mode changes, firmware updates) originating from a source not on
+  an allowlist of authorized engineering systems. Such activity can indicate an attempt to
+  disrupt or manipulate an industrial process.
+references:
+  - https://github.com/ICSVillage
+author: RW
+date: 2025-08-18
+tags:
+  - attack.impact
+  - attack.persistence
+  - attack.t0831
+  - attack.t0843
+  - attack.t0818
+  - ics
+  - cip
+logsource:
+  category: nids # Best fit for alerts from OT Security Monitoring tools (e.g., Defender for IoT, Nozomi, Dragos)
+detection:
+  selection_change_alert:
+    # These signatures are examples and must be tuned to match the alerts from your NIDS/OT security tool.
+    alert.signature|contains:
+      - 'Program Download'
+      - 'Mode Change'
+      - 'Firmware Update'
+      - 'Configuration Change'
+      - 'Stop Command'
+      - 'Unauthorized Programming'
+  filter_authorized_sources:
+    # This list is a placeholder and MUST be populated with the IP addresses of legitimate systems
+    # that perform these actions, such as Engineering Workstations, HMIs, or Asset Management servers.
+    source.ip:
+      - '192.168.1.10'  # Example: Engineering Workstation
+      - '10.0.5.25'     # Example: Asset Management Server
+  condition: selection_change_alert and not filter_authorized_sources
+fields:
+  - source.ip
+  - destination.ip
+  - alert.signature
+  - device.name # Or destination.hostname, depending on log schema
+falsepositives:
+  - Legitimate changes made from a new or temporary engineering workstation that has not yet been added to the allowlist.
+  - An authorized host changing its IP address.
+  - Regular maintenance and tuning of the authorized sources allowlist is critical for accuracy.
+level: high

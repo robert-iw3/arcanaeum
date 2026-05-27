@@ -1,0 +1,56 @@
+{
+  "data": {
+    "type": "signal_correlation",
+    "attributes": {
+      "name": "AWS Delegated Admin Exploit and Organization Takeover Detection",
+      "enabled": true,
+      "cases": [
+        {
+          "name": "Delegated Admin Abuse",
+          "status": "high",
+          "query": "source:cloudtrail @eventName:(RegisterDelegatedAdministrator OR *EnableOrganizationAdminAccount) (@requestParameters.servicePrincipal:(sso.amazonaws.com OR cloudformation.amazonaws.com OR guardduty.amazonaws.com OR securityhub.amazonaws.com OR iam-access-analyzer.amazonaws.com OR config.amazonaws.com) OR @eventSource:(sso.amazonaws.com OR cloudformation.amazonaws.com OR guardduty.amazonaws.com OR securityhub.amazonaws.com OR iam-access-analyzer.amazonaws.com OR config.amazonaws.com)) | eval delegated_service=coalesce(@requestParameters.servicePrincipal, @eventSource) | eval recipient_account_id=coalesce(@requestParameters.accountId, @requestParameters.adminAccountId)"
+        },
+        {
+          "name": "AmazonGuardDutyFullAccess v1 Use",
+          "status": "critical",
+          "query": "source:cloudtrail @eventName:(AttachUserPolicy OR AttachRolePolicy) @requestParameters.policyArn:arn:aws:iam::aws:policy/AmazonGuardDutyFullAccess | eval target_principal_name=coalesce(@requestParameters.userName, @requestParameters.roleName)"
+        },
+        {
+          "name": "Sensitive Delegated Admin Access",
+          "status": "high",
+          "query": "source:cloudtrail @aws_account_id:(<sensitive_delegated_admin_account_id_1> OR <sensitive_delegated_admin_account_id_2>) @eventName:(CreateAccountAssignment OR DeleteAccountAssignment OR UpdatePermissionSet OR ProvisionPermissionSet OR CreatePermissionSet OR CreateStackSet OR UpdateStackSet OR DeleteStackSet OR Attach*Policy OR CreatePolicy* OR CreateRole OR CreateUser OR DeletePolicy* OR DeleteRole* OR DeleteUser* OR Detach*Policy OR Put* OR UpdateRole* OR UpdateUser* OR RegisterDelegatedAdministrator) -@eventName:(PutRolePolicy OR PutUserPolicy OR PutGroupPolicy)"
+        },
+        {
+          "name": "CloudTrail Logging Disabled/Modified",
+          "status": "high",
+          "query": "source:cloudtrail @eventName:(StopLogging OR DeleteTrail OR UpdateTrail OR PutEventSelectors OR DeleteEventDataStore)"
+        },
+        {
+          "name": "Over-privileged RegisterDelegatedAdministrator",
+          "status": "high",
+          "query": "source:cloudtrail @eventName:(CreatePolicy OR CreatePolicyVersion OR PutUserPolicy OR PutRolePolicy OR PutGroupPolicy) @requestParameters.policyDocument:*organizations:RegisterDelegatedAdministrator* @requestParameters.policyDocument:*\"Resource\":\"*\"* @requestParameters.policyDocument:*\"Effect\":\"Allow\"* | eval target_name=coalesce(@requestParameters.policyName, @requestParameters.userName, @requestParameters.roleName, @requestParameters.groupName)"
+        }
+      ],
+      "group_by_fields": ["@aws_account_id", "@userIdentity.arn", "@sourceIPAddress"],
+      "distinct_fields": ["case_id"],
+      "correlation": {
+        "expression": "distinct_count >= 2",
+        "timeframe": "1h"
+      },
+      "message": "AWS Delegated Admin Exploit Detection: {distinct_count} distinct TTPs detected on account {@aws_account_id}, user {@userIdentity.arn}, or source IP {@sourceIPAddress}. Techniques: {case_names}. Details: {@eventName OR @delegated_service OR @requestParameters.policyArn OR @target_principal_name OR @requestParameters.name OR @target_name}. Timeframe: {first_activity} to {last_activity}",
+      "severity": "high",
+      "tags": [
+        "security:attack",
+        "tactic:TA0004",
+        "tactic:TA0005",
+        "technique:T1548.002",
+        "technique:T1562.007",
+        "environment:aws",
+        "service:organizations"
+      ],
+      "options": {
+        "evaluation_window": "1h"
+      }
+    }
+  }
+}

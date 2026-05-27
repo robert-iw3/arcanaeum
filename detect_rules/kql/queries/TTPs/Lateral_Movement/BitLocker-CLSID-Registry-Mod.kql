@@ -1,0 +1,30 @@
+// Name: BitLocker CLSID Registry Modification for COM Hijacking
+// Author: RW
+// Date: 2025-08-06
+// Description: Detects modification of a specific BitLocker-related CLSID registry key ({A7A63E5C-3877-4840-8727-C1EA9D7A4D50}) to hijack a COM object for code execution. This behavior is associated with the BitLockMove lateral movement tool.
+// Tactic: Defense Evasion
+// Technique: T1112 - Modify Registry
+// False Positive Sensitivity: Medium
+
+DeviceRegistryEvents
+// Focus on the specific key used for the COM hijack. The tool creates the InProcServer32 subkey.
+| where RegistryKey endswith @"\SOFTWARE\Classes\CLSID\{A7A63E5C-3877-4840-8727-C1EA9D7A4D50}\InProcServer32"
+// Look for key creation or value setting, which are indicative of the hijack setup.
+| where ActionType in ("RegistryKeyCreated", "RegistryValueSet")
+// A strong indicator is setting the registry value to a DLL path.
+| where not(ActionType == "RegistryValueSet" and isempty(RegistryValueData))
+// FP Tuning: Legitimate modifications to this specific, non-standard CLSID are highly unlikely.
+// If false positives occur, consider filtering for DLLs in suspicious paths or looking for the subsequent key deletion by the tool.
+// Example: | where RegistryValueData has_any ("C:\\tmp\\", "C:\\Perflogs\\", "C:\\Windows\\Temp\\")
+| project
+    Timestamp,
+    DeviceName,
+    AccountName = InitiatingProcessAccountName,
+    Tactic = "Defense Evasion",
+    Technique = "T1112",
+    Description = "A BitLocker-related CLSID registry key was modified, potentially for COM hijacking.",
+    ActionType,
+    RegistryKey,
+    RegistryValueData,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine

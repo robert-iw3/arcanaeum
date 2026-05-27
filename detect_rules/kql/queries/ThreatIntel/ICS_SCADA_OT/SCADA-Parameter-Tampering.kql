@@ -1,0 +1,107 @@
+// Name: SCADA Parameter Tampering
+// Author: RW
+// Date: 2025-08-20
+// Description: >
+//   Detects two patterns of SCADA/ICS parameter manipulation indicative of an attack:
+//   1. A high volume of distinct parameter changes made by a single user or from a single source system in a short time.
+//   2. Any modification to a pre-defined list of critical parameters by an unauthorized user or system.
+//   This aligns with intelligence where attackers made widespread changes to parameters like voltage levels, pump pressure, and valve states.
+//
+//   **IMPORTANT**: This rule requires logs from a SCADA/ICS/OT monitoring solution. The table 'SCADA_Events' and its fields are placeholders.
+//   You must replace 'SCADA_Events' with your actual log table and map the fields (e.g., ParameterName, NewValue, UserName) accordingly.
+//
+// False Positive Sensitivity: Medium. False positives can occur if a legitimate operator performs bulk configuration changes or if an authorized user is missing from the allowlist.
+//   Thorough tuning of the thresholds and allowlists is essential for your specific OT environment.
+// Tactics: Impact
+// Techniques: T1531
+
+// --- Tuning Section ---
+// Define the timeframe for the detection window.
+let timeFrame = 1h;
+// Set the threshold for the number of distinct parameter changes to be considered a "bulk" operation.
+let BulkChangeThreshold = 10;
+
+// Define the placeholder table for SCADA/ICS events.
+// Replace this with the actual table name from your environment.
+let SCADA_Events = datatable(
+    TimeGenerated:datetime,
+    DeviceName:string,
+    ParameterName:string,
+    OldValue:string,
+    NewValue:string,
+    UserName:string,
+    SourceIp:string
+)[
+    // Sample Data for testing
+    datetime(2023-10-27T10:05:00Z), "PLC-PumpStation-01", "PumpPressureSetpoint", "100", "150", "operator_jane", "192.168.1.10",
+    datetime(2023-10-27T10:06:00Z), "PLC-PumpStation-01", "FlowRateMax", "500", "900", "operator_jane", "192.168.1.10",
+    datetime(2023-10-27T10:07:00Z), "PLC-PumpStation-01", "ValveState", "OPEN", "CLOSED", "attacker_user", "10.10.80.123",
+    datetime(2023-10-27T10:08:00Z), "PLC-PowerGrid-04", "EmergencyShutdown", "0", "1", "attacker_user", "10.10.80.123"
+];
+
+// Tuning: Populate this list with parameter names that should rarely, if ever, be changed outside of planned maintenance.
+let Critical_Parameters = dynamic([
+    "EmergencyShutdown",
+    "SafetyBypassActive",
+    "PrimaryCoolantValveState",
+    "CoreTemperatureAlarmThreshold"
+]);
+
+// Tuning: Populate this list with user accounts that are authorized to make SCADA system changes.
+let Authorized_SCADA_Users = dynamic([
+    "operator_john",
+    "scada_admin",
+    "ics_maintenance_svc"
+]);
+
+// Tuning: Populate this list with the hostnames or IP addresses of authorized HMI stations or engineering workstations.
+let Authorized_SCADA_Systems = dynamic([
+    "HMI-ControlRoom-01",
+    "192.168.1.10",
+    "192.168.1.11"
+]);
+// --- End of Tuning Section ---
+
+// Part 1: Detect a high volume of distinct parameter changes from a single source.
+let BulkChanges = SCADA_Events
+| where TimeGenerated > ago(timeFrame)
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    ChangedParameters = make_set(ParameterName, 20),
+    DistinctParameterCount = dcount(ParameterName),
+    DevicesAffected = make_set(DeviceName, 5)
+    by UserName, SourceIp, bin(TimeGenerated, 10m)
+| where DistinctParameterCount > BulkChangeThreshold
+| project
+    StartTime,
+    EndTime,
+    UserName,
+    SourceIp,
+    DetectionMethod = "Bulk Parameter Change",
+    Description = strcat("User '", UserName, "' from IP '", SourceIp, "' changed ", DistinctParameterCount, " distinct parameters."),
+    ChangedParameters,
+    DevicesAffected;
+
+// Part 2: Detect unauthorized changes to critical parameters.
+let CriticalChanges = SCADA_Events
+| where TimeGenerated > ago(timeFrame)
+// Filter for changes to critical parameters.
+| where ParameterName in~ (Critical_Parameters)
+// Filter for changes made by users or systems NOT on the allowlists.
+| where UserName !in~ (Authorized_SCADA_Users) or SourceIp !in~ (Authorized_SCADA_Systems)
+| project
+    StartTime = TimeGenerated,
+    EndTime = TimeGenerated,
+    UserName,
+    SourceIp,
+    DetectionMethod = "Unauthorized Critical Parameter Change",
+    Description = strcat("Unauthorized change to critical parameter '", ParameterName, "' by user '", UserName, "' from IP '", SourceIp, "'."),
+    ChangedParameters = pack_array(ParameterName),
+    DevicesAffected = pack_array(DeviceName);
+
+// Combine the results from both detection methods.
+union BulkChanges, CriticalChanges
+| extend
+    AccountCustomEntity = UserName,
+    IPCustomEntity = SourceIp

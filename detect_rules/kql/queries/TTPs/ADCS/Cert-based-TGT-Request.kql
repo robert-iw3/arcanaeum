@@ -1,0 +1,61 @@
+// name: Kerberos TGT Request with Certificate for Privileged Account
+// id: 8c9d4a1b-2c3d-4e5f-6a7b-9e1f2a3b4c5d
+// version: 1
+// date: 2025-07-31
+// author: RW
+// description: |
+//   Detects a Kerberos Ticket Granting Ticket (TGT) request for a privileged account, such as a Domain Controller, that uses a certificate for pre-authentication (PKINIT).
+//   This activity is often the final step in an attack chain where an adversary, having obtained a certificate for a privileged account (e.g., via the Intune-AD CS abuse vector), uses it to authenticate and gain privileged access to the on-premises Active Directory.
+//   While this detection does not validate the certificate's origin, the act of requesting a TGT for a highly privileged account using certificate-based authentication is itself a very high-fidelity indicator of compromise, as legitimate use cases for this behavior are extremely rare.
+// severity: High
+// tactics:
+//   - CredentialAccess
+//   - PrivilegeEscalation
+// techniques:
+//  - T1558 # Steal or Forge Kerberos Tickets
+// dataSources:
+//   - SecurityEvent
+// how_to_implement: |
+//   To successfully implement this detection, you must be ingesting Windows Security Event Logs (specifically Event ID 4768) from your Domain Controllers into your Log Analytics workspace.
+//   Most importantly, you MUST populate the `PrivilegedAccounts` list in the query with the sAMAccountNames of your privileged accounts (e.g., Domain Controller computer accounts, which end in a '$', and Tier 0 administrator accounts) to ensure the rule is properly targeted.
+// known_false_positives: |
+//   False positives are highly unlikely. Certificate-based logon (e.g., via smart card) for privileged administrative accounts is not a common practice in most environments. A potential false positive could occur if your organization has explicitly implemented smart card logon for services or administrators. Any alert should be investigated as a high-priority event.
+
+query: |
+  // comment: Define the list of privileged accounts (e.g., Domain Controllers, Domain Admins). This list MUST be populated.
+  let PrivilegedAccounts = dynamic([
+      "DC01$", "DC02$", // Example Domain Controller computer accounts
+      "CONTOSO-ADMIN" // Example privileged user account
+      // Add the sAMAccountNames of your Domain Controllers and other Tier 0 accounts here.
+  ]);
+  SecurityEvent
+  | where EventID == 4768 // A Kerberos authentication ticket (TGT) was requested.
+  // comment: Filter for Kerberos pre-authentication using a certificate (PKINIT). Types 15 and 16 correspond to PKINIT.
+  | where PreAuthType in (15, 16)
+  | extend TargetAccount = tostring(TargetUserName)
+  // comment: Check if the TGT request is for a known privileged account.
+  | where TargetAccount in~ (PrivilegedAccounts)
+  | extend
+      DomainController = Computer,
+      SourceIpAddress = IpAddress
+  | project
+      TimeGenerated,
+      DomainController,
+      SourceIpAddress,
+      TargetAccount,
+      PreAuthType
+entityMappings:
+  - entityType: Account
+    fieldMappings:
+      - identifier: Name
+        columnName: TargetAccount
+  - entityType: Host
+    fieldMappings:
+      - identifier: FullName
+        columnName: DomainController
+  - entityType: IP
+    fieldMappings:
+      - identifier: Address
+        columnName: SourceIpAddress
+customDetails:
+  PreAuthType: PreAuthType

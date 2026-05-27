@@ -1,0 +1,49 @@
+rule anomalous_satellite_adcs_commands {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects anomalous commands sent to a satellite's Attitude Determination and Control System (ADCS). This includes setting control constants to potentially unstable values or disabling safety features. This behavior was observed in the Hack-A-Sat competition, where attackers sent malicious commands to cause satellites to lose stability."
+    false_positives = "Legitimate system testing, diagnostics, or specific high-G maneuvers that require unusual control parameters. Mis-parsed log data."
+    tactic = "TA0040"
+    technique = "T1499"
+    tags = "SATELLITE, ICS, ADCS, IMPACT"
+
+  events:
+    // This rule assumes satellite command logs are ingested as GENERIC_LOG. Adjust event_type and field names as needed.
+    $command.metadata.event_type = "GENERIC_LOG"
+    // The target.hostname field is used as a placeholder for the unique satellite identifier.
+    $command.target.hostname = $hostname
+
+    // Detects one of several anomalous command patterns in the log message.
+    (
+      // Pattern 1: Control parameters (Kp, Kd, etc.) are set to unusually large values.
+      // The threshold (e.g., values > 9999) should be tuned based on normal operational limits.
+      re.regex($command.about.message, `(?i)ADCS Set Control Params.*(Kp|Kd|Ki|KPa|KIa|KDa|kPw)\s+[1-9][0-9]{4,}`) or
+
+      // Pattern 2: Command to disable the satellite's safe mode.
+      re.regex($command.about.message, `(?i)safe mode.*(off|disable)`) or
+
+      // Pattern 3: Command to set a constant, high angular velocity.
+      re.regex($command.about.message, `(?i)ADCS Control to Constant W.*w\[[1-9][0-9]+\.`)
+    )
+
+  match:
+    // Correlate commands by satellite identifier over a 30 minute window.
+    $hostname over 30m
+
+  outcome:
+    // A high risk score is assigned due to the specific and potentially destructive nature of these commands.
+    $risk_score = 70
+    $satellite_id = array_distinct($hostname)
+    $event_count = count_distinct($command.metadata.id)
+    // Capture the raw log messages for analyst review.
+    $anomalous_commands = array_distinct($command.about.message)
+    // Attempt to capture the command sender from the log message, if present.
+    $command_sender = array_distinct(re.capture($command.about.message, `(?i)sender\s+(\S+)`))
+    $principal_ip = array_distinct($command.principal.ip)
+    $target_hostname = array_distinct($command.target.hostname)
+
+  condition:
+    // Trigger if one or more anomalous commands are detected for a given satellite.
+    #command >= 1
+}

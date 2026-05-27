@@ -1,0 +1,65 @@
+- type: expert
+  name: Detect Volt Typhoon LotL Reconnaissance and Credential Dumping
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "cmd.exe" -v "powershell.exe" -v "ntdsutil.exe" -v "vssadmin.exe" -v "reg.exe" }
+       }
+       Target {
+          Match PROCESS {
+             Include OBJECT_NAME { -v "**" }
+             Include -access "CREATE"
+             Include -command_line "*whoami*"
+             Include -command_line "*hostname*"
+             Include -command_line "*systeminfo*"
+             Include -command_line "*ipconfig /all*"
+             Include -command_line "*net user*"
+             Include -command_line "*net group*"
+             Include -command_line "*net localgroup*"
+             Include -command_line "*net view*"
+             Include -command_line "*nltest*"
+             Include -command_line "*query user*"
+             Include -command_line "*qwinsta*"
+             Include -command_line "*nbtstat*"
+             Include -command_line "*arp -a*"
+             Include -command_line "*tasklist /v*"
+             Include -command_line "*create shadow*"
+             Include -command_line "*save HKLM\\SAM*"
+             Include -command_line "*save HKLM\\SYSTEM*"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects cmd/powershell/ntdsutil/vssadmin/reg executing reconnaissance (whoami/systeminfo/net/nltest/arp/tasklist) or cred dumping (shadow copy, SAM/SYSTEM registry save) — LotL techniques of Volt Typhoon (PRC APT) for discovery and persistence. Tune for noisy admin scripts; exclude known baselines."
+- type: expert
+  name: Detect Webshell Execution from Web Servers (Volt Typhoon Persistence)
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "w3wp.exe" -v "httpd.exe" -v "nginx.exe" -v "tomcat*.exe" -v "php-cgi.exe" }
+       }
+       Target {
+          Match PROCESS {
+             Include OBJECT_NAME { -v "cmd.exe" -v "powershell.exe" -v "pwsh.exe" -v "bash.exe" -v "sh.exe" -v "python.exe" -v "perl.exe" -v "php.exe" }
+             Include -access "CREATE"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects web server processes (IIS, Apache, Tomcat, etc.) spawning recon/execution utilities — strong indicator of webshell activity used by Volt Typhoon for persistence and lateral movement. Tune for legitimate monitoring/automation scripts."
+- type: firewall
+  name: Detect Unusual SSL or Proxied HTTP Traffic (Volt Typhoon C2 Fallback)
+  application: "**"
+  direction: out
+  protocol: TCP
+  port: "443,444,8443,8081,8000"
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects outbound HTTPS/HTTP on non-standard ports (444, 8443, 8081, 8000) often used for C2/proxying in Volt Typhoon operations (SOHO router pivots, fallback channels). Exclude internal traffic; tune for legitimate apps. Pair with Web Control or SSL inspection for certificate/user-agent analysis."

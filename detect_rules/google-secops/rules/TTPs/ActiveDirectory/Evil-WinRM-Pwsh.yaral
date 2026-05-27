@@ -1,0 +1,29 @@
+rule Evil_WinRM_Script_Block_Detection {
+  meta:
+    author = "RW"
+    description = "Detects Evil-WinRM activity via PowerShell Script Block Logging (Event ID 4104) based on the presence of 'function prompt' and 'Evil-WinRM' in the script block, excluding searches for these terms."
+    severity = "HIGH"
+
+  events:
+    $e.metadata.event_type = "PROCESS_LAUNCH" // UDM event type for process creation/activity, potentially capturing PowerShell scripts
+    $e.metadata.event_code = 4104 // Windows Event Code for PowerShell Script Block Logging
+
+    // Check for the presence of "function prompt" and "Evil-WinRM" in the script block text
+    $e.process.command_line = /.*function prompt.*/ nocase // Check process command line for function prompt
+    $e.process.command_line = /.*Evil-WinRM.*/ nocase // Check process command line for Evil-WinRM
+
+    // Exclude detection tools searching for these indicators (grep, Select-String)
+    not $e.process.command_line = /.*grep.*/ nocase // Exclude grep
+    not $e.process.command_line = /.*select-string.*/ nocase // Exclude Select-String
+
+  outcome:
+    $first_seen = $e.metadata.event_timestamp.epoch_seconds // UDM field for event timestamp
+    $last_seen = $e.metadata.event_timestamp.epoch_seconds // In single-event rule, first and last are the same
+    $victim_host = $e.principal.hostname // UDM field for the host where the activity occurred
+    $actor_user = $e.principal.user.userid // UDM field for the user associated with the process
+    $evidence = $e.process.command_line // UDM field for the full PowerShell script block text
+    $count = 1 // In a YARA-L detection rule, count typically refers to individual matching events
+
+  condition:
+    $e
+}

@@ -1,0 +1,34 @@
+rule gcp_cloud_shell_customize_environment_creation {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects the potential creation or modification of the `.customize_environment` file in a GCP Cloud Shell environment. This file is not present by default and can be used by an attacker to establish persistence, as any commands within it are executed upon Cloud Shell startup."
+    false_positives = "Legitimate use of the .customize_environment file by administrators or developers to configure their Cloud Shell environment. This should be investigated to confirm the change was intended."
+    tactic = "TA0003"
+    technique = "T1136.003"
+    tags = "GCP, PERSISTENCE, CLOUD, CLOUD_SHELL"
+
+  events:
+    // Filter for GCP Audit Log events related to the Cloud Shell product.
+    // Direct file modification logs within Cloud Shell are limited, so this rule looks for API calls that may reference the file.
+    $gcp.metadata.event_type = "GCP_AUDIT_LOG"
+    $gcp.metadata.product_name = "Cloud Shell"
+
+    // Search for the specific filename within the request payload or the resource name field of the audit log.
+    (
+      re.regex($gcp.protoPayload.request.json, `\.customize_environment`) or
+      re.regex($gcp.protoPayload.resourceName, `\.customize_environment`)
+    )
+
+  outcome:
+    // The risk score is set to medium, as this could be legitimate administrative activity.
+    $risk_score = 40
+    $principal_ip = array_distinct($gcp.principal.ip)
+    $principal_user = array_distinct($gcp.principal.user.email_id)
+    $project_id = array_distinct($gcp.target.resource.project_id)
+    $method_name = array_distinct($gcp.protoPayload.methodName)
+    $resource_name = array_distinct($gcp.protoPayload.resourceName)
+
+  condition:
+    $gcp
+}

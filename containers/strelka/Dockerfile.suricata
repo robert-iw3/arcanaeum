@@ -1,0 +1,4 @@
+FROM docker.io/jasonish/suricata:latest
+RUN sed -i 's/enabled: no/enabled: yes/g' /etc/suricata/suricata.yaml && \
+    sed -i 's/force-filestore: no/force-filestore: yes/g' /etc/suricata/suricata.yaml
+COPY suricata-rules/* /etc/suricata/rules/

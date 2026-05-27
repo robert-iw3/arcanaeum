@@ -1,0 +1,47 @@
+rule gcp_cross_project_image_copy {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects when a Google Cloud Platform (GCP) Compute Image is created in one project using a source image from a different project. This can be a legitimate action, but it is also a technique used by attackers to exfiltrate sensitive data by moving it to a project they control."
+    false_positives = "Legitimate development or operational activities that require sharing compute images between projects."
+    tags = "GCP, EXFILTRATION, COMPUTE"
+    tactic = "TA0010"
+    technique = "T1537"
+
+  events:
+    // Event filter for GCP Compute Image creation logs.
+    $event.metadata.event_type = "GCP_CLOUDAUDIT_LOG"
+    $event.metadata.method_name = "v1.compute.images.insert"
+
+    // Capture the source project ID from the sourceImage field.
+    // Example: "https://www.googleapis.com/compute/v1/projects/source-project-id/..."
+    $source_project_id = re.capture($event.additional.fields["request.sourceImage"], `projects/([^/]+)/`)
+
+    // Capture the destination project ID from the resource.name field.
+    // Example: "projects/destination-project-id/global/images/new-image"
+    $destination_project_id = re.capture($event.resource.name, `projects/([^/]+)/`)
+
+  outcome:
+    // Risk score, can be adjusted based on environment.
+    $risk_score = 40
+    // Actor and network information.
+    $principal_ip = array_distinct($event.principal.ip)
+    $principal_user_userid = array_distinct($event.principal.user.userid)
+    $principal_user_agent = array_distinct($event.network.http.user_agent)
+    // Source and destination project details.
+    $source_project = array_distinct($source_project_id)
+    $destination_project = array_distinct($destination_project_id)
+    // Image and resource details.
+    $source_image_uri = array_distinct($event.additional.fields["request.sourceImage"])
+    $destination_image_name = array_distinct($event.additional.fields["request.name"])
+    $destination_resource_name = array_distinct($event.resource.name)
+
+  condition:
+    // The core detection logic: trigger if an event exists where the source and destination project IDs
+    // were successfully captured and are not the same.
+    $event and $source_project_id != $destination_project_id
+    // To reduce potential false positives from legitimate cross-project activity,
+    // consider adding exceptions for known project pairs or authorized service accounts.
+    // For example:
+    // and not ($source_project_id = "shared-images-project" and $destination_project_id = "dev-project")
+}

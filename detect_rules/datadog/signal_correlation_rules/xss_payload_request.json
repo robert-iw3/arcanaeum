@@ -1,0 +1,33 @@
+{
+  "name": "Potential XSS Payload in URL or Request Body",
+  "queries": [
+    {
+      "query": "source:(iis OR apache OR stream_http OR paloalto OR aws_waf) (@http.url:(*<script* OR *script>* OR *javascript:* OR *onload=* OR *onerror=* OR *onmouseover=* OR *onclick=* OR *alert\\(* OR *prompt\\(* OR *confirm\\(* OR *eval\\(* OR *String.fromCharCode\\(* OR *btoa\\(* OR *document.cookie* OR *document.write\\(* OR *\"><* OR *src=x* OR *addEventListener\\(* OR @http.request_body:(*<script* OR *script>* OR *javascript:* OR *onload=* OR *onerror=* OR *onmouseover=* OR *onclick=* OR *alert\\(* OR *prompt\\(* OR *confirm\\(* OR *eval\\(* OR *String.fromCharCode\\(* OR *btoa\\(* OR *document.cookie* OR *document.write\\(* OR *\"><* OR *src=x* OR *addEventListener\\(*))",
+      "data_source": "logs",
+      "name": "xss_detection_query",
+      "aggregation": "count",
+      "group_by_fields": [
+        "@client.ip",
+        "@destination.ip",
+        "@http.user_agent"
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "condition": "xss_detection_query > 0",
+      "status": "medium"
+    }
+  ],
+  "message": "Potential XSS payload detected: {matched_payloads} from source {@client.ip} to destination {@destination.ip} with user agent {@http.user_agent}. URLs: {@http.url}",
+  "tags": [
+    "security:attack",
+    "technique:T1190"
+  ],
+  "options": {
+    "evaluationWindow": 3600,
+    "keepAlive": 10800,
+    "maxSignalDuration": 3600
+  },
+  "type": "log_detection"
+}

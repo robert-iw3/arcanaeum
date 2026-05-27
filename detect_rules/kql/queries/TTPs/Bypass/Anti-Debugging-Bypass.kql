@@ -1,0 +1,28 @@
+// Name: Bcdedit Used to Enable Debugging or Disable Integrity Checks
+// Author: RW
+// Date: 2025-08-14
+// Description: Detects the use of bcdedit.exe to enable kernel debugging, test signing, or disable integrity checks.
+// These actions can be used by adversaries to disable kernel protections like PatchGuard, allowing for the loading of
+// malicious kernel-mode drivers or direct kernel modification. This is a common technique to bypass PatchGuard's own anti-debugging checks.
+// False Positive Sensitivity: Medium. System administrators or developers may legitimately use these commands for testing or debugging purposes.
+// Investigate the user and context of the activity.
+
+DeviceProcessEvents
+// Filter for the execution of the Boot Configuration Data Editor.
+| where FileName =~ "bcdedit.exe"
+// Look for command-line arguments that enable debugging or disable security features.
+| where ProcessCommandLine has "dbgsettings"
+    or (ProcessCommandLine has "debug" and ProcessCommandLine has "on")
+    or (ProcessCommandLine has "testsigning" and ProcessCommandLine has "on")
+    or (ProcessCommandLine has "nointegritychecks" and ProcessCommandLine has "on")
+// Exclude simple queries of the settings, which are less indicative of malicious activity.
+| where not (ProcessCommandLine has "/enum" or ProcessCommandLine has "/query")
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    FileName,
+    ProcessCommandLine,
+    ReportId

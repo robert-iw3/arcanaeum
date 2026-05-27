@@ -1,0 +1,31 @@
+rule unencrypted_sle_pdu_traffic_detected {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects unencrypted, sensitive Space Link Extension (SLE) operations like CLTU-BIND. The SLE protocol lacks inherent encryption, making this traffic vulnerable to eavesdropping, credential theft, and session hijacking as described in the provided intelligence. This alert flags the presence of these operations for security review."
+    tactic = "TA0006, TA0009" // Credential Access, Collection
+    technique = "T1040" // Network Sniffing
+    false_positives = "This rule will trigger on legitimate SLE BIND operations. It is intended to highlight the risk of unencrypted sensitive data transfer. To reduce noise, scope the rule to traffic involving critical assets (Mission Control Systems, Ground Stations) and consider suppressing alerts during known operational windows."
+
+  events:
+    // This rule requires a data source with Deep Packet Inspection (DPI) capabilities.
+    $traffic.metadata.event_type = "NETWORK_CONNECTION"
+    // The 'bf64' hex sequence is the ASN.1 signature for a CLTU-BIND message.
+    re.regex($traffic.network.sent_bytes, /\xbf\x64/)
+
+    // To increase fidelity, filter for traffic to/from critical assets like Mission Control Systems or Ground Stations.
+    // Example: $traffic.principal.ip in %critical_space_assets or $traffic.target.ip in %critical_space_assets
+
+  condition:
+    $traffic
+
+  outcome:
+    // Risk score set to medium due to potential for legitimate traffic.
+    $risk_score = 40
+    $principal_ip = array_distinct($traffic.principal.ip)
+    $principal_hostname = array_distinct($traffic.principal.hostname)
+    $target_ip = array_distinct($traffic.target.ip)
+    $target_port = array_distinct($traffic.target.port)
+    $target_hostname = array_distinct($traffic.target.hostname)
+    $application = array_distinct($traffic.network.application_protocol)
+}

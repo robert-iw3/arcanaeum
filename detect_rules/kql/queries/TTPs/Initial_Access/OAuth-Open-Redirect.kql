@@ -1,0 +1,40 @@
+// Name: OAuth Open Redirect
+// Author: RW
+// Date: 2025-08-14
+// Description: Detects potential OAuth open redirect vulnerabilities by identifying when a redirect_uri in an authorization request does not match a pre-approved allowlist for the given application.
+// False Positive Sensitivity: Medium. This detection is highly dependent on a well-maintained allowlist of redirect URIs. A new or changed but legitimate URI will trigger an alert until the allowlist is updated.
+// Triage Steps:
+// 1. Examine the 'DetectedRedirectUri' and the 'Application'.
+// 2. Determine if the URI is a legitimate endpoint for that application's authentication flow. Consult with the application owner if necessary.
+// 3. If the URI is legitimate, add it to the 'RedirectUriAllowlist' to prevent future false positives.
+// 4. If the URI is suspicious or malicious, investigate the user's activity around the time of the alert for signs of phishing or compromise. Block the malicious URI.
+
+// Define a list of known, legitimate redirect URIs for each application.
+// This is a critical step for tuning and must be populated for your environment.
+let RedirectUriAllowlist = datatable(ApplicationId:string, AllowedRedirectUri:string) [
+    // Example entries:
+    "00000003-0000-0000-c000-000000000000", "https://portal.azure.com/signin/callback",
+    "some-app-id-guid", "https://my-app.com/oauth2/callback",
+    "another-app-id", "https://another-app.com/redirect.html"
+];
+// Find OAuth authorization requests where the redirect URI is not on the allowlist.
+CloudAppEvents
+| where TimeGenerated > ago(1d)
+// The ActionType will vary based on the log source. This should represent the OAuth authorization step.
+| where ActionType == "Authorize app" or ActionType has "OAuth"
+// The redirect URI may be in different fields. Adapt this parsing to your log schema.
+| extend redirect_uri = tostring(parse_json(RawEventData).redirect_uri)
+| where isnotempty(redirect_uri)
+// Use a left-anti join to find redirect URIs that are NOT in the allowlist for the specific application.
+| join kind=leftanti (
+    RedirectUriAllowlist
+) on ApplicationId, $left.redirect_uri == $right.AllowedRedirectUri
+// Project the results for analysis.
+| project
+    DetectionTime = TimeGenerated,
+    User = AccountDisplayName,
+    IPAddress,
+    Application,
+    ApplicationId,
+    DetectedRedirectUri = redirect_uri,
+    UserAgent

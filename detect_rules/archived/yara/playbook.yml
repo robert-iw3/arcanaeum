@@ -1,0 +1,80 @@
+---
+- name: YARA Rule Compilation and Scanning Automation
+  hosts: localhost
+  vars:
+    yara_root_dir: "/path/to/yara/rules"
+    output_dir: "/path/to/output"
+    scan_dir: "/path/to/scan"
+    output_format: "json"
+    output_file: "{{ output_dir }}/scan_results.json"
+    rule_filter: []
+    max_strings: 10000
+    max_match_data: 1024
+    chunk_size: 100
+    max_file_size: 10485760
+    timeout: 60
+    batch_size: 100
+    log_level: "INFO"
+
+  tasks:
+    - name: Install dependencies
+      ansible.builtin.package:
+        name:
+          - python3
+          - python3-pip
+        state: present
+
+    - name: Install yara-python
+      ansible.builtin.pip:
+        name: yara-python
+        state: present
+
+    - name: Ensure output directory exists
+      ansible.builtin.file:
+        path: "{{ output_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Copy YARA compilation script
+      ansible.builtin.copy:
+        src: compile_yara_rules.py
+        dest: "{{ output_dir }}/compile_yara_rules.py"
+        mode: '0755'
+
+    - name: Copy YARA scanning script
+      ansible.builtin.copy:
+        src: scan_yara_rules.py
+        dest: "{{ output_dir }}/scan_yara_rules.py"
+        mode: '0755'
+
+    - name: Compile YARA rules
+      ansible.builtin.command:
+        cmd: >
+          python3 {{ output_dir }}/compile_yara_rules.py
+          {{ yara_root_dir }}
+          {{ output_dir }}
+          --max-strings {{ max_strings }}
+          --max-match-data {{ max_match_data }}
+          --chunk-size {{ chunk_size }}
+          --rule-filter {{ rule_filter | join(' ') }}
+          --log-level {{ log_level }}
+        creates: "{{ output_dir }}/all_rules.yar"
+      register: compile_result
+      changed_when: compile_result.rc == 0
+
+    - name: Scan directory with YARA rules
+      ansible.builtin.command:
+        cmd: >
+          python3 {{ output_dir }}/scan_yara_rules.py
+          {{ scan_dir }}
+          {{ output_dir }}/all_rules.yar
+          --max-file-size {{ max_file_size }}
+          --timeout {{ timeout }}
+          --batch-size {{ batch_size }}
+          --output-format {{ output_format }}
+          --output-file {{ output_file }}
+          --rule-filter {{ rule_filter | join(' ') }}
+          --log-level {{ log_level }}
+      when: compile_result.rc == 0
+      register: scan_result
+      changed_when: scan_result.rc == 0

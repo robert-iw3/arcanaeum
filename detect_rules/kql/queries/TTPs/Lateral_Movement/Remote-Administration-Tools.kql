@@ -1,0 +1,41 @@
+// Name: Remote Administration Tools for Lateral Movement
+// Author: RW
+// Date: 2025-08-19
+// MITRE ATT&CK: TA0008 (Lateral Movement), T1021 (Remote Services), T1047 (Windows Management Instrumentation)
+// Description: Detects the use of common remote administration tools (PsExec, WMI, PowerShell Remoting, RDP) for lateral movement.
+
+let lookback = 1d;
+DeviceProcessEvents
+| where Timestamp > ago(lookback)
+| where
+    // T1021.001: PsExec execution
+    (ProcessFileName =~ "psexec.exe" and ProcessCommandLine has @"\\") or
+    // T1047: WMI remote command execution
+    (ProcessFileName =~ "wmic.exe" and ProcessCommandLine has "/node:") or
+    // T1021.006: PowerShell Remoting
+    (ProcessFileName in~ ("powershell.exe", "pwsh.exe") and ProcessCommandLine has_any ("Invoke-Command", "Enter-PSSession", "New-PSSession") and ProcessCommandLine has "-ComputerName") or
+    // T1021.001: Remote Desktop command-line execution
+    (ProcessFileName =~ "mstsc.exe" and ProcessCommandLine has "/v:")
+// False Positive Tuning: This activity is very common for system administrators.
+// To increase fidelity, focus on activity originating from non-administrative users or standard workstations.
+// Consider creating asset lists or watchlists for 'Ground Station' devices and 'Sensitive Network' devices and alerting on traffic between them.
+// Example: | where InitiatingProcessAccountUpn !endswith "@domain.com" or InitiatingProcessAccountUpn !in (ListOfAdmins)
+| extend
+    Technique = case(
+        ProcessFileName =~ "psexec.exe", "T1021.001 - PsExec",
+        ProcessFileName =~ "wmic.exe", "T1047 - WMI",
+        ProcessFileName in~ ("powershell.exe", "pwsh.exe"), "T1021.006 - PowerShell Remoting",
+        ProcessFileName =~ "mstsc.exe", "T1021.001 - RDP",
+        "Unknown Lateral Movement"
+    ),
+    // Attempt to extract the target device from the command line for easier investigation.
+    TargetDevice = extract(@"(?:/node:|/v:|\\|ComputerName\s+)(\"?)([\w\.\-]+)\1", 2, ProcessCommandLine)
+| project
+    AlertTime = Timestamp,
+    SourceDevice = DeviceName,
+    DeviceId,
+    AccountName,
+    Technique,
+    TargetDevice,
+    ParentProcess = InitiatingProcessFileName,
+    CommandLine = ProcessCommandLine

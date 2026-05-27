@@ -1,0 +1,54 @@
+rule filejacking_via_browser_mass_file_access {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects a browser process reading an unusually high number of files from a network share or a non-system drive. This behavior is indicative of the FileJacking technique, where a malicious website or HTML attachment uses Chromium File System APIs to enumerate and exfiltrate data from mapped drives."
+    false_positives = "Legitimate web applications that interact with the local file system (e.g., cloud storage sync, large file uploaders) might trigger this rule. Tuning the file access threshold or excluding trusted domains/applications may be necessary."
+    tactic = "TA0001, TA0005, TA0010"
+    technique = "T1189, T1027, T1041"
+    tags = "BROWSER, FILEJACKING, EXFILTRATION, WINDOWS"
+
+  events:
+    // Event for a file being opened.
+    $file.metadata.event_type = "FILE_OPEN"
+
+    // Filter for activity initiated by common web browsers.
+    $file.principal.process.file.name in ("msedge.exe", "chrome.exe", "firefox.exe", "brave.exe", "opera.exe")
+
+    // Core logic: Focus on access to network shares (UNC paths) or non-system local drives.
+    (
+      re.regex($file.target.file.full_path, `^\\\\.*`) or
+      (re.regex($file.target.file.full_path, `^[a-zA-Z]:\\.*`) and not re.regex($file.target.file.full_path, `^C:\\.*` nocase))
+    )
+
+    // Exclude common noisy paths that are unlikely to be targeted for mass exfiltration.
+    not re.regex($file.target.file.full_path, `(?i)(AppData|Cache|Temp)`)
+
+    // Define match variables for correlation.
+    $file.principal.hostname = $hostname
+    $file.principal.user.userid = $user
+    $file.principal.process.file.name = $browser_process
+    $file.principal.process.pid = $pid
+
+  match:
+    // Group events by host, user, and browser process over a 10 minute window.
+    $hostname, $user, $browser_process, $pid over 10m
+
+  outcome:
+    // Tunable threshold for the number of unique files accessed.
+    $file_access_threshold = 50
+    $unique_file_count = count_distinct($file.target.file.full_path)
+    $risk_score = if($unique_file_count > 200, 80, 60)
+
+    // Populate outcome fields for alert context.
+    $principal_hostname = $hostname
+    $principal_user_userid = $user
+    $principal_process_name = $browser_process
+    $principal_process_pid = $pid
+    $principal_process_command_line = array_distinct($file.principal.process.command_line)
+    $accessed_files = array_distinct($file.target.file.full_path)
+
+  condition:
+    // Trigger an alert if the number of unique files accessed exceeds the defined threshold.
+    $unique_file_count > $file_access_threshold
+}

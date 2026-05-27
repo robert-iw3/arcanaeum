@@ -1,0 +1,105 @@
+// Name: Warlock Ransomware Activity
+// Author: RW
+// Date: 2025-08-21
+// Description: This query detects a combination of Tactics, Techniques, and Procedures (TTPs) associated with Warlock ransomware campaigns.
+// It looks for evidence of discovery, credential access, defense evasion, lateral movement, and exfiltration.
+// False Positive Sensitivity: Medium. This query correlates multiple weak signals into a stronger one.
+// Individual components, like RDP modification or copying files to C$, might be legitimate administrative behavior.
+// The query's strength comes from detecting multiple TTPs on the same host in a short period.
+// Consider tuning by adding known administrative accounts or tools to an exclusion list.
+// References: https://www.trendmicro.com/en_us/research/25/h/warlock-ransomware.html
+
+let timeframe = 1d;
+// Define suspicious patterns and IOCs from the Warlock campaign
+let discovery_commands = dynamic([
+    "nltest /domain_trusts",
+    "wmic product get name,identifyingnumber",
+    "net group \"domain admins\"",
+    "net group \"domain computers\"",
+    "net group \"domain controllers\"",
+    "quser"
+]);
+let privesc_commands = dynamic([
+    "net user guest /active:yes",
+    "net localgroup administrators guest /add",
+    "New-GPO"
+]);
+let exfil_processes = dynamic(["rclone.exe", "TrendSecurity.exe"]);
+let defense_evasion_tools = dynamic(["vmtools.exe"]);
+let defense_evasion_drivers = dynamic(["googleApiUtil64.sys"]);
+
+(union isfuzzy=true
+    (
+        // Tactic: Discovery and Credential Access
+        // Detects discovery commands and credential dumping attempts
+        DeviceProcessEvents
+        | where Timestamp > ago(timeframe)
+        | where ProcessCommandLine has_any (discovery_commands)
+            or FileName =~ "mimikatz.exe"
+            or ProcessCommandLine has_all ("reg", "save", "hklm\\sam")
+            or ProcessCommandLine has_all ("reg", "save", "hklm\\security")
+        | extend Tactic = "Discovery & Credential Access", Activity = ProcessCommandLine, ActivityType="Process"
+    ),
+    (
+        // Tactic: Defense Evasion
+        // Detects tools used to terminate security products and create C2 tunnels
+        DeviceProcessEvents
+        | where Timestamp > ago(timeframe)
+        | where (InitiatingProcessFileName in~ (defense_evasion_tools) and ProcessCommandLine has_any ("taskkill", "net stop"))
+            or (ProcessCommandLine has_all ("tunnel", "run", "--token"))
+        | extend Tactic = "Defense Evasion & C2", Activity = ProcessCommandLine, ActivityType="Process"
+    ),
+    (
+        // Tactic: Defense Evasion - Malicious Driver
+        // Detects the drop of the specific driver used to kill processes
+        DeviceFileEvents
+        | where Timestamp > ago(timeframe)
+        | where FileName in~ (defense_evasion_drivers)
+        | extend Tactic = "Defense Evasion", Activity = strcat("Malicious driver dropped: ", FileName), ActivityType="File"
+    ),
+    (
+        // Tactic: Lateral Movement & Persistence
+        // Detects copying of tools to administrative shares and modification of RDP settings
+        DeviceProcessEvents
+        | where Timestamp > ago(timeframe)
+        // Note: Copying files to admin shares can be legitimate. This is correlated with other events to reduce FPs.
+        | where ProcessCommandLine matches regex @".*copy.*\\\\\\\\[^\\\\]+\\c\$\\users\\public.*"
+        | extend Tactic = "Lateral Movement", Activity = ProcessCommandLine, ActivityType="Process"
+    ),
+    (
+        DeviceRegistryEvents
+        | where Timestamp > ago(timeframe)
+        | where RegistryValueData == "0"
+          and (
+            RegistryKey endswith @"SYSTEM\CurrentControlSet\Control\Terminal Server\fDenyTSConnections"
+            or RegistryKey endswith @"SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp\UserAuthentication"
+          )
+        | extend Tactic = "Persistence & Defense Evasion", Activity = strcat("RDP setting modified to be less secure: ", RegistryKey), ActivityType="Registry"
+    ),
+    (
+        // Tactic: Exfiltration
+        // Detects the use of a renamed RClone to exfiltrate data to cloud storage
+        DeviceProcessEvents
+        | where Timestamp > ago(timeframe)
+        | where InitiatingProcessFileName in~ (exfil_processes) and ProcessCommandLine has_all ("copy", "--protondrive-username", "--protondrive-password")
+        | extend Tactic = "Exfiltration", Activity = ProcessCommandLine, ActivityType="Process"
+    ),
+    (
+        // Tactic: Initial Access & Privilege Escalation
+        // Detects account manipulation commands spawned by a SharePoint worker process, indicating exploit activity
+        DeviceProcessEvents
+        | where Timestamp > ago(timeframe)
+        | where InitiatingProcessFileName =~ "w3wp.exe" and InitiatingProcessCommandLine has "SharePoint"
+          and (ProcessCommandLine has_any (privesc_commands))
+        | extend Tactic = "Initial Access & Privilege Escalation", Activity = ProcessCommandLine, ActivityType="Process"
+    )
+)
+| summarize
+    StartTime = min(Timestamp),
+    EndTime = max(Timestamp),
+    Tactics = make_set(Tactic, 10),
+    Activities = make_set(pack(ActivityType, Activity), 10)
+    by DeviceId, DeviceName, InitiatingProcessAccountName
+// Correlate events by requiring at least two distinct tactics to be observed on the same host
+| where array_length(Tactics) > 1
+| extend timestamp = StartTime // For alert schema mapping

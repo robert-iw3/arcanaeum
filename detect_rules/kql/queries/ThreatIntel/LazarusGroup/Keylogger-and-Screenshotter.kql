@@ -1,0 +1,65 @@
+// title: Lazarus Group Keylogger and Screenshotter Activity
+// description: This rule detects behaviors and indicators associated with the Lazarus Group's keylogger and screenshotter malware. The rule identifies either specific C2 communication or the behavioral pattern of a scripting engine creating a screenshot and subsequently making an outbound network connection.
+// author: RW
+// date: 2025-07-30
+// references:
+// mitre_attack_id: T1056.001, T1113, T1041
+// mitre_attack_technique: Keylogging, Screen Capture, Exfiltration Over C2 Channel
+// mitre_attack_phase: Collection, Exfiltration
+// security_domain: endpoint, network
+// datamodel: File, Network
+// risk_score: 85
+// severity: High
+
+union
+(
+    // Part 1: High-fidelity IOC detection for known C2 from Sonatype report
+    DeviceNetworkEvents
+    | where RemoteIP == "144.172.94.226" and RemotePort == 5974
+    | summarize
+        StartTime = min(Timestamp),
+        EndTime = max(Timestamp),
+        RemoteIPs = make_set(RemoteIP),
+        RemotePorts = make_set(RemotePort)
+        by DeviceName, AccountName, InitiatingProcessFileName, InitiatingProcessCommandLine
+    | extend detection_type = "IOC - C2 Communication"
+),
+(
+    // Part 2: TTP-based detection for screenshot and exfil behavior
+    let timeWindow = 5m;
+    let suspiciousInitiators = dynamic(["node.exe", "powershell.exe", "pwsh.exe", "python.exe", "python3.exe"]);
+    (DeviceFileEvents
+    | where InitiatingProcessFileName in~ (suspiciousInitiators)
+    | where (FileName endswith ".png" or FileName endswith ".jpg" or FileName endswith ".jpeg" or FileName endswith ".bmp")
+    // Focus on temp dirs or the specific path from the report
+    | where FolderPath has "/windows cache/" or FolderPath has_any ("\\Temp\\", "\\tmp\\", "/tmp/", "/var/tmp/")
+    | project ScreenshotTime = Timestamp, DeviceId, InitiatingProcessId, InitiatingProcessFileName, InitiatingProcessCommandLine, AccountName, DeviceName
+    )
+    | join kind=inner (
+        DeviceNetworkEvents
+        | where InitiatingProcessFileName in~ (suspiciousInitiators)
+        | where isnotempty(RemoteIP) and not(ipv4_is_private(RemoteIP))
+        | project NetworkTime = Timestamp, DeviceId, InitiatingProcessId, RemoteIP, RemoteUrl
+    ) on DeviceId, InitiatingProcessId
+    | where NetworkTime between (ScreenshotTime .. (ScreenshotTime + timeWindow))
+    | summarize
+        StartTime = min(ScreenshotTime),
+        EndTime = max(NetworkTime),
+        RemoteIPs = make_set(RemoteIP),
+        RemoteUrls = make_set(RemoteUrl)
+        by DeviceName, AccountName, InitiatingProcessFileName, InitiatingProcessCommandLine
+    | extend detection_type = "TTP - Screenshot and Exfil"
+)
+| project
+    Timestamp = StartTime,
+    EndTime,
+    detection_type,
+    DeviceName,
+    AccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RemoteIPs,
+    RemoteUrls,
+    RemotePorts
+| fillnull value=""
+// comment: This rule has two parts. The IOC-based part is high-fidelity. The TTP-based part detects suspicious behavior; false positives could occur if legitimate automation scripts (e.g., for UI testing) create screenshots and also have network capabilities. Investigate the process, its parent, and the destination of the network traffic to confirm maliciousness.

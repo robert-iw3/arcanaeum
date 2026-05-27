@@ -1,0 +1,101 @@
+title: TTP & IOC's - Ivanti CS Exploit Chain - MDifyLoader, Cobalt Strike, vshell, Fscan, DslogdRAT
+status: experimental
+description: Detects activity related to exploitation of Ivanti Connect Secure
+  vulnerabilities (CVE-2025-0282, CVE-2025-22457) using MDifyLoader, Cobalt
+  Strike, vshell, DslogdRAT, and Fscan. Includes file, process, and
+  network-based IOCs from JPCERT report.
+author:
+tags:
+  - attack.initial_access
+  - attack.execution
+  - attack.persistence
+  - attack.defense_evasion
+  - attack.credential_access
+  - attack.discovery
+  - attack.lateral_movement
+  - attack.command_and_control
+  - attack.t1133
+  - attack.t1053.005
+  - attack.t1136.002
+  - attack.t1098
+  - attack.t1543.003
+  - attack.t1036
+  - attack.t1070.004
+  - attack.t1140
+  - attack.t1562.001
+  - attack.t1110.001
+  - attack.t1087
+  - attack.t1210
+  - attack.t1021.001
+  - attack.t1021.002
+  - attack.t1573
+logsource:
+  product: windows
+  service: sysmon
+  category: process_creation
+detection:
+  mdifyloader_execution:
+    Image|endswith:
+      - '\push_detect.exe'
+      - '\rmic.exe'
+      - '\jli.dll'
+      - '\Microsoft.WindowsAppRuntime.Bootstrap.dll'
+  cobaltstrike_beacon:
+    CommandLine|contains:
+      - 'RC4'
+      - 'google'
+      - 'NewBeacon.dll'
+    ParentImage|endswith:
+      - '\push_detect.exe'
+      - '\rmic.exe'
+  dslogdrat:
+    Image|endswith: '\dslogd.exe'
+    CommandLine|contains: '-run'
+  vshell_exec:
+    Image|endswith:
+      - '\ws.exe'
+      - '\ws_windows_amd64.exe'
+      - '\ws_windows_amd2.exe'
+  fscan_loader:
+    Image|endswith: '\python.exe'
+    CommandLine|contains: 'k.bin'
+  fscan_dll:
+    ImageLoaded|endswith: '\python311.dll'
+  malware_hashes:
+    Hashes|contains:
+      - '45ecb7b23b328ab762d8519e69738a20eb0cd5618a10abb2c57a9c72582aa7e7'
+      - '9e91862b585fc4d213e9aaadd571435c1a007d326bd9b07b72dbecb77d1a27ac'
+      - '09087fc4f8c261a810479bb574b0ecbf8173d4a8365a73113025bd506b95e3d7'
+      - '1652ab693512cd4f26cc73e253b5b9b0e342ac70aa767524264fef08706d0e69'
+      - '699290a753f35ae3f05a7ea1984d95f6e6f21971a146714fca5708896e5e6218'
+      - 'cff2afc651a9cba84a11a4e275cc9ec49e29af5fd968352d40aeee07fb00445e'
+      - '48f3915fb8d8ad39dc5267894a950efc863bcc660f1654187b3d77a302fd040f'
+      - '54350d677174269b4dc25b0ccfb0029d6aeac5abbbc8d39eb880c9fd95691125'
+      - '85f9819118af284e6b00ce49fb0c85ff0c0b9d7a0589e1bb56a275ed91314965'
+  c2_connections:
+    EventID: 3
+    DestinationIp|contains:
+      - '172.237.6.207'
+      - '45.77.110.37'
+      - '38.6.229.42'
+      - '23.227.196.254'
+    DestinationHostname|contains:
+      - 'proxy.objectlook.com'
+      - 'api.openedr.eu.org'
+      - 'community.openedr.eu.org'
+      - 'query.datasophos.com'
+  condition: |
+    mdifyloader_execution or
+    cobaltstrike_beacon or
+    dslogdrat or
+    vshell_exec or
+    fscan_loader or
+    fscan_dll or
+    malware_hashes or
+    c2_connections
+falsepositives:
+  - Internal use of similar tool names or POCs
+  - Developers using same open-source projects (e.g., FilelessRemotePE)
+level: high
+references:
+  - https://blogs.jpcert.or.jp/en/2025/07/ivanti_cs.html

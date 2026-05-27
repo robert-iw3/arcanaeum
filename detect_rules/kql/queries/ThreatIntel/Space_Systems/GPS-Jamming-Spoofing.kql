@@ -1,0 +1,55 @@
+// Name: Potential GPS Jamming or Spoofing Detected
+// Author: RW
+// Date: 2025-08-15
+// Tactic: Initial Access
+// Technique: T1566
+// Description: This rule detects potential GPS jamming or spoofing activity by monitoring for anomalies in navigation system data.
+// It looks for specific error codes, a sudden loss of signal strength, or a significant degradation in position accuracy.
+// Such events can indicate an electronic warfare attack aimed at disrupting navigation and communication for space assets.
+// False Positive Sensitivity: Medium. This detection relies on specialized logs from GPS receivers or navigation systems, which are
+// not standard in all environments. Thresholds for signal strength and position accuracy must be tuned to the specific hardware and
+// operating environment to avoid false positives from natural signal degradation (e.g., urban canyons, tunnels, or atmospheric conditions).
+//
+// Data sources: This query assumes a custom log table named 'NavigationSystemLogs' with fields like 'ErrorCode', 'SignalStrength_dBm', and 'PositionAccuracy_meters'. You must adapt the query to your specific data source.
+
+let timeframe = 30m;
+// Key parameter: Populate this list with the device names of your critical assets with GPS receivers.
+let critical_assets = dynamic([]); // e.g., dynamic(['ground-station-vehicle-01', 'mobile-command-unit-03']);
+// Key parameter: Define error codes from your navigation system that indicate jamming.
+let jamming_error_codes = dynamic(['ERR_SIGNAL_LOST', 'HIGH_INTERFERENCE']);
+// Key parameter: Define error codes from your navigation system that indicate spoofing.
+let spoofing_error_codes = dynamic(['ERR_INCONSISTENT_DATA', 'ERR_POS_JUMP']);
+// Key parameter: Set the signal strength threshold (in dBm) below which an alert should be considered. This value is hardware-dependent.
+let signal_strength_threshold = -130;
+// Key parameter: Set the position accuracy threshold (in meters) above which an alert should be considered. A large value indicates poor accuracy.
+let position_accuracy_threshold = 100;
+
+// Ingest logs from the specialized navigation system data source.
+// The table name and field names are placeholders and must be changed to match your environment.
+NavigationSystemLogs
+| where TimeGenerated > ago(timeframe)
+// Filter for specific assets if defined.
+| where isempty(critical_assets) or DeviceName in (critical_assets)
+// Identify events that match jamming or spoofing indicators.
+| where
+    ErrorCode in (jamming_error_codes) or
+    ErrorCode in (spoofing_error_codes) or
+    (isnotnull(SignalStrength_dBm) and SignalStrength_dBm < signal_strength_threshold) or
+    (isnotnull(PositionAccuracy_meters) and PositionAccuracy_meters > position_accuracy_threshold)
+// Summarize the findings per device to create a single alert.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    ReasonsForAlert = make_set(
+        case(
+            ErrorCode in (jamming_error_codes), "Jamming-related error code detected",
+            ErrorCode in (spoofing_error_codes), "Spoofing-related error code detected",
+            SignalStrength_dBm < signal_strength_threshold, "Signal strength dropped below threshold",
+            PositionAccuracy_meters > position_accuracy_threshold, "Position accuracy degraded beyond threshold",
+            "Unknown Anomaly"
+        )
+    ),
+    ReportedErrorCodes = make_set(ErrorCode),
+    MinSignalStrength = min(SignalStrength_dBm),
+    MaxPositionAccuracy = max(PositionAccuracy_meters)
+    by DeviceName, SystemComponent, Account, SourceIp

@@ -1,0 +1,70 @@
+// title: Lazarus Group Host Profiling for Evasion
+// description: Detects a process, typically a scripting engine, executing system information discovery commands to check for sandbox or virtualized environments, followed by an outbound network connection from the same process. This behavior is a known defense evasion technique used by malware, including payloads distributed by the Lazarus Group, to alter or terminate execution and avoid analysis.
+// author: RW
+// date: 2025-07-31
+// references:
+// mitre_attack_id: T1497.001, T1497.003
+// mitre_attack_technique: System Information Discovery, Time Based Evasion
+// mitre_attack_phase: Defense Evasion
+// security_domain: endpoint
+// datamodel: Process, Network
+// risk_score: 70
+// severity: Medium
+
+let timeWindow = 5m;
+// Define suspicious parent processes that might perform profiling, often scripting engines used by malware.
+let suspiciousInitiators = dynamic(["node.exe", "python.exe", "python3.exe", "pwsh.exe", "powershell.exe", "wscript.exe", "cscript.exe", "sh", "bash", "zsh"]);
+
+// Find processes that spawn system information discovery commands, as seen in the Lazarus malware.
+let profiling_events =
+    DeviceProcessEvents
+    | where InitiatingProcessFileName in~ (suspiciousInitiators)
+    | where
+        // Windows VM/Sandbox check from Sonatype report
+        (FileName =~ "wmic.exe" and ProcessCommandLine has "computersystem" and ProcessCommandLine has "get" and ProcessCommandLine has "model") or
+        // macOS VM/Sandbox check
+        (FileName =~ "system_profiler" and ProcessCommandLine has "SPHardwareDataType") or
+        // Linux VM/Sandbox check
+        (FileName in~ ("cat", "grep") and ProcessCommandLine has "/proc/cpuinfo");
+
+// Correlate the parent process of the profiling command with subsequent network activity.
+profiling_events
+| project
+    ProfilingTime = Timestamp,
+    DeviceId,
+    DeviceName,
+    AccountName,
+    InitiatingProcessId,
+    InitiatingProcessCommandLine,
+    ProfilingCommand = ProcessCommandLine
+| join kind=inner (
+    DeviceNetworkEvents
+    | where InitiatingProcessFileName in~ (suspiciousInitiators)
+    // Filter for external network connections, excluding private IP space.
+    | where isnotempty(RemoteIP) and not(ipv4_is_private(RemoteIP))
+    | project
+        NetworkTime = Timestamp,
+        DeviceId,
+        InitiatingProcessId,
+        RemoteIP,
+        RemoteUrl
+) on DeviceId, InitiatingProcessId
+// The core of the correlation: ensure the network event happens shortly AFTER the profiling command.
+| where NetworkTime between (ProfilingTime .. (ProfilingTime + timeWindow))
+// Summarize to create a single alert for a sequence of events from the same parent process.
+| summarize
+    StartTime = min(ProfilingTime),
+    EndTime = max(NetworkTime),
+    ProfilingCommands = make_set(ProfilingCommand),
+    RemoteIPs = make_set(RemoteIP),
+    RemoteUrls = make_set(RemoteUrl)
+    by DeviceName, AccountName, InitiatingProcessCommandLine, InitiatingProcessId
+// comment: This detection correlates system profiling with network activity from the same parent process. False positives may occur with legitimate system management or automation scripts (e.g., Ansible, Puppet, Chef) that gather system facts before configuring a host. Review the InitiatingProcessCommandLine and network destinations to assess legitimacy.
+| project
+    Timestamp = StartTime,
+    DeviceName,
+    AccountName,
+    InitiatingProcessCommandLine,
+    ProfilingCommands,
+    RemoteIPs,
+    RemoteUrls

@@ -1,0 +1,122 @@
+name: ESQL Pipeline Automation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      kibana_url:
+        description: 'Kibana URL'
+        required: false
+      api_key:
+        description: 'Kibana API Key'
+        required: false
+      es_host:
+        description: 'Elasticsearch Host'
+        required: false
+      es_index:
+        description: 'Elasticsearch Index'
+        default: 'kibana-saved-objects'
+      stream_to:
+        description: 'Import to (kibana/elasticsearch)'
+        default: 'kibana'
+      overwrite:
+        description: 'Overwrite existing objects (true/false)'
+        default: 'true'
+      ca_cert_path:
+        description: 'Path to CA certificate for TLS verification'
+        required: false
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Build Docker image
+        run: |
+          docker build -t esql-pipeline:latest .
+
+      - name: Run unit tests in Docker
+        run: |
+          docker run --rm esql-pipeline:latest python -m unittest test_esql_pipeline.py -v
+
+      - name: Run pipeline in Docker
+        env:
+          KIBANA_URL: ${{ github.event.inputs.kibana_url || secrets.KIBANA_URL }}
+          KIBANA_API_KEY: ${{ github.event.inputs.api_key || secrets.KIBANA_API_KEY }}
+          ES_HOST: ${{ github.event.inputs.es_host || secrets.ES_HOST }}
+          CA_CERT_PATH: ${{ github.event.inputs.ca_cert_path || secrets.CA_CERT_PATH }}
+        run: |
+          docker run --rm \
+            -e KIBANA_URL="${KIBANA_URL}" \
+            -e KIBANA_API_KEY="${KIBANA_API_KEY}" \
+            -e ES_HOST="${ES_HOST}" \
+            -e ES_INDEX="${{ github.event.inputs.es_index }}" \
+            -e STREAM_TO="${{ github.event.inputs.stream_to }}" \
+            -e OVERWRITE="${{ github.event.inputs.overwrite }}" \
+            -e CA_CERT_PATH="${CA_CERT_PATH}" \
+            -v ${{ github.workspace }}/ca.crt:/app/ca.crt:ro \
+            esql-pipeline:latest \
+            python esql_pipeline.py --verbose --compress --max-workers 4 \
+            --kibana-url "${KIBANA_URL}" \
+            --api-key "${KIBANA_API_KEY}" \
+            --es-host "${ES_HOST}" \
+            --es-index "${{ github.event.inputs.es_index }}" \
+            --stream-to "${{ github.event.inputs.stream_to }}" \
+            --overwrite=${{ github.event.inputs.overwrite }} \
+            --ca-cert-path="${CA_CERT_PATH}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: esql-rules
+          path: import/final/combined_esql_rules.ndjson.gz
+          retention-days: 7
+
+      - name: Upload CA certificate artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ca-certificate
+          path: ca.crt
+          retention-days: 7
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-logs
+          path: import/final/pipeline.log
+          retention-days: 7
+
+      - name: Scan Docker image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'esql-pipeline:latest'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+
+      - name: Notify on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1
+        with:
+          slack-bot-token: ${{ secrets.SLACK_BOT_TOKEN }}
+          channel-id: 'pipeline-notifications'
+          text: 'ESQL Pipeline failed for ${{ github.repository }} on branch ${{ github.ref }}. Check logs for details.'

@@ -1,0 +1,40 @@
+// Name: LOLBin Registry Write Bursts
+// Author: RW
+// Date: 2025-08-08
+// Description: Identifies a burst of registry write activity from a LOLBin to HKCU keys within a short time frame,
+//              which may indicate malicious scripting, configuration staging, or payload delivery.
+// MITRE ATT&CK: T1112 (Modify Registry)
+
+let lookback = 1d;
+let burst_window = 1m; // The time window to define a burst.
+let write_threshold = 5; // The minimum number of writes to be considered a burst.
+let lolbins = dynamic(["powershell.exe", "pwsh.exe", "powershell_ise.exe", "reg.exe", "wscript.exe", "cscript.exe", "mshta.exe", "rundll32.exe"]);
+
+DeviceRegistryEvents
+| where Timestamp > ago(lookback)
+| where ActionType == "RegistryValueSet"
+// Focus on user-writable keys, a common target for malware staging.
+| where RegistryKey has "HKEY_CURRENT_USER"
+| where InitiatingProcessFileName in~ (lolbins)
+// Group events into time buckets to identify bursts.
+| summarize
+    StartTime = min(Timestamp),
+    EndTime = max(Timestamp),
+    RegistryWriteCount = count(),
+    RegistryKeysWritten = make_set(RegistryKey, 10),
+    RegistryValuesWritten = make_set(RegistryValueName, 10)
+    by bin(Timestamp, burst_window), DeviceName, InitiatingProcessFileName, InitiatingProcessCommandLine
+// Filter for groups that meet the burst threshold.
+| where RegistryWriteCount >= write_threshold
+// Potential for False Positives: Some software installers, updaters, or legitimate configuration scripts can perform rapid registry writes.
+// Consider tuning the 'write_threshold' or excluding known benign processes or command lines.
+// Example: | where not (InitiatingProcessCommandLine contains 'SomeBenignInstaller')
+| project
+    StartTime,
+    EndTime,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RegistryWriteCount,
+    RegistryKeysWritten,
+    RegistryValuesWritten

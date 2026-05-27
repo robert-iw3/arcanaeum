@@ -1,0 +1,389 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+spec:
+  serviceName: redis
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:alpine
+        ports:
+        - containerPort: 6379
+        readinessProbe:
+          exec:
+            command: ["redis-cli", "ping"]
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          exec:
+            command: ["redis-cli", "ping"]
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      - name: redis-exporter
+        image: oliver006/redis_exporter:latest
+        args:
+        - "--redis.addr=localhost:6379"
+        ports:
+        - containerPort: 9121
+      securityContext:
+        runAsUser: 1000
+        fsGroup: 1000
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: filestore
+spec:
+  serviceName: filestore
+  replicas: 1
+  selector:
+    matchLabels:
+      app: filestore
+  template:
+    metadata:
+      labels:
+        app: filestore
+    spec:
+      containers:
+      - name: minio
+        image: minio/minio
+        ports:
+        - containerPort: 9000
+        - containerPort: 9001
+        env:
+        - name: MINIO_ROOT_USER
+          valueFrom:
+            secretKeyRef:
+              name: minio-creds
+              key: user
+        - name: MINIO_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: minio-creds
+              key: password
+        command: ["server", "/data", "--console-address", ":9001"]
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        readinessProbe:
+          httpGet:
+            path: /minio/health/live
+            port: 9001
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /minio/health/live
+            port: 9001
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      securityContext:
+        runAsUser: 1000
+        fsGroup: 1000
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 10Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+      - name: frontend
+        image: ghcr.io/target/strelka-frontend:latest
+        ports:
+        - containerPort: 8732
+        env:
+        - name: STRELKA_BACKEND_ADDR
+          value: "backend:57314"
+        readinessProbe:
+          exec:
+            command: ["grpc-health-probe", "-addr=:8732"]  # Install in image if needed
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        livenessProbe:
+          exec:
+            command: ["grpc-health-probe", "-addr=:8732"]
+          initialDelaySeconds: 10
+          periodSeconds: 10
+      securityContext:
+        runAsUser: 1000
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+spec:
+  replicas: 2  # Initial scale
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      initContainers:
+      - name: init-yara
+        image: your-registry/backend:latest  # Your custom image with git/yara
+        command: ["/app/update-yara.sh"]
+        volumeMounts:
+        - name: yara-rules
+          mountPath: /app/configs/python/backend/yara/rules
+      containers:
+      - name: backend
+        image: your-registry/backend:latest
+        env:
+        - name: STRELKA_FILENAMES_ADDR
+          value: "filestore:9000"
+        volumeMounts:
+        - name: yara-rules
+          mountPath: /app/configs/python/backend/yara/rules
+        readinessProbe:
+          exec:
+            command: ["python3", "-c", "import strelka; print('OK')"]
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        livenessProbe:
+          exec:
+            command: ["python3", "-c", "import strelka; print('OK')"]
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+      volumes:
+      - name: yara-rules
+        persistentVolumeClaim:
+          claimName: yara-rules-pvc
+      securityContext:
+        runAsUser: 1000
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: suricata
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: suricata
+  template:
+    metadata:
+      labels:
+        app: suricata
+    spec:
+      containers:
+      - name: suricata
+        image: your-registry/suricata:latest  # Custom with rules
+        securityContext:
+          capabilities:
+            add: ["NET_ADMIN", "SYS_NICE"]
+        volumeMounts:
+        - name: logs
+          mountPath: /var/log/suricata
+        - name: files
+          mountPath: /var/lib/suricata/files
+        - name: config
+          mountPath: /etc/suricata/suricata.yaml
+          subPath: suricata.yaml
+        - name: rules
+          mountPath: /etc/suricata/rules
+        - name: suricata-socket
+          mountPath: /var/run/suricata
+        command: ["-i", "eth0"]  # Adjust
+        readinessProbe:
+          exec:
+            command: ["suricata", "--build-info"]
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        livenessProbe:
+          exec:
+            command: ["suricata", "--build-info"]
+          initialDelaySeconds: 10
+          periodSeconds: 10
+      - name: suricata-exporter
+        image: jvogt/suricata_exporter:latest  # Or similar
+        args:
+        - "--suricata.socket=/var/run/suricata/suricata-command.socket"  # Adjust if needed
+        ports:
+        - containerPort: 9913
+        volumeMounts:
+        - name: suricata-socket
+          mountPath: /var/run/suricata
+      volumes:
+      - name: logs
+        persistentVolumeClaim:
+          claimName: suricata-logs-pvc
+      - name: files
+        persistentVolumeClaim:
+          claimName: suricata-files-pvc
+      - name: config
+        configMap:
+          name: suricata-config
+      - name: rules
+        configMap:
+          name: suricata-config
+          items:
+          - key: emerging-download.rules
+            path: emerging-download.rules
+      - name: suricata-socket
+        emptyDir: {}
+      securityContext:
+        runAsUser: 1000
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: integrator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: integrator
+  template:
+    metadata:
+      labels:
+        app: integrator
+    spec:
+      containers:
+      - name: integrator
+        image: python:3.12-slim
+        command: ["python", "/app/integrator.py"]
+        env:
+        - name: STRELKA_HOST
+          value: "frontend:8732"
+        volumeMounts:
+        - name: script
+          mountPath: /app/integrator.py
+          subPath: integrator.py
+        - name: suricata-logs
+          mountPath: /suricata-logs
+        - name: suricata-files
+          mountPath: /suricata-files
+        - name: file-drop
+          mountPath: /file-drop
+        readinessProbe:
+          exec:
+            command: ["pgrep", "python"]
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        livenessProbe:
+          exec:
+            command: ["pgrep", "python"]
+          initialDelaySeconds: 10
+          periodSeconds: 10
+      volumes:
+      - name: script
+        configMap:
+          name: integrator-script
+      - name: suricata-logs
+        persistentVolumeClaim:
+          claimName: suricata-logs-pvc
+      - name: suricata-files
+        persistentVolumeClaim:
+          claimName: suricata-files-pvc
+      - name: file-drop
+        persistentVolumeClaim:
+          claimName: file-drop-pvc
+      securityContext:
+        runAsUser: 1000
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: watcher
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: watcher
+  template:
+    metadata:
+      labels:
+        app: watcher
+    spec:
+      containers:
+      - name: watcher
+        image: python:3.12-slim
+        command: ["python", "/app/watcher.py"]
+        env:
+        - name: STRELKA_HOST
+          value: "frontend:8732"
+        - name: SIEM_TYPE
+          value: "elastic"  # Or from ConfigMap
+        - name: SIEM_URL
+          value: "http://your-siem:9200"  # Customize
+        - name: INDEX_NAME
+          value: "strelka-scans"
+        volumeMounts:
+        - name: script
+          mountPath: /app/watcher.py
+          subPath: watcher.py
+        - name: file-drop
+          mountPath: /file-drop
+        - name: scan-logs
+          mountPath: /scan-logs
+        - name: siem-token
+          mountPath: /run/secrets/siem_token
+          subPath: token
+          readOnly: true
+        readinessProbe:
+          exec:
+            command: ["pgrep", "python"]
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        livenessProbe:
+          exec:
+            command: ["pgrep", "python"]
+          initialDelaySeconds: 10
+          periodSeconds: 10
+      volumes:
+      - name: script
+        configMap:
+          name: watcher-script
+      - name: file-drop
+        persistentVolumeClaim:
+          claimName: file-drop-pvc
+      - name: scan-logs
+        persistentVolumeClaim:
+          claimName: scan-logs-pvc
+      - name: siem-token
+        secret:
+          secretName: siem-token
+      securityContext:
+        runAsUser: 1000

@@ -1,0 +1,48 @@
+// Name: KCFG or KCET Corruption Attempt via Bugcheck
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects system crashes (bugchecks) that may indicate an attempt to corrupt Kernel Control Flow Guard (KCFG) bitmaps
+//              or Kernel Control-flow Enforcement Technology (KCET) shadow stacks. These memory regions are protected by the hypervisor
+//              when Virtualization-based Security (VBS) and Hypervisor-enforced Code Integrity (HVCI) are enabled. An attempt to write
+//              to them results in a fatal exception.
+// False Positive Sensitivity: Medium
+// References:
+// - https://i.blackhat.com/BH-USA-25/Presentations/USA-25-McGarr-Out-Of-Control-KCFG-And-KCET.pdf
+// - https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/bug-check-0x139-kernel-security-check-failure
+// - https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/bug-check-0x20001-hypervisor-error
+
+DeviceEvents
+// Filter for bugcheck events, which are logged by the endpoint sensor.
+| where ActionType == "BugCheckReported"
+// Parse the bugcheck code and parameters from the AdditionalFields JSON blob.
+| extend BugCheck = todynamic(AdditionalFields)
+| extend BugCheckCode = tostring(BugCheck.BugCheckCode),
+         BugCheckParameter1 = tostring(BugCheck.BugCheckParameter1),
+         BugCheckParameter2 = tostring(BugCheck.BugCheckParameter2),
+         BugCheckParameter3 = tostring(BugCheck.BugCheckParameter3),
+         BugCheckParameter4 = tostring(BugCheck.BugCheckParameter4)
+| where
+    // Condition 1: Detects KERNEL_SECURITY_CHECK_FAILURE (0x139) with a first parameter indicating a CET shadow stack violation.
+    // This is a high-fidelity signal for an attacker attempting to bypass KCET via return address corruption.
+    (BugCheckCode == "0x139" and BugCheckParameter1 in (
+        "0x33", // FAST_FAIL_CET_SHADOW_STACK_UNEXPECTED_RET: Return address not found on shadow stack.
+        "0x34", // FAST_FAIL_CET_SHADOW_STACK_INVALID: Shadow stack pointer is invalid.
+        "0x35"  // FAST_FAIL_CET_SHADOW_STACK_OVERFLOW: Shadow stack has overflowed.
+    ))
+    or
+    // Condition 2: Detects a HYPERVISOR_ERROR (0x20001). This can occur when a write is attempted to a memory page
+    // that the hypervisor has marked as read-only (via Extended Page Tables), such as the KCFG bitmap.
+    // FP Tuning: This bugcheck can occur for other hypervisor-related reasons. If false positives occur,
+    // investigate the other bugcheck parameters to identify specific patterns related to EPT violations.
+    (BugCheckCode == "0x20001")
+| project
+    Timestamp,
+    DeviceId,
+    DeviceName,
+    ActionType,
+    BugCheckCode,
+    BugCheckParameter1,
+    BugCheckParameter2,
+    BugCheckParameter3,
+    BugCheckParameter4,
+    ReportId

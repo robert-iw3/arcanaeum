@@ -1,0 +1,83 @@
+{
+  "rule_id": "aws_suspicious_ssm_startsession_activity",
+  "name": "AWS Suspicious SSM StartSession Activity",
+  "description": "Detects the initiation of an SSM session to an EC2 instance by an unknown user or from an untrusted source IP address. This can indicate an attacker using compromised credentials for backdoor access or lateral movement.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "from logs-aws.cloudtrail-* | where event.provider == 'ssm.amazonaws.com' and event.action == 'StartSession' and error.code is null | keep aws.cloudtrail.user_identity.arn, source.ip, aws.cloudtrail.request_parameters.target, aws.cloudtrail.aws_region",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0008",
+        "name": "Lateral Movement",
+        "reference": "https://attack.mitre.org/tactics/TA0008/"
+      },
+      "technique": [
+        {
+          "id": "T1021",
+          "name": "Remote Services",
+          "reference": "https://attack.mitre.org/techniques/T1021/"
+        },
+        {
+          "id": "T1021.006",
+          "name": "System Management",
+          "reference": "https://attack.mitre.org/techniques/T1021/006/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0003",
+        "name": "Persistence",
+        "reference": "https://attack.mitre.org/tactics/TA0003/"
+      }
+    }
+  ],
+  "interval": "5m",
+  "from": "now-5m",
+  "max_signals": 100,
+  "risk_score": 90,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html",
+    "https://stratus-red-team.cloud/attack-techniques/AWS/aws.execution.ssm-start-session/"
+  ],
+  "tags": [
+    "AWS",
+    "CloudTrail",
+    "SSM",
+    "Lateral Movement",
+    "Persistence"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "exemptions": [
+    {
+      "name": "known_ssm_users_exemption",
+      "description": "Exempts known administrative roles and trusted IPs from SSM session detection.",
+      "conditions": [
+        {
+          "field": "aws.cloudtrail.user_identity.arn",
+          "operator": "included",
+          "type": "list",
+          "list_id": "known_ssm_users"
+        },
+        {
+          "field": "source.ip",
+          "operator": "included",
+          "type": "list",
+          "list_id": "known_ssm_users"
+        }
+      ],
+      "enabled": true
+    }
+  ],
+  "custom_query_fields": [],
+  "event_group": "aws.cloudtrail.user_identity.arn, source.ip, aws.cloudtrail.request_parameters.target"
+}

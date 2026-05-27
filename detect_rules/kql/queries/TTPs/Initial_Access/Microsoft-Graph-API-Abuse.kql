@@ -1,0 +1,82 @@
+// Name: Suspicious Microsoft Graph API Activity by Application
+// Author: RW
+// Date: 2025-08-09
+// Description: Detects when an application or service principal performs sensitive configuration changes, likely via the Microsoft Graph API.
+//              This can indicate an attacker using a compromised or malicious application for persistence (adding credentials), privilege
+//              escalation (adding owners), or defense evasion (modifying Conditional Access policies). This aligns with known and observed
+//              TTPs where attackers abuse application permissions.
+// False Positives: Legitimate administrative applications or CI/CD pipelines may perform these actions.
+// It is important to add trusted application display names or App IDs to the 'initiatorAllowList' to reduce noise.
+
+// Allowlist for trusted applications/service principals that are expected to perform these actions.
+let initiatorAllowList = dynamic([
+    "Microsoft PIM",
+    "Microsoft Entra Connect",
+    "Azure AD Connect"
+    // Add App IDs or Display Names of trusted applications, such as DevOps or monitoring tools.
+]);
+
+// Part 1: Detects adding credentials to an application or service principal.
+let credentialAddition = AuditLogs
+| where TimeGenerated > ago(1d)
+| where Category == "ApplicationManagement"
+| where OperationName in ("Update application", "Update service principal", "Add service principal credentials") and Result == "Success"
+| where isnotempty(InitiatedBy.app) // Action performed by an application.
+| where not(tostring(InitiatedBy.app.displayName) in (initiatorAllowList))
+| mv-expand ModifiedProperties = TargetResources[0].modifiedProperties
+| where tostring(ModifiedProperties.displayName) has_any ("Credentials", "KeyCredential")
+| where isnotempty(tostring(ModifiedProperties.newValue)) // A new credential value was added.
+| extend TargetApp = TargetResources[0]
+| summarize
+    TimeGenerated = arg_max(TimeGenerated, *),
+    Activity = "Credential Added to Application/SP",
+    InitiatorIpAddress = tostring(InitiatedBy.user.ipAddress)
+    by InitiatorAppId = tostring(InitiatedBy.app.appId),
+       InitiatorDisplayName = tostring(InitiatedBy.app.displayName),
+       TargetDisplayName = tostring(TargetApp.displayName),
+       TargetId = tostring(TargetApp.id),
+       CorrelationId;
+
+// Part 2: Detects adding a new owner to an application or service principal.
+let ownerAddition = AuditLogs
+| where TimeGenerated > ago(1d)
+| where Category == "ApplicationManagement"
+| where OperationName has "Add owner to" and Result == "Success"
+| where isnotempty(InitiatedBy.app) // Action performed by an application.
+| where not(tostring(InitiatedBy.app.displayName) in (initiatorAllowList))
+| extend Target = TargetResources[0]
+| extend AddedOwnerInfo = Target.modifiedProperties[0].newValue
+| summarize
+    TimeGenerated = arg_max(TimeGenerated, *),
+    Activity = "Owner Added to Application/SP",
+    AddedOwners = make_set(AddedOwnerInfo),
+    InitiatorIpAddress = tostring(InitiatedBy.user.ipAddress)
+    by InitiatorAppId = tostring(InitiatedBy.app.appId),
+       InitiatorDisplayName = tostring(InitiatedBy.app.displayName),
+       TargetDisplayName = tostring(Target.displayName),
+       TargetId = tostring(Target.id),
+       CorrelationId;
+
+// Part 3: Detects modification of a Conditional Access policy by an application.
+let caPolicyModification = AuditLogs
+| where TimeGenerated > ago(1d)
+| where OperationName == "Update Conditional Access policy" and Result == "Success"
+| where isnotempty(InitiatedBy.app) // Action performed by an application.
+| where not(tostring(InitiatedBy.app.displayName) in (initiatorAllowList))
+| extend TargetPolicy = TargetResources[0]
+| summarize
+    TimeGenerated = arg_max(TimeGenerated, *),
+    Activity = "Conditional Access Policy Modified",
+    InitiatorIpAddress = tostring(InitiatedBy.user.ipAddress)
+    by InitiatorAppId = tostring(InitiatedBy.app.appId),
+       InitiatorDisplayName = tostring(InitiatedBy.app.displayName),
+       TargetDisplayName = tostring(TargetPolicy.displayName),
+       TargetId = tostring(TargetPolicy.id),
+       CorrelationId;
+
+// Union all suspicious activities
+union credentialAddition, ownerAddition, caPolicyModification
+| extend
+    timestamp = TimeGenerated,
+    AccountCustomEntity = InitiatorDisplayName,
+    IpCustomEntity = InitiatorIpAddress

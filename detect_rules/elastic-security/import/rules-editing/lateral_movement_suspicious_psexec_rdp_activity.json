@@ -1,0 +1,73 @@
+{
+  "rule_id": "lateral_movement_suspicious_psexec_rdp_activity",
+  "name": "Lateral Movement: Suspicious PsExec or RDP Activity",
+  "description": "Detects activity indicative of lateral movement using PsExec or RDP. This rule correlates PsExec service installations (7045), PsExec-like process executions (Sysmon Event ID 1), and successful RDP logins (1149) on an endpoint.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "from winlogbeat-*, logs-endpoint.events-* | where (winlog.channel == 'System' and winlog.event_id == '7045' and (winlog.event_data.ServiceName == 'PSEXESVC' or winlog.event_data.ServiceFileName rlike '(?i).*PSEXESVC\\.exe$')) or (event.module == 'sysmon' and event.code == '1' and (process.executable rlike '.*PSEXESVC\\.exe$' or (process.executable rlike '.*[C|c]:\\\\[W|w][I|i][N|n][D|d][O|o][W|w][S|s]\\\\.*\\.exe$' and process.executable rlike '(?i).*[C|c]:\\\\[W|w][I|i][N|n][D|d][O|o][W|w][S|s]\\\\[a-zA-Z0-9]{8,}\\.exe$'))) or (winlog.channel == 'Microsoft-Windows-TerminalServices-LocalSessionManager/Operational' and winlog.event_id == '1149') | eval activity_type = CASE(winlog.event_id == '7045' or event.code == '7045', 'PsExec Service Installation', winlog.event_id == '1' or event.code == '1', 'PsExec-like Process Execution', winlog.event_id == '1149', 'Successful RDP Logon', 'Unknown'), user = COALESCE(winlog.event_data.AccountName, user.name), details = COALESCE(winlog.event_data.ServiceFileName, process.executable, process.command_line, CONCAT('Source IP: ', source.ip), winlog.event_data.param1) | stats count = COUNT(*), activities = ARRAY_AGG(activity_type), users = ARRAY_AGG(user), activity_details = ARRAY_AGG(details) by host.name | keep host.name, activities, users, activity_details, count",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0008",
+        "name": "Lateral Movement",
+        "reference": "https://attack.mitre.org/tactics/TA0008/"
+      },
+      "technique": [
+        {
+          "id": "T1021",
+          "name": "Remote Services",
+          "reference": "https://attack.mitre.org/techniques/T1021/"
+        },
+        {
+          "id": "T1021.001",
+          "name": "Remote Desktop Protocol",
+          "reference": "https://attack.mitre.org/techniques/T1021/001/"
+        },
+        {
+          "id": "T1021.002",
+          "name": "SMB/Windows Admin Shares",
+          "reference": "https://attack.mitre.org/techniques/T1021/002/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0002",
+        "name": "Execution",
+        "reference": "https://attack.mitre.org/tactics/TA0002/"
+      },
+      "technique": [
+        {
+          "id": "T1059",
+          "name": "Command and Scripting Interpreter",
+          "reference": "https://attack.mitre.org/techniques/T1059/"
+        }
+      ]
+    }
+  ],
+  "interval": "10m",
+  "from": "now-10m",
+  "max_signals": 100,
+  "risk_score": 85,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://docs.microsoft.com/en-us/sysinternals/downloads/psexec",
+    "https://www.elastic.co/guide/en/security/current/psexec-service-creation.html"
+  ],
+  "tags": [
+    "PsExec",
+    "RDP",
+    "Lateral Movement",
+    "Windows"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "host.name"
+}

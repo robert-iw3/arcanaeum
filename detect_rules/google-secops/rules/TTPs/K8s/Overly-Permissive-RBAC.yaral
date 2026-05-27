@@ -1,0 +1,54 @@
+rule kubernetes_overly_permissive_rbac_creation {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects the creation or modification of Kubernetes RBAC Roles, ClusterRoles, RoleBindings, or ClusterRoleBindings that grant high-privilege permissions, such as creating pods or binding the cluster-admin role to unauthenticated or overly broad groups. This is a common misconfiguration exploited for privilege escalation."
+    tactic = "TA0004"
+    technique = "T1068"
+    false_positives = "Legitimate administrative actions to set up cluster access. Cluster setup or major application deployments might trigger this rule. Exclude trusted administrator accounts or specific namespaces if this activity is expected."
+    tags = "KUBERNETES, RBAC, PRIVILEGE_ESCALATION"
+
+  events:
+    // Event 1: Detects a Role or ClusterRole being created/updated with pod creation privileges.
+    $role.metadata.event_type = "KUBERNETES_AUDIT"
+    $role.additional.verb in ("create", "update")
+    $role.target.resource.resource_subtype in ("roles", "clusterroles")
+    // Check for rules allowing pod creation, a common vector for container escape and privilege escalation.
+    (
+      $role.additional.request.rules.resources = "pods" or
+      $role.additional.request.rules.resources = "*"
+    )
+    and
+    (
+      $role.additional.request.rules.verbs = "create" or
+      $role.additional.request.rules.verbs = "*"
+    )
+
+    // Event 2: Detects the cluster-admin role being bound to a risky, broad group.
+    $binding.metadata.event_type = "KUBERNETES_AUDIT"
+    $binding.additional.verb in ("create", "update")
+    $binding.target.resource.resource_subtype in ("rolebindings", "clusterrolebindings")
+    // Specifically look for the powerful 'cluster-admin' role.
+    $binding.additional.request.roleRef.name = "cluster-admin"
+    // Check if it's being bound to unauthenticated or system-wide authenticated groups.
+    $binding.additional.request.subjects.kind = "Group"
+    $binding.additional.request.subjects.name in ("system:unauthenticated", "system:anonymous", "system:authenticated")
+
+  condition:
+    $role or $binding
+
+  outcome:
+    // Set a risk score for the detection.
+    $risk_score = 65
+    // Consolidate fields from either event for uniform alerting.
+    $principal_user = if($role, $role.principal.user.userid, $binding.principal.user.userid)
+    $principal_ip = if($role, array_distinct($role.principal.ip), array_distinct($binding.principal.ip))
+    $target_resource_name = if($role, $role.target.resource.name, $binding.target.resource.name)
+    $target_resource_subtype = if($role, $role.target.resource.resource_subtype, $binding.target.resource.resource_subtype)
+    $target_namespace = if($role, $role.target.namespace, $binding.target.namespace)
+    $verb = if($role, $role.additional.verb, $binding.additional.verb)
+    // Provide a clear reason for the alert.
+    $reason = if($role, "A Role or ClusterRole was created/updated with permissions to create pods, which can be used for privilege escalation.", "The cluster-admin role was bound to a broad or unauthenticated group, granting excessive privileges.")
+    $request_object = if($role, $role.additional.request, $binding.additional.request)
+
+}

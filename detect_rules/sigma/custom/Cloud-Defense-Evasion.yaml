@@ -1,0 +1,59 @@
+title: Cloud Defense Evasion
+id: cba4b6e3-cf14-4ff7-a1b5-6f706655efe3
+status: experimental
+description: Detects defense evasion techniques such as modifying cloud firewalls, disabling security tools, or altering logging configurations. Adversaries use these methods to operate undetected within a cloud environment.
+references:
+  - Threat Intel ID: 6e487ba759c8e80223efef2a739cd68b6586a6454f568bafdb580d896b47660a
+author: RW
+date: 2025-08-19
+tags:
+  - attack.defense_evasion
+  - attack.t1562
+logsource:
+  category: cloud
+detection:
+  # AWS - Disabling or modifying logging and security tools
+  aws_disable_logging:
+    product: aws
+    service: cloudtrail
+    aws.eventName:
+      - 'DeleteTrail'
+      - 'StopLogging'
+      - 'DeleteFlowLogs'
+  aws_disable_security_tool:
+    product: aws
+    service: cloudtrail
+    aws.eventName:
+      - 'DeleteDetector' # GuardDuty
+      - 'DeleteAlarms' # CloudWatch
+      - 'DisableSecurityHub'
+      - 'DeleteRule' # EventBridge
+  # Azure - Disabling or modifying security policies
+  azure_disable_security_policy:
+    product: azure
+    service: auditlogs
+    operationName|startswith:
+      - 'Microsoft.Security/policies/delete'
+      - 'Microsoft.Security/securitySolutions/delete'
+      - 'Microsoft.Security/settings/update' # Look for settings being turned off
+      - 'Microsoft.OperationalInsights/workspaces/dataSources/delete' # Deleting data sources from Log Analytics
+      - 'Microsoft.Insights/diagnosticSettings/delete' # Deleting diagnostic settings
+  # GCP - Disabling or modifying logging and firewalls
+  gcp_disable_logging:
+    product: gcp
+    service: gcp.audit
+    gcp.method_name|endswith:
+      - 'logging.v2.ConfigServiceV2.DeleteSink'
+      - 'logging.v2.ConfigServiceV2.UpdateSink' # Review request to see if sink was disabled
+  gcp_modify_firewall:
+    product: gcp
+    service: gcp.audit
+    gcp.method_name|contains:
+      - 'compute.firewalls.delete'
+      - 'compute.firewalls.patch'
+      - 'compute.firewalls.insert'
+  condition: 1 of them
+falsepositives:
+  - Legitimate administrative activities, such as decommissioning infrastructure or reconfiguring security settings.
+  - Automated infrastructure-as-code (IaC) deployments (e.g., Terraform, CloudFormation) may trigger these events. It's recommended to filter out known service account principals associated with IaC pipelines.
+level: medium

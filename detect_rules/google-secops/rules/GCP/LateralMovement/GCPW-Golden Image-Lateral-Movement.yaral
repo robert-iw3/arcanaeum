@@ -1,0 +1,48 @@
+rule gcp_gcpw_gaia_password_extraction {
+  meta:
+    description = "Detects attempts to dump LSA secrets, potentially to extract the 'gaia' user password for Google Credential Provider for Windows (GCPW). This password, if consistent across cloned VMs, can be used for lateral movement."
+    author = "RW"
+    date = "2025-08-20"
+    tags = "GCP, GOOGLE_WORKSPACE, CREDENTIAL_ACCESS, LATERAL_MOVEMENT, WINDOWS, LSA_SECRETS"
+    tactic = "TA0006, TA0008"
+    technique = "T1003.004"
+    false_positives = "Legitimate security tools (e.g., vulnerability scanners) or administrative scripts that perform credential audits might trigger this rule. Exclusions for known tools and administrative users may be necessary."
+
+  events:
+    // Detects a process launch with command-line arguments indicative of dumping GCPW LSA secrets.
+    $gcpw_dump_command.metadata.event_type = "PROCESS_LAUNCH"
+    $gcpw_dump_command.principal.hostname = $hostname
+    $gcpw_dump_command.principal.process.pid = $pid
+    $gcpw_dump_command.target.process.file.full_path = $process_path
+    $gcpw_dump_command.target.process.command_line = $command_line
+    // Looks for common LSA dumping commands combined with keywords related to the GCPW secret.
+    re.regex($command_line, `(?i)(lsadump|sekurlsa::lsa|secrets).*(Chrome-GCPW-|gaia)`)
+
+    // Detects a non-standard process opening a handle to lsass.exe, a common pattern for credential dumping.
+    $lsass_access.metadata.event_type = "PROCESS_OPEN"
+    $lsass_access.principal.hostname = $hostname
+    $lsass_access.principal.process.pid = $pid
+    $lsass_access.principal.process.file.full_path = $process_path
+    $lsass_access.principal.process.command_line = $command_line
+    re.regex($lsass_access.target.process.file.full_path, `lsass\.exe$`)
+    // Filter to reduce FPs from legitimate system processes that interact with LSASS.
+    // This list may need to be tuned for your environment.
+    not re.regex($process_path, `(?i)(\\svchost\.exe|\\wininit\.exe|\\winlogon\.exe|\\services\.exe|\\lsass\.exe|\\csrss\.exe)$`)
+
+  match:
+    $hostname, $pid, $process_path over 10m
+
+  outcome:
+    $risk_score = 75
+    $principal_hostname = $hostname
+    $principal_process_pid = $pid
+    $principal_process_path = $process_path
+    $principal_process_command_line = if($gcpw_dump_command, $gcpw_dump_command.target.process.command_line, $lsass_access.principal.process.command_line)
+    $principal_user = array_distinct($gcpw_dump_command.principal.user.userid, $lsass_access.principal.user.userid)
+    $target_process_path = if($lsass_access, $lsass_access.target.process.file.full_path, "")
+    // Provides context on which detection path triggered the alert.
+    $detection_method = if($gcpw_dump_command, "Specific GCPW LSA Dump Command", "Generic LSASS Access")
+
+  condition:
+    $gcpw_dump_command or $lsass_access
+}

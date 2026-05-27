@@ -1,0 +1,85 @@
+// Name: Anomalous Sign-in to Multi-Tenant Application
+// Author: RW
+// Date: 2025-08-09
+// Description: Detects anomalous sign-in patterns to multi-tenant applications, such as impossible travel or sign-ins from a new country.
+//              This behavior can indicate a compromised account being used to abuse misconfigured multi-tenant applications.
+// False Positives: Users traveling, using VPNs, or legitimate but infrequent access from new locations can trigger this alert.
+// The speed and country baseline thresholds may need tuning. Consider excluding known corporate VPN IP ranges.
+
+let detection_window = 1d;
+let speed_threshold_kmh = 1000; // Speed in km/h to flag as impossible travel.
+let country_lookback = 14d; // How far back to look for a user's country baseline.
+
+// Part 1: Impossible Travel Detection
+let impossible_travel =
+    SigninLogs
+    | where TimeGenerated > ago(detection_window)
+    | where ResultType == 0 // Successful sign-ins
+    | where isnotempty(UserPrincipalName) and isnotempty(LocationDetails.geoCoordinates)
+    // Focus on multi-tenant app sign-ins, a key aspect of the research.
+    | where HomeTenantId != ResourceTenantId
+    | extend Latitude = todouble(LocationDetails.geoCoordinates.latitude), Longitude = todouble(LocationDetails.geoCoordinates.longitude)
+    | where isnotnull(Latitude) and isnotnull(Longitude)
+    | order by UserPrincipalName, TimeGenerated asc
+    | serialize // Process events sequentially for each user
+    | extend
+        Prev_TimeGenerated = prev(TimeGenerated, 1),
+        Prev_Latitude = prev(Latitude, 1),
+        Prev_Longitude = prev(Longitude, 1),
+        Prev_IPAddress = prev(IPAddress, 1),
+        Prev_Location = prev(Location, 1),
+        IsSameUser = prev(UserPrincipalName, 1) == UserPrincipalName
+    | where IsSameUser and TimeGenerated != Prev_TimeGenerated // Ensure we are looking at distinct sign-in events for the same user
+    | extend
+        TravelTimeHours = (TimeGenerated - Prev_TimeGenerated) / 1h,
+        TravelDistanceKm = geo_distance_2points(Longitude, Latitude, Prev_Longitude, Prev_Latitude) / 1000
+    | extend TravelSpeedKmh = round(TravelDistanceKm / iif(TravelTimeHours > 0, TravelTimeHours, 1/3600.0), 2)
+    | where TravelSpeedKmh > speed_threshold_kmh
+    | project
+        TimeGenerated,
+        UserPrincipalName,
+        IPAddress,
+        Location,
+        AppDisplayName,
+        Reason = "Impossible Travel",
+        Description = strcat("User signed in from '", Prev_Location, "' and '", Location, "' with an impossible speed of ", TravelSpeedKmh, " km/h.")
+    ;
+
+// Part 2: New Country Detection
+let known_countries =
+    SigninLogs
+    | where TimeGenerated between (ago(country_lookback) .. ago(detection_window))
+    | where ResultType == 0
+    | where isnotempty(UserPrincipalName) and isnotempty(LocationDetails.countryOrRegion)
+    | summarize KnownCountries = make_set(tostring(LocationDetails.countryOrRegion)) by UserPrincipalName;
+let new_country_signins =
+    SigninLogs
+    | where TimeGenerated > ago(detection_window)
+    | where ResultType == 0
+    | where isnotempty(UserPrincipalName) and isnotempty(LocationDetails.countryOrRegion)
+    // Focus on multi-tenant app sign-ins.
+    | where HomeTenantId != ResourceTenantId
+    | lookup kind=leftouter known_countries on UserPrincipalName
+    | extend NewCountry = tostring(LocationDetails.countryOrRegion)
+    // Alert if the country is not in the user's known list and a baseline exists.
+    | where isnotempty(KnownCountries) and not(NewCountry in (KnownCountries))
+    | summarize
+        TimeGenerated = arg_max(TimeGenerated, *),
+        AppList = make_set(AppDisplayName)
+        by UserPrincipalName, IPAddress, Location, NewCountry, KnownCountries
+    | project
+        TimeGenerated,
+        UserPrincipalName,
+        IPAddress,
+        Location,
+        AppDisplayName = tostring(AppList),
+        Reason = "New Country",
+        Description = strcat("User signed in from a new country '", NewCountry, "'. Known countries: ", KnownCountries, ".")
+    ;
+
+// Union the results from both detection methods
+union impossible_travel, new_country_signins
+| extend
+    timestamp = TimeGenerated,
+    AccountCustomEntity = UserPrincipalName,
+    IpCustomEntity = IPAddress

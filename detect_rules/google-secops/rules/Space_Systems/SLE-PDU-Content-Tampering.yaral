@@ -1,0 +1,49 @@
+rule sle_pdu_content_tampering_detected {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects potential tampering or corruption of Space Link Extension (SLE) Protocol Data Units (PDUs) by validating the integrity of the ISP1 framing. It checks if the actual payload size matches the length specified in the ISP1 header. A mismatch can indicate a Man-in-the-Middle (MitM) attack where an adversary has tampered with the PDU content without correctly updating the frame's length field, as described in the provided intelligence."
+    tactic = "TA0040, TA0005" // Impact, Defense Evasion
+    technique = "T1499.003, T1565.001" // Application or System Exploitation, Data Manipulation
+    false_positives = "Legitimate causes for mismatches could include network packet fragmentation, data corruption from faulty hardware, or non-compliant SLE implementations. It is crucial to validate against known good traffic and filter for specific critical assets (e.g., Mission Control Systems, Ground Stations) to improve fidelity."
+
+  events:
+    // This rule requires a data source with Deep Packet Inspection (DPI) capabilities (e.g., Zeek, Corelight)
+    // that can parse the ISP1 protocol wrapper for SLE messages.
+    $traffic.metadata.event_type = "NETWORK_CONNECTION"
+
+    // Filter for SLE PDU messages based on the ISP1 Type ID (0x01), as identified in the intelligence.
+    // This assumes a custom parser populates a UDM field with the ISP1 Type ID.
+    $traffic.network.application_protocol_data.isp1_type_id = 1
+
+    // This rule's core logic relies on comparing the actual payload size with the size declared in the ISP1 header.
+    // The following fields are placeholders and must be mapped to the fields provided by your specific network parser.
+
+    // Capture the actual size of the entire network payload in bytes.
+    $traffic.network.bytes = $actual_payload_size
+
+    // Capture the message length value from bytes 5-8 of the ISP1 header.
+    $traffic.network.application_protocol_data.isp1_declared_length = $declared_message_length
+
+    // The expected total size is the declared message length plus the 8-byte ISP1 header.
+    // The rule triggers if the actual size does not match the expected size.
+    $actual_payload_size != $declared_message_length + 8
+
+    // To increase fidelity, consider filtering for traffic involving critical assets.
+    // Example: $traffic.principal.ip in %mission_control_systems or $traffic.target.ip in %ground_stations
+
+  condition:
+    $traffic
+
+  outcome:
+    // The risk score is set to medium-high, as a confirmed mismatch is a strong indicator of tampering or corruption.
+    $risk_score = 65
+    $principal_ip = array_distinct($traffic.principal.ip)
+    $target_ip = array_distinct($traffic.target.ip)
+    $target_port = array_distinct($traffic.target.port)
+    $principal_hostname = array_distinct($traffic.principal.hostname)
+    $target_hostname = array_distinct($traffic.target.hostname)
+    // Provide the mismatched lengths for investigation.
+    $actual_payload_length = array_distinct($actual_payload_size)
+    $expected_payload_length = array_distinct($declared_message_length + 8)
+}

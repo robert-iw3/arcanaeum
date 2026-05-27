@@ -1,0 +1,62 @@
+{
+  "data": {
+    "type": "signal_correlation",
+    "attributes": {
+      "name": "Chinese State-Sponsored Cyber Operations Targeting Critical Infrastructure",
+      "enabled": true,
+      "cases": [
+        {
+          "name": "Volt Typhoon LotL Activity",
+          "status": "high",
+          "query": "source:windows (@process.name:(cmd.exe OR powershell.exe) (@process.command_line:(whoami OR hostname OR systeminfo OR \"ipconfig /all\" OR \"net user\" OR \"net group\" OR \"net localgroup\" OR \"net view\" OR nltest OR \"query user\" OR qwinsta OR nbtstat OR \"arp -a\" OR \"tasklist /v\") OR @process.name:ntdsutil.exe OR (@process.name:vssadmin.exe @process.command_line:\"create shadow\") OR (@process.name:reg.exe @process.command_line:(\"save HKLM\\SAM\" OR \"save HKLM\\SYSTEM\"))) | eval technique=case(contains(@process.command_line, \"whoami|hostname|systeminfo|ipconfig|net user|net group|net localgroup|net view|nltest|query user|qwinsta|nbtstat|arp|tasklist\") => \"Reconnaissance\", contains(@process.command_line, \"ntdsutil|vssadmin create shadow|reg save HKLM\\SAM|reg save HKLM\\SYSTEM\") => \"Credential Dumping\", true => \"Other LotL Activity\") | where count > 1 AND (distinct_count(technique) > 1 OR @process.parent.name:(w3wp.exe OR httpd.exe OR nginx.exe OR tomcat*.exe) OR technique:\"Credential Dumping\")"
+        },
+        {
+          "name": "Exploitation of Edge Devices",
+          "status": "high",
+          "query": "source:(pan* OR opsec* OR suricata OR cisco_asa OR fortinet* OR stream_http) (@http.url:/(\\.\\/|\\%2e\\%2e|etc\\/passwd|cmd\\.exe|powershell\\.exe|wget|curl|bin\\/sh)/ OR @threat.name:/(Command Injection|Path Traversal|Remote Code Execution|RCE)/) | aggregate count, collect(@http.url) AS sample_urls, collect(@threat.name) AS triggered_signatures by @ip.src, @ip.dst | where count > 5"
+        },
+        {
+          "name": "Spear-Phishing Campaigns",
+          "status": "high",
+          "query": "source:(windows OR sysmon) @event.code:(4688 OR 1) @parent_process_name:/(winword\\.exe|excel\\.exe|powerpnt\\.exe|outlook\\.exe|msaccess\\.exe)$/ @process.name:/(cmd\\.exe|powershell\\.exe|wscript\\.exe|cscript\\.exe|mshta\\.exe|rundll32\\.exe)$/"
+        },
+        {
+          "name": "Webshells on Compromised Systems",
+          "status": "high",
+          "query": "source:(windows OR sysmon) @event.code:(4688 OR 1) @parent_process_name:/(w3wp\\.exe|httpd\\.exe|nginx\\.exe|tomcat\\d*\\.exe|php-cgi\\.exe)$/ @process.name:/(cmd\\.exe|powershell\\.exe|pwsh\\.exe|whoami\\.exe|ipconfig\\.exe|net\\.exe|net1\\.exe|systeminfo\\.exe|quser\\.exe|qwinsta\\.exe|nbtstat\\.exe|nltest\\.exe|certutil\\.exe|bitsadmin\\.exe|sh\\.exe|bash\\.exe)$/"
+        },
+        {
+          "name": "Unusual SSL or HTTP C2 Communication",
+          "status": "high",
+          "query": "source:(zeek_ssl OR zeek_http OR pan_traffic OR suricata) | eval reason=case(source:zeek_ssl AND @ssl.issuer IS NOT NULL AND @ssl.subject IS NOT NULL AND @ssl.issuer = @ssl.subject AND @dest_port:443 => \"Self-Signed SSL on Port 443\", (source:zeek_http OR @app:http OR @http.http_method IS NOT NULL) AND @dest_port NOT IN (80, 8080, 8000, 8888) => \"HTTP on Non-Standard Port\") | where reason IS NOT NULL AND NOT (@dest_ip:(10.0.0.0/8 OR 172.16.0.0/12 OR 192.168.0.0/16))"
+        }
+      ],
+      "group_by_fields": ["@host", "@ip.src", "@user"],
+      "distinct_fields": ["case_id"],
+      "correlation": {
+        "expression": "distinct_count >= 2",
+        "timeframe": "1h"
+      },
+      "message": "Chinese State-Sponsored Cyber Activity Detected: {distinct_count} distinct TTPs on host {@host}, source IP {@ip.src}, or user {@user}. Techniques: {case_names}. Details: {@process.command_line OR @http.url OR @threat.name OR @ssl.issuer OR @dest_port}. Timeframe: {first_activity} to {last_activity}",
+      "severity": "high",
+      "tags": [
+        "security:attack",
+        "tactic:TA0001",
+        "tactic:TA0005",
+        "technique:T1190",
+        "technique:T1566.001",
+        "technique:T1505.003",
+        "technique:T1071.001",
+        "technique:T1090",
+        "environment:global",
+        "threat_actor:volt_typhoon",
+        "threat_actor:mustang_panda",
+        "threat_actor:apt41",
+        "threat_actor:redecho"
+      ],
+      "options": {
+        "evaluation_window": "1h"
+      }
+    }
+  }
+}

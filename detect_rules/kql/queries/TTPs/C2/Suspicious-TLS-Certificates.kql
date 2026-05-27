@@ -1,0 +1,87 @@
+// name Suspicious TLS Certificate Usage
+// author RW
+// description
+//   This rule detects potential C2 communications by identifying connections using suspicious TLS certificates.
+//   It flags connections that use self-signed certificates (where the Issuer and Subject are identical) or
+//   certificates issued by a Certificate Authority (CA) that is not on a predefined list of common, trusted CAs.
+//   Attackers often use such certificates for their C2 infrastructure because they are free and easy to deploy.
+// tags
+// - T1071.001
+// - T1588.004
+// severity Medium
+// false_positives
+// - Legitimate internal services may use certificates from an internal CA, which might not be on the trusted list. These should be added to the 'SubjectIssuerAllowList' or filtered by IP.
+// - Some legitimate, smaller, or newer online services may use less common CAs.
+// - Ad-hoc services or developer environments may use self-signed certificates.
+// - It is critical to tune the 'TrustedCAList' and 'SubjectIssuerAllowList' for your specific environment.
+// datasources
+// - CommonSecurityLog (Requires SSL/TLS Inspection)
+// - DeviceNetworkEvents (Requires SSL/TLS Inspection)
+//
+// Define a list of common and trusted Certificate Authorities.
+// This list should be reviewed and customized for your environment to reduce false positives.
+
+let TrustedCAList = dynamic([
+    "DigiCert", "Sectigo", "GoDaddy", "GlobalSign", "Let's Encrypt", "Entrust",
+    "VeriSign", "Thawte", "Comodo", "Microsoft", "Google", "Amazon", "Cloudflare"
+]);
+
+// Allowlist for specific subjects or issuers that are known to be safe in your environment (e.g., internal CAs).
+let SubjectIssuerAllowList = dynamic([
+    "myinternalapp.local" // Example: Add common names of internal services
+]);
+
+// Allowlist for destination IPs/hosts that are known to use self-signed or internally-signed certs.
+let DestinationAllowList = dynamic([
+    "" // Example: "192.168.1.10", "dev-server.example.com"
+]);
+
+// This detection requires SSL/TLS Inspection to be enabled on your firewall or proxy.
+// The table and field names might vary based on your log source.
+// CommonSecurityLog is used here, common for Palo Alto, Zscaler, etc.
+// Field names like 'SSLServerCertificateIssuer' might be 'Issuer' in other schemas.
+CommonSecurityLog
+| where TimeGenerated > ago(1d)
+// Ensure the necessary fields for SSL inspection are present.
+| where isnotempty(SSLServerCertificateIssuer) and isnotempty(SSLServerCertificateSubject)
+// Filter out traffic to private/internal IP spaces, as they commonly use internal CAs.
+| where not(ipv4_is_private(DestinationIP))
+// Exclude known allowed destinations, subjects, or issuers.
+| where not(DestinationHostName has_any (DestinationAllowList) or DestinationIP has_any (DestinationAllowList))
+| where not(SSLServerCertificateSubject has_any (SubjectIssuerAllowList) or SSLServerCertificateIssuer has_any (SubjectIssuerAllowList))
+// Core detection logic:
+| extend
+    // Flag 1: Self-signed certificate (Issuer and Subject are the same). This is a strong indicator for external traffic.
+    IsSelfSigned = (SSLServerCertificateIssuer == SSLServerCertificateSubject),
+    // Flag 2: Certificate is issued by a non-standard or less common CA.
+    IsUntrustedCA = not(SSLServerCertificateIssuer has_any (TrustedCAList))
+// Trigger an alert if the certificate is self-signed or from an untrusted CA.
+| where IsSelfSigned or IsUntrustedCA
+// Summarize alerts to reduce noise and provide context.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    EventCount = count(),
+    DistinctSources = dcount(SourceIP),
+    SampleRequestURLs = make_set(RequestURL, 5)
+    by
+    DestinationIP,
+    DestinationHostName,
+    DestinationPort,
+    SSLServerCertificateIssuer,
+    SSLServerCertificateSubject,
+    IsSelfSigned,
+    IsUntrustedCA
+| project-reorder
+    StartTime,
+    EndTime,
+    EventCount,
+    DestinationHostName,
+    DestinationIP,
+    DestinationPort,
+    SSLServerCertificateIssuer,
+    SSLServerCertificateSubject,
+    IsSelfSigned,
+    IsUntrustedCA,
+    DistinctSources,
+    SampleRequestURLs

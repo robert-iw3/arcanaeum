@@ -1,0 +1,17 @@
+[
+  {
+    "name": "DCSync Replication Activity Correlation",
+    "description": "Correlates EventCode 4662 (Active Directory replication) with network activity on common replication ports (135, 389, 88) from Sysmon event code 3.",
+    "search": "index=* (sourcetype=WinEventLog:Security OR sourcetype=WinEventLog:ForwardedEvents) EventCode=4662 | where like(Object_Type, \"%19195a5b-6da0-11d0-afd3-00c04fd930c9%\") OR like(Object_Type, \"%1131f6aa-9c07-11d1-f79f-00c04fc2dcd2%\") OR like(Object_Type, \"%1131f6ad-9c07-11d1-f79f-00c04fc2dcd2%\") OR like(Object_Type, \"%89e95b76-444d-4c62-991a-0facbeda640c%\") OR like(Object_Type, \"%replicationSynchronization%\") OR like(Object_Type, \"%replicating Directory Changes All%\") | search Access_Mask=0x100 | eval Ticket_Time = _time | eval Account_Name=lower(Account_Name) | eval Descriptive_Object_Type = case(like(Object_Type, \"%19195a5b-6da0-11d0-afd3-00c04fd930c9%\"), \"Directory Replication\", like(Object_Type, \"%1131f6aa-9c07-11d1-f79f-00c04fc2dcd2%\"), \"Replicating Directory Changes\", like(Object_Type, \"%1131f6ad-9c07-11d1-f79f-00c04fc2dcd2%\"), \"Replicating Directory Changes All\", like(Object_Type, \"%89e95b76-444d-4c62-991a-0facbeda640c%\"), \"Replicating Directory Changes In Filtered Set\", like(Object_Type, \"%replicationSynchronization%\"), \"General Replication Synchronization\", like(Object_Type, \"%replicating Directory Changes All%\"), \"General Replication of All Directory Changes\", 1==1, \"Unknown\") | table Account_Name, Ticket_Time, Descriptive_Object_Type | append [ search index=* sourcetype=WinEventLog:Microsoft-Windows-Sysmon/Operational EventCode=3 (DestinationPort=135 OR DestinationPort=389 OR DestinationPort=88) | rex field=_raw \"User:\\s(?<user_domain>[^\\s]+)\" | eval Account_Name=lower(mvindex(split(user_domain, \"\\\\\"),1)) | eval Network_Time = _time | table Account_Name, Network_Time, Image, DestinationPort ] | stats values(Descriptive_Object_Type) as Object_Type, values(Image) as Image, values(DestinationPort) as DestinationPort, min(Ticket_Time) as Ticket_Time, min(Network_Time) as Network_Time, count(eval(isnotnull(Ticket_Time))) as Ticket_Count, count(eval(isnotnull(Network_Time))) as Network_Count by Account_Name | where isnotnull(Object_Type) AND isnotnull(Network_Time) | where abs(Ticket_Time - Network_Time) <= 1800 | eval Network_Time=strftime(Network_Time, \"%Y-%m-%d %H:%M:%S\") | eval Ticket_Time=strftime(Ticket_Time, \"%Y-%m-%d %H:%M:%S\") | table Account_Name, Object_Type, Image, DestinationPort, Network_Time, Network_Count, Ticket_Time, Ticket_Count",
+    "is_scheduled": 1,
+    "disabled": 0,
+    "cron_schedule": "*/30 * * * *",
+    "dispatch.earliest_time": "-24h",
+    "dispatch.latest_time": "now",
+    "sharing": "global",
+    "acl": {
+      "read": ["power", "admin"],
+      "write": ["admin"]
+    }
+  }
+]

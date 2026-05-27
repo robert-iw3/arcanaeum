@@ -1,0 +1,33 @@
+// Name: Temporary File Execution via PowerShell and COM
+// Author: RW
+// Date: 2025-08-12
+// Description: Detects PowerShell creating a script or batch file in a temporary directory and subsequently executing it using
+//              the Shell.Application COM object. This is a common technique for staging payloads and evading detection.
+// MITRE ATT&CK: T1059.001, T1083
+// False Positives: While legitimate scripts may use COM objects, the combination of creating a temporary script/batch file and
+// executing it via Shell.Application is highly suspicious. Tuning may be required for specific administrative or deployment tools that use this pattern.
+
+DeviceEvents
+| where ActionType in ("PowerShellCommand", "AmsiScriptContent")
+// Combine command line and script block text for comprehensive analysis
+| extend ScriptContent = iff(ActionType == "AmsiScriptContent", tostring(AdditionalFields.ScriptBlockText), ProcessCommandLine)
+// First-pass filter for the core components of the technique
+| where ScriptContent has "Shell.Application"
+  and ScriptContent has "ShellExecute"
+  and (ScriptContent has "Set-Content" or ScriptContent has "Out-File")
+// Use regex to find the creation of a .bat or .ps1 file in a common temporary location
+| where ScriptContent matches regex @"(?i)(\$env:TEMP|\\AppData\\Local\\Temp|\\Windows\\Temp)[^'""`]+\.(bat|ps1)"
+// Further confirm the instantiation of the COM object, which is the execution vector
+| where ScriptContent contains "New-Object" and ScriptContent contains "-ComObject"
+// FP Mitigation: This pattern is highly suspicious. If false positives occur, consider excluding known-good parent processes or scripts.
+// For example: | where InitiatingProcessFileName !~ "legit_tool.exe"
+| project
+    Timestamp,
+    DeviceName,
+    ActionType,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    AccountName,
+    ScriptContent,
+    ReportId,
+    AdditionalFields

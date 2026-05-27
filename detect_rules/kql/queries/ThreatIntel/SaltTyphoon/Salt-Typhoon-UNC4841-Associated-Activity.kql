@@ -1,0 +1,97 @@
+// Name: Salt Typhoon & UNC4841 Associated Activity 2025
+// Description: This rule detects a combination of Tactics, Techniques, and Procedures (TTPs) associated with the Chinese APT groups Salt Typhoon and UNC4841.
+// It combines endpoint and network indicators to identify potential compromise. The rule looks for C2 communications to known malicious domains, attempts to
+// clear Linux logs, and credential harvesting from web browsers.
+// Required Data Sources: DeviceProcessEvents, DnsEvents, DeviceNetworkEvents
+// Tactic: Command and Control, Defense Evasion, Credential Access
+// Technique: T1071 (Application Layer Protocol), T1070.003 (Indicator Removal: Clear Command History), T1555.003 (Credentials from Password Stores: Web Browsers)
+// Author: RW
+// Version: 1.0
+// Date: 2025-09-09
+// False Positive Sensitivity: Medium
+
+let saltTyphoonDomains = dynamic([
+    "aar.gandhibludtric.com", "aria-hidden.com", "asparticrooftop.com", "caret-right.com", "chatscreend.com",
+    "chekoodver.com", "cloudprocenter.com", "clubworkmistake.com", "col-lg.com", "colourtinctem.com",
+    "componfrom.com", "dateupdata.com", "e-forwardviewupdata.com", "fessionalwork.com", "fjtest-block.com",
+    "fitbookcatwer.com", "followkoon.com", "gandhibludtric.com", "gesturefavour.com", "getdbecausehub.com",
+    "goldenunder.com", "hateupopred.com", "imap.dateupdata.com", "incisivelyfut.com", "infraredsen.com",
+    "junsamyoung.com", "lookpumrron.com", "materialplies.com", "morrowadded.com", "newhkdaily.com",
+    "onlineeylity.com", "pulseathermakf.com", "qatarpenble.com", "redbludfootvr.com", "requiredvalue.com",
+    "ressicepro.com", "shalaordereport.com", "siderheycook.com", "sinceretehope.com", "solveblemten.com",
+    "togetheroffway.com", "toodblackrun.com", "troublendsef.com", "unfeelmoonvd.com", "verfiedoccurr.com",
+    "waystrkeprosh.com", "xdmgwctese.com"
+]);
+let credentialFiles = dynamic(["Login Data", "Web Data", "Cookies", "key4.db", "logins.json"]);
+let logFiles = dynamic([".bash_history", "auth.log", "lastlog", "wtmp", "btmp"]);
+let browserProcesses = dynamic(["chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe"]);
+(
+    // comment("Part 1: Detects endpoint TTPs like log clearing and credential harvesting.")
+    DeviceProcessEvents
+    | where
+        // comment("T1070.003: Detects various methods of clearing common Linux log files.")
+        (
+            (ProcessCommandLine has_any (logFiles) and InitiatingProcessFileName in~ ("shred", "truncate", "rm")) or
+            (ProcessCommandLine has_any ("cat /dev/null >", "echo >", "printf '' >") and ProcessCommandLine has_any (logFiles)) or
+            (InitiatingProcessFileName in~ ("bash", "sh", "zsh", "ksh") and ProcessCommandLine matches regex @"^\s*>\s*.*(\.bash_history|auth\.log|lastlog|wtmp|btmp)\b") or
+            (InitiatingProcessFileName =~ "history" and ProcessCommandLine has "-c")
+        ) or
+        // comment("T1555.003: Detects non-browser processes accessing browser credential files.")
+        (
+            ProcessCommandLine has_any (credentialFiles) and
+            InitiatingProcessFileName !in~ (browserProcesses) and
+            ProcessCommandLine has_any ("AppData\\Local\\Google", "AppData\\Roaming\\Mozilla", "AppData\\Local\\Microsoft\\Edge", "AppData\\Local\\BraveSoftware")
+        )
+    | extend
+        DetectionMethod = case(
+            (ProcessCommandLine has_any (logFiles) or (InitiatingProcessFileName =~ "history" and ProcessCommandLine has "-c")), "Linux Log Clearing (T1070.003)",
+            (ProcessCommandLine has_any (credentialFiles)), "Browser Credential Harvesting (T1555.003)",
+            "Unknown Endpoint TTP"
+        ),
+        Indicator = ProcessCommandLine
+    | project
+        Timestamp,
+        DeviceName,
+        DetectionMethod,
+        Indicator,
+        InitiatingProcessAccountName,
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine
+)
+| union
+(
+    // comment("Part 2: Detects network C2 communications to known malicious domains.")
+    (
+        DnsEvents
+        | where Name in~ (saltTyphoonDomains)
+        | extend
+            DetectionMethod = "C2 Communication via DNS (T1071)",
+            Indicator = Name,
+            InitiatingProcessFileName = tostring(parse_json(InitiatingProcessFolderPath)[0])
+        | project-away InitiatingProcessFolderPath
+    )
+    | union
+    (
+        DeviceNetworkEvents
+        | where RemoteUrl in~ (saltTyphoonDomains)
+        | extend
+            DetectionMethod = "C2 Communication via HTTP/S (T1071)",
+            Indicator = RemoteUrl
+    )
+    | project
+        Timestamp,
+        DeviceName,
+        DetectionMethod,
+        Indicator,
+        InitiatingProcessAccountName,
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine
+)
+// comment("FP Tuning: Legitimate admin scripts may clear logs or backup browser data. If specific scripts or password managers cause FPs, exclude their 'InitiatingProcessFileName' from the query.")
+| summarize
+    StartTime = min(Timestamp),
+    EndTime = max(Timestamp),
+    Detections = make_set(DetectionMethod),
+    Indicators = make_set(Indicator),
+    Processes = make_set(InitiatingProcessFileName)
+    by DeviceName, InitiatingProcessAccountName

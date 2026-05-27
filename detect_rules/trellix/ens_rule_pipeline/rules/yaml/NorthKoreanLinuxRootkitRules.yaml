@@ -1,0 +1,71 @@
+- type: expert
+  name: Detect North Korean Linux Rootkit Artifacts (tracker-fs & pcicard)
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "**" }
+       }
+       Target {
+          Match FILE {
+             Include OBJECT_NAME { -v "/usr/lib64/tracker-fs" -v "/usr/include/tracker-fs/tracker-efs" -v "/etc/init.d/tracker-fs" -v "/etc/rc2.d/S55tracker-fs" -v "/etc/rc3.d/S55tracker-fs" -v "/etc/rc5.d/S55tracker-fs" -v "/proc/acpi/pcicard" }
+             Include -access "CREATE,EXECUTE"
+          }
+       }
+    }
+  action: Report
+  severity: Critical
+  enabled: true
+  description: "Detects creation or execution of files/paths directly tied to the North Korean Linux rootkit leaked in Phrack #72 (August 2025, attributed to Kimsuky/APT43). Includes hidden kernel module (/usr/lib64/tracker-fs), backdoor (/usr/include/tracker-fs/tracker-efs), init scripts, and magic-packet socket (/proc/acpi/pcicard). Extremely high-fidelity IOCs; very low false positives. Tune only if legitimate software uses identical paths (rare)."
+- type: expert
+  name: Detect Kernel Taint by Unsigned Module Load
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "**" }
+       }
+       Target {
+          Match FILE {
+             Include OBJECT_NAME { -v "/proc/sys/kernel/tainted" }
+             Include -access "WRITE"
+             Include -value_data "*1*"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects writes to /proc/sys/kernel/tainted with value 1 — indicates unsigned kernel module loading, a core TTP of the North Korean rootkit for hiding processes/files. High-fidelity on Linux; tune for legitimate unsigned modules (e.g., drivers)."
+- type: expert
+  name: Detect Suspicious Shell History Evasion
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "bash" -v "sh" -v "zsh" -v "ksh" -v "ln" }
+       }
+       Target {
+          Match PROCESS {
+             Include OBJECT_NAME { -v "**" }
+             Include -access "CREATE"
+             Include -command_line "*--noprofile*"
+             Include -command_line "*--norc*"
+             Include -command_line "*HISTFILE=/dev/null*"
+             Include -command_line "*HISTORY=/dev/null*"
+             Include -command_line "*BASH_HISTORY=/dev/null*"
+             Include -command_line "*unset HISTFILE*"
+             Include -command_line "*unset HISTORY*"
+             Include -command_line "*TMOUT=0*"
+             Include -command_line "*-sf*/dev/null*.bash_history*"
+             Include -command_line "*-sf*/dev/null*.zsh_history*"
+             Include -command_line "*-sf*/dev/null*.zhistory*"
+             Include -command_line "*-sf*/dev/null*.history*"
+             Include -command_line "*-sf*/dev/null*.sh_history*"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects shell processes or ln commands disabling shell history logging (HISTFILE=/dev/null, unset HISTFILE, --norc, etc.) — anti-forensic technique used by advanced actors (including North Korean rootkit operators) to evade audit trails. Tune for legitimate scripts using --noprofile/--norc or history redirection."

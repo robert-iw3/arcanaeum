@@ -1,0 +1,75 @@
+---
+- name: Deploy Malware Sandbox container
+  hosts: localhost
+  connection: winrm
+  vars:
+    container_runtime: "{{ container_runtime | default('docker') }}"
+    kubernetes_replicas: "{{ kubernetes_replicas | default(1) }}"
+    evidence_tool: "{{ evidence_tool | default('magnet') }}"
+    cuckoo_vm_ip: "{{ cuckoo_vm_ip | default('192.168.56.10') }}"
+  tasks:
+    - name: Install Chocolatey
+      win_chocolatey:
+        name: chocolatey
+        state: present
+
+    - name: Install container runtime
+      block:
+        - name: Install Docker Desktop
+          win_shell: |
+            Invoke-WebRequest -Uri https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe -OutFile DockerInstaller.exe
+            Start-Process -Wait -FilePath DockerInstaller.exe -ArgumentList 'install --quiet'
+          when: container_runtime == 'docker'
+
+        - name: Install Podman
+          win_shell: |
+            Invoke-WebRequest -Uri https://podman.io/releases/podman-installer.exe -OutFile PodmanInstaller.exe
+            Start-Process -Wait -FilePath PodmanInstaller.exe -ArgumentList '/quiet'
+          when: container_runtime == 'podman'
+
+        - name: Install Kubernetes CLI and initialize cluster
+          win_shell: |
+            choco install kubernetes-cli -y
+            kubeadm init --pod-network-cidr=10.244.0.0/16
+          when: container_runtime == 'kubernetes'
+
+    - name: Health check for container runtime
+      win_shell: |
+        if ("{{ container_runtime }}" -eq "docker") {
+          docker info
+        } elseif ("{{ container_runtime }}" -eq "podman") {
+          podman info
+        } else {
+          kubectl cluster-info
+          kubectl apply -f C:\vagrant\kubernetes-deployment.yaml --dry-run=client
+        }
+      register: runtime_check
+      failed_when: runtime_check.rc != 0
+      retries: 3
+      delay: 10
+
+    - name: Build container image
+      win_shell: |
+        if ("{{ container_runtime }}" -eq "docker") {
+          docker build -t malware-sandbox C:\vagrant
+        } elseif ("{{ container_runtime }}" -eq "podman") {
+          podman build -t malware-sandbox C:\vagrant
+        }
+      when: container_runtime != 'kubernetes'
+
+    - name: Run container
+      win_shell: |
+        if ("{{ container_runtime }}" -eq "docker") {
+          docker run -it --isolation=hyperv --network=none -v C:\vagrant\Malware:/Malware -v C:\vagrant\Collections:/Collections -v C:\vagrant\Logs:/Logs malware-sandbox python malware_sandbox.py --malws-path /Malware --collection-dir /Collections --parallel 4 --volatility-plugins windows.pslist,windows.netscan --simulate-network --evidence-tool {{ evidence_tool }} {{ '--cuckoo-url ' + cuckoo_vm_ip + ':8090' if evidence_tool == 'cuckoo' else '' }}
+        } elseif ("{{ container_runtime }}" -eq "podman") {
+          podman run -it --isolation=hyperv --network=none -v C:\vagrant\Malware:/Malware:Z -v C:\vagrant\Collections:/Collections:Z -v C:\vagrant\Logs:/Logs:Z malware-sandbox python malware_sandbox.py --malws-path /Malware --collection-dir /Collections --parallel 4 --volatility-plugins windows.pslist,windows.netscan --simulate-network --evidence-tool {{ evidence_tool }} {{ '--cuckoo-url ' + cuckoo_vm_ip + ':8090' if evidence_tool == 'cuckoo' else '' }}
+        }
+      when: container_runtime != 'kubernetes'
+
+    - name: Deploy to Kubernetes
+      win_shell: |
+        powershell -Command "((Get-Content -Path C:\vagrant\kubernetes-deployment.yaml -Raw) -replace 'replicas: 1', 'replicas: {{ kubernetes_replicas }}') | Set-Content -Path C:\vagrant\kubernetes-deployment.yaml"
+        powershell -Command "((Get-Content -Path C:\vagrant\kubernetes-deployment.yaml -Raw) -replace 'value: \"magnet\"', 'value: \"{{ evidence_tool }}\"') | Set-Content -Path C:\vagrant\kubernetes-deployment.yaml"
+        powershell -Command "((Get-Content -Path C:\vagrant\kubernetes-deployment.yaml -Raw) -replace 'value: \"http://192.168.56.10:8090\"', 'value: \"http://{{ cuckoo_vm_ip }}:8090\"') | Set-Content -Path C:\vagrant\kubernetes-deployment.yaml"
+        kubectl apply -f C:\vagrant\kubernetes-deployment.yaml
+      when: container_runtime == 'kubernetes'

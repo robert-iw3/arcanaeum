@@ -1,0 +1,61 @@
+rule insecure_remote_access_to_ot_environment {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects common remote access protocols (SSH, RDP, Telnet, VNC) communicating between a critical OT asset and a public IP address. This activity could indicate exploitation of insecure remote access configurations, which is a common initial access vector into OT/ICS environments. This rule requires a reference list '%ot_asset_ip_ranges' to be populated with OT network segments."
+    reference = "https://attack.mitre.org/techniques/T1133/"
+    tags = "ICS, OT, INITIAL_ACCESS, NETWORK, WINDOWS"
+    tactic = "TA0001"
+    technique = "T1133"
+    false_positives = "Legitimate remote access by vendors or administrators. This rule requires tuning by populating the '%ot_asset_ip_ranges' reference list with your organization's OT network segments and whitelisting known-good external IP addresses or services."
+    severity = "HIGH"
+
+  events:
+    $conn.metadata.event_type = "NETWORK_CONNECTION"
+    // Detects common remote access protocols by port
+    $conn.target.port in (22, 23, 3389, 5900, 5901, 5902)
+
+    // This logic identifies a connection between an asset in the defined OT network space and a public IP address.
+    // The reference list '%ot_asset_ip_ranges' MUST be populated for this rule to be effective.
+    (
+      // Case 1: Outbound connection from an OT asset to a public IP
+      (
+        $conn.principal.ip in %ot_asset_ip_ranges and
+        not (
+          net.ip_in_range_cidr($conn.target.ip, "10.0.0.0/8") or
+          net.ip_in_range_cidr($conn.target.ip, "172.16.0.0/12") or
+          net.ip_in_range_cidr($conn.target.ip, "192.168.0.0/16") or
+          net.ip_in_range_cidr($conn.target.ip, "127.0.0.0/8") or
+          net.ip_in_range_cidr($conn.target.ip, "169.254.0.0/16")
+        )
+      )
+      or
+      // Case 2: Inbound connection from a public IP to an OT asset
+      (
+        $conn.target.ip in %ot_asset_ip_ranges and
+        not (
+          net.ip_in_range_cidr($conn.principal.ip, "10.0.0.0/8") or
+          net.ip_in_range_cidr($conn.principal.ip, "172.16.0.0/12") or
+          net.ip_in_range_cidr($conn.principal.ip, "192.168.0.0/16") or
+          net.ip_in_range_cidr($conn.principal.ip, "127.0.0.0/8") or
+          net.ip_in_range_cidr($conn.principal.ip, "169.254.0.0/16")
+        )
+      )
+    )
+
+  outcome:
+    $risk_score = 75
+    // Identify which IP and hostname belong to the OT asset vs the external entity
+    $ot_asset_ip = if($conn.principal.ip in %ot_asset_ip_ranges, $conn.principal.ip, $conn.target.ip)
+    $ot_asset_hostname = if($conn.principal.ip in %ot_asset_ip_ranges, $conn.principal.hostname, $conn.target.hostname)
+    $external_ip = if($conn.principal.ip in %ot_asset_ip_ranges, $conn.target.ip, $conn.principal.ip)
+    $external_hostname = if($conn.principal.ip in %ot_asset_ip_ranges, $conn.target.hostname, $conn.principal.hostname)
+
+    $port = $conn.target.port
+    // Map port to likely protocol for context
+    $protocol = if($conn.target.port == 22, "SSH", if($conn.target.port == 23, "Telnet", if($conn.target.port == 3389, "RDP", "VNC")))
+    $direction = if($conn.principal.ip in %ot_asset_ip_ranges, "Outbound", "Inbound")
+
+  condition:
+    $conn
+}

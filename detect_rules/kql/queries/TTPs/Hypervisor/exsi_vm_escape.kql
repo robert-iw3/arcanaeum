@@ -1,0 +1,51 @@
+// Name: Multi-Layered ESXi VM Escape Toolkit Detection
+// Author: RW
+// Date: 2026-01-09
+// Description: This rule detects multiple stages of the ESXi VM Escape toolkit attack chain by combining high-fidelity file hash indicators with specific behavioral patterns observed during the attack.
+// References:
+// False Positive Sensitivity: Medium
+// - The use of 'devcon.exe' or 'netsh.exe' might be legitimate in some admin scripts. Consider adding parent process or user filtering to reduce noise.
+// - The execution of 'kdu.exe' is highly suspicious and unlikely to be a false positive.
+let MaliciousHashes = dynamic([
+    "37972a232ac6d8c402ac4531430967c1fd458b74a52d6d1990688d88956791a7", // MAESTRO
+    "4614346fc1ff74f057d189db45aa7dc25d6e7f3d9b68c287a409a53c86dca25e", // GetShell Plugin
+    "c3f8da7599468c11782c2332497b9e5013d98a1030034243dfed0cf072469c89", // VSOCKpuppet
+    "2bc5d02774ac1778be22cace51f9e35fe7b53378f8d70143bf646b68d2c0f94c"  // MyDriver.sys
+]);
+union DeviceProcessEvents, DeviceFileEvents
+| where Timestamp > ago(1d)
+| where
+    // Layer 1: Known malicious file hashes from the ESXi exploit toolkit.
+    (isnotempty(SHA256) and SHA256 in (MaliciousHashes))
+    or
+    // Layer 2: Disabling of VMware VMCI devices via devcon.exe.
+    (ActionType == "ProcessCreated" and FileName =~ "devcon.exe" and ProcessCommandLine has "disable" and (ProcessCommandLine has @"PCI\VEN_15AD&DEV_0740" or ProcessCommandLine has @"ROOT\VMWVMCIHOSTDEV"))
+    or
+    // Layer 3: Execution of the Kernel Driver Utility (KDU).
+    (ActionType == "ProcessCreated" and FileName =~ "kdu.exe")
+    or
+    // Layer 4: Host network isolation using netsh.
+    (ActionType == "ProcessCreated" and FileName =~ "netsh.exe" and ProcessCommandLine has "advfirewall" and ProcessCommandLine has "add" and ProcessCommandLine has "rule" and ProcessCommandLine has "action=block" and ProcessCommandLine has "dir=out" and ProcessCommandLine has "remoteip=0.0.0.0-255.255.255.255")
+    or
+    // Layer 5: Modification of the ESXi inetd.conf file.
+    (FolderPath endswith "/var/run/inetd.conf" and ActionType in ("FileCreated", "FileRenamed", "FileModified"))
+| extend DetectionReason = case(
+    SHA256 in (MaliciousHashes), "Known ESXi Exploit Toolkit file hash detected",
+    FileName =~ "devcon.exe" and ProcessCommandLine has "disable", "VMware VMCI device disabled via devcon.exe",
+    FileName =~ "kdu.exe", "Kernel Driver Utility (KDU) execution detected",
+    FileName =~ "netsh.exe" and ProcessCommandLine has "action=block", "Host network isolation via netsh detected",
+    FolderPath endswith "/var/run/inetd.conf", "ESXi inetd.conf file modified",
+    "Unknown trigger"
+)
+| project-reorder
+    Timestamp,
+    DeviceName,
+    DetectionReason,
+    ActionType,
+    FileName,
+    ProcessCommandLine,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    AccountName,
+    FolderPath,
+    SHA256

@@ -1,0 +1,70 @@
+rule salt_typhoon_ttp_1 {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects a collection of endpoint-based Tactics, Techniques, and Procedures (TTPs) associated with the Salt Typhoon APT group. This rule identifies PowerShell downgrade attacks, specific scheduled task creation for persistence, and LSASS memory dumping via comsvcs.dll."
+    tags = "SALT_TYPHOON, FAMOUSSPARROW, GHOSTEMPEROR, APT, CHINA, POWERSHELL, SCHEDULED_TASK, LSASS"
+    tactic = "TA0002, TA0003, TA0005, TA0006"
+    technique = "T1059.001, T1053.005, T1003.001, T1562"
+    false_positives = "Legitimate administrative scripts or security tools might perform similar actions. The scheduled task name 'test3' could potentially be used by legitimate applications, although it is unlikely. Review the parent process and user context to validate."
+
+  events:
+    // Catches process creation events for multiple TTPs.
+    $process.metadata.event_type = "PROCESS_LAUNCH"
+
+    // The OR block combines multiple distinct TTPs into a single rule.
+    (
+      // TTP 1: PowerShell Downgrade Attack to bypass AMSI.
+      (
+        re.regex($process.target.process.file.full_path, `\\powershell\.exe$`) nocase and
+        re.regex($process.target.process.command_line, `\s-version\s+2`)
+      )
+      or
+      // TTP 2: Scheduled Task creation for persistence, using a name observed in Salt Typhoon campaigns.
+      (
+        re.regex($process.target.process.file.full_path, `\\schtasks\.exe$`) nocase and
+        re.regex($process.target.process.command_line, `\/create\s`) nocase and
+        re.regex($process.target.process.command_line, `\/tn\s+test3`) nocase
+      )
+      or
+      // TTP 3: LSASS Memory Dumping for credential access.
+      (
+        re.regex($process.target.process.file.full_path, `\\rundll32\.exe$`) nocase and
+        re.regex($process.target.process.command_line, `comsvcs\.dll`) nocase and
+        re.regex($process.target.process.command_line, `lsass`) nocase
+      )
+    )
+
+  outcome:
+    // Risk score can be adjusted based on environment sensitivity.
+    $risk_score = 65
+    $principal_hostname = $process.principal.hostname
+    $principal_user = $process.principal.user.userid
+    $target_process_command_line = $process.target.process.command_line
+    $target_process_path = $process.target.process.file.full_path
+    $parent_process_command_line = $process.principal.process.command_line
+
+    // Provides specific context on which TTP was matched for easier triage.
+    $technique_id = if(
+        re.regex($process.target.process.command_line, `\s-version\s+2`),
+        "T1059.001",
+        if(
+            re.regex($process.target.process.command_line, `\/tn\s+test3`),
+            "T1053.005",
+            "T1003.001"
+        )
+    )
+    $tactic = if(
+        $technique_id = "T1053.005",
+        "Persistence",
+        if(
+            $technique_id = "T1003.001",
+            "Credential Access",
+            "Defense Evasion" // PowerShell Downgrade
+        )
+    )
+    $threat_name = "Salt Typhoon"
+
+  condition:
+    $process
+}

@@ -1,0 +1,53 @@
+rule gcp_iam_role_update_for_privilege_escalation {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects attempts to update a custom IAM role to include high-privilege permissions. An attacker with the `iam.roles.update` permission on a custom role assigned to them can add arbitrary permissions to that role, effectively escalating their privileges."
+    false_positives = "Legitimate updates to custom IAM roles by administrators to grant necessary high-privilege permissions. Baselining for known administrative users or service accounts is recommended."
+    tags = "attack.privilege_escalation, attack.t1098.003, cloud, gcp"
+    tactic = "TA0004"
+    technique = "T1098.003"
+
+  events:
+    // Filter for successful IAM role update events in GCP audit logs.
+    $event.metadata.event_type = "GCP_AUDIT_LOG"
+    $event.metadata.product_name = "iam.googleapis.com"
+    $event.metadata.product_event_type = "google.iam.admin.v1.IAM.UpdateRole"
+    $event.security_result.action = "ALLOW"
+
+    // Core detection: check if any added permission is considered high-privilege.
+    any perm in $event.udm.additional.request.role.includedPermissions satisfies (
+      perm = "iam.serviceAccountKeys.create" or
+      perm = "iam.serviceAccounts.actAs" or
+      perm = "iam.serviceAccounts.getAccessToken" or
+      perm = "iam.serviceAccounts.signBlob" or
+      perm = "iam.serviceAccounts.signJwt" or
+      perm = "iam.roles.update" or
+      strings.ends_with(perm, "setIamPolicy") or // Catches various setIamPolicy permissions
+      perm = "deploymentmanager.deployments.create" or
+      perm = "cloudbuild.builds.create"
+    )
+
+    // Placeholder for the principal user to use in the match section.
+    $principal_user = $event.principal.user.userid
+
+    // Placeholder for filtering out known legitimate accounts to reduce noise.
+    // For example: not $event.principal.user.userid in %gcp_iam_admins
+
+  match:
+    // Group events by the user over a 10 minute window.
+    $principal_user over 10m
+
+  outcome:
+    // Set risk score and extract key fields for investigation.
+    $risk_score = 50
+    $principal_ip = array_distinct($event.principal.ip)
+    $principal_user_id = array_distinct($event.principal.user.userid)
+    $target_role = array_distinct($event.target.resource.name)
+    // Capture all permissions added in the request for context.
+    $added_permissions = array_distinct($event.udm.additional.request.role.includedPermissions)
+    $event_count = count_distinct($event.metadata.id)
+
+  condition:
+    $event
+}

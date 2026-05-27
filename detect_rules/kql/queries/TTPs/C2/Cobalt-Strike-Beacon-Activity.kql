@@ -1,0 +1,69 @@
+// This rule detects Cobalt Strike beacon activity by looking for two common patterns:
+// 1. Creation of named pipes with patterns known to be used by Cobalt Strike for C2 and post-exploitation tasks.
+// 2. Suspicious process injection from common beacon host processes into other processes.
+// Author: RW
+// MITRE ATT&CK Tactics: Command and Control, Defense Evasion, Privilege Escalation
+// MITRE ATT&CK Techniques: T1071, T1055
+
+let timeframe = 1d;
+
+(union isouter=true
+    (
+        // Detects known Cobalt Strike named pipe patterns
+        let cs_pipe_patterns = dynamic([
+            "\\pipe\\msagent_",
+            "\\pipe\\MSSE-",
+            "\\pipe\\postex_",
+            "\\pipe\\status_",
+            "\\pipe\\csexec_",
+            "\\pipe\\csrev_",
+            "\\pipe\\imposecost" // Specific pattern from reference article
+        ]);
+        DeviceEvents
+        | where Timestamp > ago(timeframe)
+        | where ActionType == "NamedPipeCreated"
+        | where FileName has_any (cs_pipe_patterns)
+        // FP Tuning: Exclude legitimate applications that may use similar pipe names, if any are found in your environment.
+        | project
+            Timestamp,
+            DetectionMethod = "CobaltStrikeNamedPipe",
+            DeviceName,
+            InitiatingProcessFileName,
+            InitiatingProcessId,
+            InitiatingProcessCommandLine,
+            Details = strcat("Cobalt Strike named pipe created: ", FileName),
+            HostCustomEntity = DeviceName,
+            ProcessCustomEntity = InitiatingProcessId
+    ),
+    (
+        // Detects suspicious process injection often used by Cobalt Strike beacons for post-exploitation
+        let injection_source_processes = dynamic([
+            "rundll32.exe",
+            "svchost.exe",
+            "regsvr32.exe",
+            "dllhost.exe",
+            "powershell.exe"
+        ]);
+        DeviceEvents
+        | where Timestamp > ago(timeframe)
+        | where ActionType == "CreateRemoteThread"
+        // An injected process (the beacon) performing further injection is a strong indicator.
+        | where InitiatingProcessFileName in (injection_source_processes)
+        // Injection into a process that is not a direct child is highly suspicious.
+        | where InitiatingProcessId != TargetProcessParentId
+        // Exclude self-injection, which can be normal behavior.
+        | where InitiatingProcessId != TargetProcessId
+        // FP Tuning: Exclude legitimate security or management tools that perform cross-process injection.
+        // | where not (InitiatingProcessFolderPath contains @"C:\Program Files\SomeLegitApp\")
+        | project
+            Timestamp,
+            DetectionMethod = "SuspiciousCrossProcessInjection",
+            DeviceName,
+            InitiatingProcessFileName,
+            InitiatingProcessId,
+            InitiatingProcessCommandLine,
+            Details = strcat("Process ", InitiatingProcessFileName, " (", InitiatingProcessId, ") injected into ", TargetProcessFileName, " (", TargetProcessId, ")"),
+            HostCustomEntity = DeviceName,
+            ProcessCustomEntity = InitiatingProcessId
+    )
+)

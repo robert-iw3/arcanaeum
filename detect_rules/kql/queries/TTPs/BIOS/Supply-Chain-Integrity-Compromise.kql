@@ -1,0 +1,49 @@
+// Rule Title: Suspicious Child Process of Software Update Executable
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects when a known software update process spawns a suspicious child process, such as a command shell
+//              or scripting engine. This behavior can be an indicator of a supply chain attack, where a legitimate and
+//              signed updater is trojanized to execute malicious code, as seen in attacks like SUNBURST and ShadowHammer.
+// MITRE TTPs: T1195
+
+// Define a list of common software update executables.
+let trustedUpdaters = dynamic([
+    "SolarWinds.BusinessLayerHost.exe", // Associated with SUNBURST
+    "AsusLiveUpdate.exe", // Associated with ShadowHammer
+    "LiveUpdate.exe",
+    "DellCommandUpdate.exe",
+    "LenovoVantage.exe",
+    "HPImageAssistant.exe",
+    "AdobeARM.exe",
+    "GoogleUpdate.exe",
+    "Update.exe"
+]);
+// Define a list of suspicious child processes that are not typically spawned by updaters.
+let suspiciousChildren = dynamic([
+    "powershell.exe",
+    "pwsh.exe",
+    "cmd.exe",
+    "rundll32.exe",
+    "cscript.exe",
+    "wscript.exe",
+    "mshta.exe",
+    "bitsadmin.exe"
+]);
+DeviceProcessEvents
+// Identify a known updater process creating a new process.
+| where InitiatingProcessFileName in~ (trustedUpdaters)
+// Check if the new process is a suspicious shell or script engine.
+| where FileName in~ (suspiciousChildren)
+// FP Tuning: Some legitimate installers use command scripts. If legitimate activity is flagged,
+// consider adding command-line exclusions for known good scripts to reduce noise.
+// For example: `and not (ProcessCommandLine contains "my-legit-install-script.cmd")`
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    FileName,
+    ProcessCommandLine,
+    MD5,
+    SHA256

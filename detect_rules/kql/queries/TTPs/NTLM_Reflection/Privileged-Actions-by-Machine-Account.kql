@@ -1,0 +1,30 @@
+// Name: Privileged Actions by Machine Account
+// Author: RW
+// Date: 2025-07-31
+// Description: Detects when a machine account (e.g., SRV1$) executes privileged commands, such as spawning a shell or dumping credentials. This behavior is highly anomalous and can be an indicator of a successful NTLM relay attack like CVE-2025-33073, where the machine account's authentication is leveraged to gain SYSTEM-level access.
+// Mitre TTPs: T1003.002, T1003.003, T1059
+// References:
+DeviceProcessEvents
+// Look for processes initiated by a machine account (name ends with $)
+| where InitiatingProcessAccountName endswith "$"
+// Filter for specific privileged actions associated with credential dumping or interactive shells
+| where
+    // Detects command shell execution
+    FileName in~ ("cmd.exe", "powershell.exe", "pwsh.exe") or
+    // Detects SAM hive dumping via reg.exe
+    (FileName =~ "reg.exe" and ProcessCommandLine has_all ("save", "hklm", "sam")) or
+    // Detects use of Volume Shadow Copy for offline credential access
+    (FileName =~ "vssadmin.exe" and ProcessCommandLine has "create shadow") or
+    // Detects LSASS memory dumping via comsvcs.dll
+    (FileName =~ "rundll32.exe" and ProcessCommandLine has_all ("comsvcs.dll", "MiniDump"))
+// FP Tuning: Legitimate systems management tools (e.g., SCCM, backup software) might perform some of these actions under the machine account context.
+// If legitimate activity is found, investigate the parent process and command line to create a specific exclusion.
+// For example: | where ParentProcessFileName != "legit_management_agent.exe"
+| project
+    Timestamp,
+    DeviceName,
+    InitiatingProcessAccountName,
+    FileName,
+    ProcessCommandLine,
+    ParentProcessFileName,
+    ParentProcessCommandLine

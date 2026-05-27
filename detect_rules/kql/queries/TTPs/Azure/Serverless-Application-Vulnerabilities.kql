@@ -1,0 +1,57 @@
+// Name: Azure Serverless Application Misconfiguration
+// Author: RW
+// Date: 2025-08-31
+// Description: Detects configuration changes to Azure App Services or Function Apps that weaken their security posture.
+// This includes disabling authentication or adding application settings that appear to contain plaintext secrets instead
+// of using Azure Key Vault. These actions can make serverless applications vulnerable to unauthorized access or data exposure.
+// Tactic: Credential Access, Defense Evasion
+// Technique: T1538
+
+let lookback = 1d;
+
+// Define a list of trusted users or service principals that are allowed to perform these actions.
+// This list should be populated with known administrative and automation accounts to reduce false positives.
+let trustedCallers = dynamic([]); // e.g. dynamic(["admin@example.com", "service-principal-guid"])
+
+// Define keywords often found in the names of settings that store secrets.
+let secretSettingKeywords = dynamic(['key', 'secret', 'password', 'token', 'connectionstring']);
+
+// Base query for App Service/Function App configuration changes.
+let ConfigChanges = AzureActivity
+| where TimeGenerated > ago(lookback)
+| where OperationNameValue == "MICROSOFT.WEB/SITES/CONFIG/WRITE"
+| where ActivityStatusValue == "Succeeded"
+// Exclude trusted callers to reduce noise from legitimate administrative activity.
+| where Caller !in (trustedCallers)
+| extend requestBody = todynamic(Properties).requestbody;
+
+// Pattern 1: Detects when built-in authentication is disabled on an App Service or Function App.
+let AuthDisabled = ConfigChanges
+// The 'authsettings' property is present when authentication settings are modified.
+| where tostring(requestBody.properties) has 'authsettings'
+// Check if the 'enabled' flag within 'authsettings' is explicitly set to false.
+| where tostring(requestBody.properties.authsettings.enabled) == "false"
+| extend
+    Activity = "App Service Authentication Disabled",
+    Details = strcat("Authentication was disabled for App Service/Function: ", tostring(requestBody.name)),
+    Tactic = "Defense Evasion"
+| project TimeGenerated, Activity, Tactic, Technique="T1538", User=Caller, UserIpAddress=CallerIpAddress, ResourceName=tostring(requestBody.name), Details, CorrelationId;
+
+// Pattern 2: Detects when an application setting is added that appears to contain a plaintext secret.
+let PlaintextSecretAdded = ConfigChanges
+| where isnotempty(requestBody.properties.appSettings)
+| mv-expand setting = requestBody.properties.appSettings
+// Check for settings with names that suggest they are secrets.
+| where tostring(setting.name) has_any (secretSettingKeywords)
+// Ensure the value is not empty and is not a Key Vault reference, which is the recommended practice for storing secrets.
+| where isnotempty(setting.value) and not(tostring(setting.value) matches regex "@Microsoft.KeyVault\\\\(SecretUri=.*")
+// False Positive Consideration: Some applications may use settings with these keywords for non-secret values.
+// Review the specific application and setting name. Consider refining the 'secretSettingKeywords' list to be more specific to your environment.
+| extend
+    Activity = "Potential Plaintext Secret in App Setting",
+    Details = strcat("A non-Key Vault secret named '", tostring(setting.name), "' was added to App Service/Function: ", tostring(requestBody.name)),
+    Tactic = "Credential Access"
+| project TimeGenerated, Activity, Tactic, Technique="T1538", User=Caller, UserIpAddress=CallerIpAddress, ResourceName=tostring(requestBody.name), Details, CorrelationId;
+
+// Combine the results from both patterns.
+union AuthDisabled, PlaintextSecretAdded

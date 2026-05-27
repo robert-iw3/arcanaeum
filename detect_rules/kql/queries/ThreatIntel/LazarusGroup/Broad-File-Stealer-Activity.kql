@@ -1,0 +1,44 @@
+// title: Lazarus Group Broad File Stealer Activity
+// description: Detects a pattern of behavior associated with the Lazarus Group's broad file stealer, where a process, typically a scripting engine, accesses an unusually high number of sensitive files (e.g., those containing keywords like 'secret', 'wallet', or extensions like '.pdf', '.docx') and subsequently exfiltrates a large volume of data. This indicates a "smash and grab" data theft operation.
+// author: RW
+// date: 2025-07-31
+// references:
+// mitre_attack_id: T1005, T1020, T1041
+// mitre_attack_technique: Data from Local System, Automated Exfiltration, Exfiltration Over C2 Channel
+// mitre_attack_phase: Collection, Exfiltration
+// security_domain: endpoint, network
+// datamodel: Process, File, Network
+// risk_score: 80
+// severity: High
+
+// Define detection parameters
+let time_window = 10m;
+let file_count_threshold = 20;
+let bytes_out_threshold = 500000; // 500 KB
+
+// Define suspicious processes and sensitive file patterns based on the report
+let suspiciousProcesses = dynamic(["node.exe", "python.exe", "python3.exe", "pwsh.exe", "powershell.exe"]);
+let sensitiveFilePatterns = dynamic(["*.env*", "*secret*", "*wallet*", "*mnemonic*", "*.pdf", "*.docx", "*.csv", "*.json", "*.txt", "*keypair*", "*credential*", "*recovery*"]);
+
+// Use a union to combine file and network events for correlation
+union DeviceFileEvents, DeviceNetworkEvents
+// Filter for scripting engines likely to be abused for this task
+| where InitiatingProcessFileName in~ (suspiciousProcesses)
+| summarize
+    // Count distinct sensitive files accessed
+    DistinctSensitiveFilesAccessed = dcountif(FilePath, TableName == "DeviceFileEvents" and FileName has_any (sensitiveFilePatterns)),
+    // Sum outbound bytes, excluding local/private traffic
+    TotalBytesOut = sumif(TotalBytesSent, TableName == "DeviceNetworkEvents" and isnotempty(RemoteIP) and not(ipv4_is_private(RemoteIP)))
+    by bin(Timestamp, time_window), DeviceId, DeviceName, AccountName, InitiatingProcessFileName, InitiatingProcessId, InitiatingProcessCommandLine
+// Apply thresholds to identify the suspicious pattern of mass file access followed by data exfiltration
+| where DistinctSensitiveFilesAccessed > file_count_threshold and TotalBytesOut > bytes_out_threshold
+// comment: This detection correlates mass file access of sensitive documents with significant data exfiltration by the same process. Thresholds for 'DistinctSensitiveFilesAccessed' (default: >20) and 'TotalBytesOut' (default: >500KB) may need tuning for your environment. Legitimate backup, archival, or developer tools could trigger this; investigate the process and its command line to confirm malicious activity.
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessId,
+    DistinctSensitiveFilesAccessed,
+    TotalBytesOut

@@ -1,0 +1,90 @@
+rule warlock_ransomware_activity {
+  meta:
+    description = "This rule detects a combination of Tactics, Techniques, and Procedures (TTPs) associated with Warlock ransomware campaigns. It looks for evidence of discovery, credential access, defense evasion, lateral movement, and exfiltration."
+    author = "RW"
+    date = "2025-08-21"
+    reference = "https://www.trendmicro.com/en_us/research/25/h/warlock-ransomware.html"
+    tags = "attack.t1190, attack.t1087.002, attack.t1003.002, attack.t1562.001, attack.t1021.002, attack.t1572, attack.t1567.002, attack.t1486"
+    false_positives = "This is a correlation rule that combines multiple weak signals. Individual components, such as copying files to C$ or modifying RDP settings, might be legitimate administrative behavior. The rule's strength comes from detecting multiple distinct TTPs on the same host in a short period. Consider tuning by adding known administrative accounts or tools to an exclusion list."
+    severity = "high"
+
+  events:
+    // Tactic: Initial Access & Privilege Escalation (via SharePoint)
+    $ia_privesc_sp.metadata.event_type = "PROCESS_LAUNCH"
+    $ia_privesc_sp.principal.hostname = $hostname
+    re.regex($ia_privesc_sp.principal.process.file.full_path, `\\w3wp\.exe$`) nocase
+    re.regex($ia_privesc_sp.principal.process.command_line, `SharePoint`) nocase
+    re.regex($ia_privesc_sp.target.process.command_line, `(?i)(net user guest /active:yes|net localgroup administrators guest /add|New-GPO)`)
+
+    // Tactic: Discovery
+    $discovery.metadata.event_type = "PROCESS_LAUNCH"
+    $discovery.principal.hostname = $hostname
+    re.regex($discovery.target.process.command_line, `(?i)(nltest /domain_trusts|wmic product get name,identifyingnumber|net group "domain admins"|net group "domain computers"|net group "domain controllers"|quser)`)
+
+    // Tactic: Credential Access
+    $cred_mimikatz.metadata.event_type = "PROCESS_LAUNCH"
+    $cred_mimikatz.principal.hostname = $hostname
+    re.regex($cred_mimikatz.target.process.file.full_path, `\\mimikatz\.exe$`) nocase
+
+    $cred_reg_sam.metadata.event_type = "PROCESS_LAUNCH"
+    $cred_reg_sam.principal.hostname = $hostname
+    re.regex($cred_reg_sam.target.process.command_line, `reg\s+save\s+hklm\\sam`) nocase
+
+    $cred_reg_sec.metadata.event_type = "PROCESS_LAUNCH"
+    $cred_reg_sec.principal.hostname = $hostname
+    re.regex($cred_reg_sec.target.process.command_line, `reg\s+save\s+hklm\\security`) nocase
+
+    // Tactic: Defense Evasion
+    $de_killav.metadata.event_type = "PROCESS_LAUNCH"
+    $de_killav.principal.hostname = $hostname
+    re.regex($de_killav.principal.process.file.full_path, `\\vmtools\.exe$`) nocase
+    re.regex($de_killav.target.process.command_line, `taskkill|net stop`) nocase
+
+    $de_driver.metadata.event_type = "FILE_CREATION"
+    $de_driver.principal.hostname = $hostname
+    re.regex($de_driver.target.file.full_path, `\\googleApiUtil64\.sys$`) nocase
+
+    // Tactic: Command and Control
+    $c2_tunnel.metadata.event_type = "PROCESS_LAUNCH"
+    $c2_tunnel.principal.hostname = $hostname
+    re.regex($c2_tunnel.target.process.command_line, `tunnel.*run.*--token`) nocase
+
+    // Tactic: Lateral Movement
+    $lm_copy.metadata.event_type = "PROCESS_LAUNCH"
+    $lm_copy.principal.hostname = $hostname
+    re.regex($lm_copy.target.process.command_line, `copy.*\\c\$\\users\\public`) nocase
+
+    // Tactic: Persistence & Defense Evasion
+    $pers_rdp.metadata.event_type = "REGISTRY_MODIFICATION"
+    $pers_rdp.principal.hostname = $hostname
+    $pers_rdp.target.registry.value_data = "0"
+    re.regex($pers_rdp.target.registry.key, `SYSTEM\\CurrentControlSet\\Control\\Terminal Server\\(fDenyTSConnections|WinStations\\RDP-Tcp\\UserAuthentication)$`) nocase
+
+    // Tactic: Exfiltration
+    $exfil_rclone.metadata.event_type = "PROCESS_LAUNCH"
+    $exfil_rclone.principal.hostname = $hostname
+    re.regex($exfil_rclone.principal.process.file.full_path, `\\(rclone\.exe|TrendSecurity\.exe)$`) nocase
+    re.regex($exfil_rclone.target.process.command_line, `copy.*--protondrive-username.*--protondrive-password`) nocase
+
+  match:
+    $hostname over 1d
+
+  outcome:
+    // Group TTPs for the condition check
+    $ttp_ia_privesc = if(#ia_privesc_sp > 0, 1, 0)
+    $ttp_discovery = if(#discovery > 0, 1, 0)
+    $ttp_cred_access = if(#cred_mimikatz > 0 or #cred_reg_sam > 0 or #cred_reg_sec > 0, 1, 0)
+    $ttp_defense_evasion = if(#de_killav > 0 or #de_driver > 0, 1, 0)
+    $ttp_c2 = if(#c2_tunnel > 0, 1, 0)
+    $ttp_lateral_movement = if(#lm_copy > 0, 1, 0)
+    $ttp_persistence = if(#pers_rdp > 0, 1, 0)
+    $ttp_exfiltration = if(#exfil_rclone > 0, 1, 0)
+
+    // Risk score increases with more TTPs observed
+    $risk_score = ($ttp_ia_privesc + $ttp_discovery + $ttp_cred_access + $ttp_defense_evasion + $ttp_c2 + $ttp_lateral_movement + $ttp_persistence + $ttp_exfiltration) * 10
+    $principal_hostname = $hostname
+
+  condition:
+    // The condition is met if 2 or more distinct TTPs are observed on the same host
+    $ttp_ia_privesc + $ttp_discovery + $ttp_cred_access + $ttp_defense_evasion + $ttp_c2 + $ttp_lateral_movement + $ttp_persistence + $ttp_exfiltration >= 2
+}

@@ -1,0 +1,55 @@
+---
+- name: Copy Nomad client certs
+  loop:
+    - cert
+    - key
+  ansible.builtin.copy:
+    src: '.tmp/certs/nomad_client/{{ item }}.pem'
+    dest: /etc/certs.d/
+    owner: nomad
+    group: nomad
+    mode: "0600"
+
+- name: Make / shared
+  ansible.builtin.command: mount --make-shared /
+
+- name: Make / shared at startup
+  ansible.builtin.cron:
+    name: make / shared at startup
+    special_time: reboot
+    job: mount --make-shared /
+
+- name: Create Consul client Nomad token
+  run_once: true
+  delegate_to: localhost
+  ansible.builtin.import_role:
+    name: consul_token
+  vars:
+    token_file: .tmp/consul_token_nomad_client.txt
+    policy_name: nomad-client
+    policy_rules: |
+      agent_prefix "" {
+        policy = "read"
+      }
+
+      node_prefix "" {
+        policy = "read"
+      }
+
+      service_prefix "" {
+        policy = "write"
+      }
+
+      key_prefix "" {
+        policy = "read"
+      }
+
+- name: Copy nomad config
+  ansible.builtin.template:
+    src: nomad.hcl.j2
+    dest: /etc/nomad.d/nomad.hcl
+    owner: nomad
+    mode: "0600"
+  vars:
+    consul_token: '{{ lookup("file", ".tmp/consul_token_nomad_client.txt") }}'
+  notify: Restart Nomad

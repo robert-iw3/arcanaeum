@@ -1,0 +1,100 @@
+// Name: MuddyWater Campaign - NetBird and VBScript Activity
+// Author: RW
+// Date: 2025-08-21
+// Description: This rule detects TTPs and IOCs associated with a MuddyWater campaign targeting CFOs.
+// The campaign involves multi-stage phishing, VBScript downloaders, and the abuse of legitimate tools like NetBird and OpenSSH for persistence.
+// False Positive Sensitivity: Medium
+// References: https://hunt.io/blog/apt-muddywater-deploys-multi-stage-phishing-to-target-cfos
+
+// Define known IOCs from the campaign
+let MaliciousHashes = dynamic([
+    "23dda825f91be93f5de415886f17ad4a", // F-144822.zip
+    "5325de5231458543349152f0ea1cc3df", // F-144822.vbs
+    "0aa883cd659ef9957fded2516b70c341", // cis.vbs
+    "7ddc947ce8999c8a4a36ac170dcd7505", // CERT_LOCT_C3860_012025.vbs
+    "2cddc7a31ea289e8c1e5469f094e975a", // ATTESTATION_LETPOLC3860_13891333.vbs
+    "f359f20dbd4b1cb578d521052a1b0e9f"  // VIN_SELECTION_C3860_102024.vbs
+]);
+let MaliciousDomains = dynamic([
+    "googl-6c11f.firebaseapp.com",
+    "googl-6c11f.web.app",
+    "googl-165a0.web.app",
+    "cloud-ed980.firebaseapp.com",
+    "cloud-ed980.web.app",
+    "cloud-233f9.firebaseapp.com",
+    "cloud-233f9.web.app",
+    "my1cloudlive.com",
+    "my2cloudlive.com",
+    "web-16fe.app",
+    "my-sharepoint-inc.com"
+]);
+let MaliciousIPs = dynamic([
+    "192.3.95.152",
+    "198.46.178.135"
+]);
+let NetbirdSetupKey = "E48E4A70-4CF4-4A77-946B-C8E50A60855A";
+
+// Detect network connections to malicious domains or IPs
+(union isfuzzy=true
+    (
+        DeviceNetworkEvents
+        | where RemoteIP in (MaliciousIPs) or RemoteUrl has_any (MaliciousDomains) or RemoteDomain has_any (MaliciousDomains)
+        | extend Tactic = "Command and Control", Technique = "T1071.001", Activity = "Network Connection to C2"
+    ),
+    // Detect malicious files by hash
+    (
+        DeviceFileEvents
+        | where MD5 in (MaliciousHashes)
+        | extend Tactic = "Execution", Technique = "T1204.002", Activity = "Malicious File Detected"
+    ),
+    // Detect VBScript creating and executing a second stage payload
+    (
+        DeviceProcessEvents
+        | where InitiatingProcessFileName in ("wscript.exe", "cscript.exe")
+        | where ProcessCommandLine has "CreateObject(\"WinHttp.WinHttpRequest.5.1\")" and ProcessCommandLine has ".SaveToFile" and ProcessCommandLine has_all ("C:\\bin\\", ".vbs")
+        | extend Tactic = "Execution", Technique = "T1059.005", Activity = "VBScript Downloader Activity"
+    ),
+    // Detect the creation of the specific hidden admin user
+    (
+        DeviceProcessEvents
+        | where ProcessCommandLine has_all ("net", "user", "user", "Bs@202122", "/add")
+            and ProcessCommandLine has_all ("net", "localgroup", "Administrators", "user", "/add")
+        | extend Tactic = "Persistence", Technique = "T1136.001", Activity = "Hidden Admin Account Creation"
+    ),
+    // Detect registry modification to hide the user account from the login screen
+    (
+        DeviceRegistryEvents
+        | where RegistryKey has_all (@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList", "user")
+        | extend Tactic = "Defense Evasion", Technique = "T1564.002", Activity = "Hide User Account via Registry"
+    ),
+    // Detect silent installation of NetBird or OpenSSH
+    (
+        DeviceProcessEvents
+        | where FileName =~ "msiexec.exe"
+        | where ProcessCommandLine has_any ("netbird.msi", "OpenSSH.msi") and ProcessCommandLine has_any ("/qn", "/quiet", "/norestart")
+        // This may be noisy if NetBird is used legitimately. Consider adding process parent filters.
+        | extend Tactic = "Execution", Technique = "T1218.007", Activity = "Silent MSI Installation of NetBird/OpenSSH"
+    ),
+    // Detect NetBird execution with the specific setup key
+    (
+        DeviceProcessEvents
+        | where FileName =~ "netbird.exe"
+        | where ProcessCommandLine has NetbirdSetupKey
+        | extend Tactic = "Command and Control", Technique = "T1572", Activity = "NetBird Execution with Campaign-Specific Key"
+    ),
+    // Detect persistence via scheduled tasks for NetBird
+    (
+        DeviceProcessEvents
+        | where FileName =~ "schtasks.exe"
+        | where ProcessCommandLine has "/create" and ProcessCommandLine has_any ("Start Netbird", "ForceNetbirdRestart") and ProcessCommandLine has "net start netbird"
+        | extend Tactic = "Persistence", Technique = "T1053.005", Activity = "NetBird Persistence via Scheduled Task"
+    ),
+    // Detect RDP being enabled via registry key modification
+    (
+        DeviceRegistryEvents
+        | where RegistryKey =~ @"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Terminal Server"
+        | where RegistryValueName =~ "fDenyTSConnections" and RegistryValueData == "0"
+        | extend Tactic = "Lateral Movement", Technique = "T1021.001", Activity = "RDP Enabled via Registry"
+    )
+)
+| project-reorder TimeGenerated, DeviceName, Tactic, Technique, Activity, FileName, ProcessCommandLine, InitiatingProcessFileName, RemoteUrl, RemoteIP, MD5, RegistryKey, RegistryValueName, RegistryValueData

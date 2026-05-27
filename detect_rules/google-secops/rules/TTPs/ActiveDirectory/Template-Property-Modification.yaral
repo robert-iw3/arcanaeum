@@ -1,0 +1,37 @@
+rule Certificate_Template_Modification_ESC4_Detection {
+  meta:
+    author = "RW"
+    description = "Detects the modification of a certificate template to allow the requester to supply the subject name (ESC4), a potential privilege escalation technique."
+    severity = "HIGH"
+
+  events:
+    $e.metadata.event_type = "LDAP_MODIFICATION" // Windows Event ID 5136 maps to LDAP_MODIFICATION
+    $e.metadata.event_code = 5136 // Windows Event ID for Active Directory object modification
+
+    // Target the specific object class for certificate templates.
+    // The UDM field for Object_Class="pKICertificateTemplate" is target.resource.type.
+    $e.target.resource.type = "pKICertificateTemplate"
+
+    // Target the specific attribute being modified: msPKI-Certificate-Name-Flag.
+    // The UDM field for Attribute_LDAP_Display_Name is target.resource.attribute.ldap_display_name.
+    $e.target.resource.attribute.ldap_display_name = "msPKI-Certificate-Name-Flag"
+
+    // Check for the specific value indicating "Enrollee Supplies Subject" (flag 0x1).
+    // The UDM field for Attribute_Value is target.resource.attribute.new_value or attribute.value depending on the parser.
+    $e.target.resource.attribute.new_value = "1" or $e.target.resource.attribute.value = "1"
+
+    // FP Tuning: Consider excluding known administrative users or times.
+    // Use a Chronicle Reference List for known legitimate administrative accounts.
+    // Example: not $e.principal.user.userid in %known_good_admin_accounts
+
+  outcome:
+    $event_time = $e.metadata.event_timestamp.epoch_seconds // _time
+    $host = $e.principal.hostname // host
+    $subject_user_name = $e.principal.user.userid // Subject_User_Name
+    $object_dn = $e.target.resource.attribute.dn // Object_DN (Distinguished Name)
+    $attribute_name = $e.target.resource.attribute.ldap_display_name // Attribute_LDAP_Display_Name
+    $attribute_value = $e.target.resource.attribute.new_value or $e.target.resource.attribute.value // Attribute_Value
+
+  condition:
+    $e
+}

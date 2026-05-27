@@ -1,0 +1,52 @@
+title: Scattered Spider Phishing Domain Patterns
+id: 738fd52a-bbb8-499b-a4be-f53d04c70481
+status: experimental
+description: |
+  Detects network connections to domains matching patterns commonly used by the Scattered Spider threat group for phishing campaigns.
+  The group often registers domains that mimic legitimate corporate services by appending suffixes like "-sso", "-servicedesk", "-okta", "-vpn", or "-helpdesk" to a target's name (e.g., victim-sso.com).
+references:
+  - https://blog.checkpoint.com/research/exposing-scattered-spider-new-indicators-highlight-growing-threat-to-enterprises-and-aviation/
+  - https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-320a
+  - https://www.crowdstrike.com/en-us/blog/crowdstrike-services-observes-scattered-spider-escalate-attacks/
+  - https://cloud.google.com/blog/topics/threat-intelligence/unc3944-sms-phishing-sim-swapping-ransomware/
+author:
+date: 2025-07-10
+tags:
+  - attack.initial_access
+  - attack.t1566.002
+  - threat_group.scattered_spider
+logsource:
+  - category: dns
+    product: zeek
+  - category: proxy
+detection:
+  # These patterns match known naming conventions for Scattered Spider phishing domains.
+  selection_dns:
+    dns.question.name|endswith:
+      - '-sso.com'
+      - '-servicedesk.com'
+      - '-okta.com'
+      - '-vpn.com'
+      - '-help.com'
+      - '-helpdesk.com'
+      - '-corp.com'
+      - '-internal.com'
+      - '-servicenow.com'
+  selection_proxy:
+    url.domain|endswith:
+      - '-sso.com'
+      - '-servicedesk.com'
+      - '-okta.com'
+      - '-vpn.com'
+      - '-help.com'
+      - '-helpdesk.com'
+      - '-corp.com'
+      - '-internal.com'
+      - '-servicenow.com'
+  condition: selection_dns or selection_proxy
+falsepositives:
+  - Legitimate third-party services or even internal services could potentially
+    use similar domain naming conventions. It is recommended to baseline your
+    environment and add exceptions for known-good domains that match these
+    patterns.
+level: high

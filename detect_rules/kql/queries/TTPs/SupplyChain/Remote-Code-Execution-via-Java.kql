@@ -1,0 +1,54 @@
+// Name: RCE via Java Spawning Shell
+// Author: RW
+// Date: 2025-08-20
+// Description: Detects a pattern consistent with Remote Code Execution (RCE) vulnerabilities like Log4Shell (CVE-2021-44228), where a Java process
+// spawns a suspicious child process such as a shell or scripting engine. This is a strong indicator of post-exploitation activity.
+// Tactic: Execution
+// Technique: T1203 - Exploitation for Client Execution
+// False Positive Sensitivity: Medium
+
+// Define common Java parent processes that could be vulnerable to exploits like Log4Shell.
+let vulnerable_parents = dynamic([
+    "java.exe",
+    "javaw.exe"
+]);
+
+// Define suspicious child processes often used for post-exploitation command and control or payload download.
+let suspicious_children = dynamic([
+    "powershell.exe",
+    "pwsh.exe",
+    "cmd.exe",
+    "sh",
+    "bash",
+    "wscript.exe",
+    "cscript.exe",
+    "rundll32.exe",
+    "certutil.exe",
+    "bitsadmin.exe",
+    "curl.exe",
+    "wget.exe"
+]);
+
+DeviceProcessEvents
+// Look for process creation events.
+| where ActionType == "ProcessCreated"
+// Filter for a Java process being the parent.
+| where InitiatingProcessFileName in~ (vulnerable_parents)
+// Filter for the child process being a shell, scripting engine, or LOLBAS.
+| where FileName in~ (suspicious_children)
+// Potential for False Positives: Some applications, like build servers (e.g., Jenkins) or other management tools,
+// may legitimately spawn shells from a Java process.
+// Exclude known legitimate command lines for your environment to reduce noise.
+// For example: | where not (InitiatingProcessCommandLine has "jenkins" and ProcessCommandLine has "run-build.bat")
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    ParentProcessName = InitiatingProcessFileName,
+    ParentProcessCommandLine = InitiatingProcessCommandLine,
+    ChildProcessName = FileName,
+    ChildProcessCommandLine = ProcessCommandLine,
+    ParentProcessSigner = InitiatingProcessSigner,
+    ChildProcessSigner = Signer,
+    ReportId,
+    DeviceId

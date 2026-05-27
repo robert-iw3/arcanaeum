@@ -1,0 +1,47 @@
+// Name: Shade BIOS Device Control Hijack
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects a device control hijack technique used by Shade BIOS. The malware calls gBS->DisconnectController()
+//              to detach a device from OS drivers, followed immediately by gBS->ConnectController() to re-initialize the
+//              device for its own use, effectively seizing control at the firmware level.
+// RequiredDataConnectors: This detection requires a specialized data source capable of monitoring UEFI Boot Service (gBS) calls.
+// This is not a standard log source and may require hypervisor-level introspection (example: vmWare NSX/sVM/vShield)
+// or advanced EDR agents with firmware visibility (example: crowdstrike/sentinel one).
+// otherwise detect via mem forensic analysis: https://github.com/tandasat/kraft_dinner
+// Tactic: Persistence
+// TacticID: TA0003
+// Technique: Boot or Logon Autostart Execution: UEFI
+// TechniqueID: T1542.001
+
+let shadeBiosDeviceHijack = (v_table_name:string, v_time_window:timespan=5m) {
+    table(v_table_name)
+    // This query assumes a custom log table with fields for UEFI service call monitoring.
+    // The ActionType 'UefiServiceCall' and field 'Service' are placeholders.
+    | where ActionType == "UefiServiceCall" and AdditionalFields.Service in ("gBS->DisconnectController", "gBS->ConnectController")
+    // Order the events by time for each host to analyze the sequence.
+    | sort by DeviceName, TimeGenerated asc
+    // Use serialize to process events sequentially for each device.
+    | serialize by DeviceName
+    | extend PrevService = prev(tostring(AdditionalFields.Service), 1),
+             PrevTime = prev(TimeGenerated, 1),
+             ModulePath = tostring(AdditionalFields.ModulePath)
+    // Core detection logic: Find a ConnectController call that immediately follows a DisconnectController call.
+    | where AdditionalFields.Service == "gBS->ConnectController" and PrevService == "gBS->DisconnectController"
+    // Ensure the two calls happen in close succession.
+    | where TimeGenerated - PrevTime < v_time_window
+    // FP Tuning: Legitimate firmware updates or diagnostic tools could potentially perform this sequence.
+    // If false positives occur, they can be excluded by filtering on the module path.
+    // For example: | where ModulePath !contains "KnownGoodFirmwareTool.efi"
+    | project
+        TimeGenerated,
+        DeviceName,
+        ActionType,
+        HijackSequence = strcat(PrevService, " -> ", AdditionalFields.Service),
+        TimeBetweenCalls = TimeGenerated - PrevTime,
+        AttackerModule = ModulePath
+    | extend
+        timestamp = TimeGenerated,
+        HostCustomEntity = DeviceName
+};
+// Replace 'UefiEvents' with the actual table name containing UEFI monitoring logs.
+shadeBiosDeviceHijack('UefiEvents')

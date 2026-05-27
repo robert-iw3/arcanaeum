@@ -1,0 +1,11 @@
+rule_name,direction,port,protocol,remote_address,action,profile
+00_FW_HTTP_INBOUND_ALLOW,Inbound,80,TCP,192.168.100.0/24,Allow,Any
+01_FW_HTTPS_INBOUND_ALLOW,Inbound,443,TCP,192.168.100.0/24,Allow,Any
+02_FW_SSH_INBOUND_ALLOW,Inbound,22,TCP,2001:db8::/32,Allow,Private
+03_FW_RDP_INBOUND_ALLOW,Inbound,3389,TCP,192.168.100.10,Allow,Domain
+04_FW_DNS_INBOUND_ALLOW,Inbound,53,UDP,2001:db8:0:1::1/128,Allow,Any
+05_FW_SMTP_OUTBOUND_ALLOW,Outbound,25,TCP,172.16.0.0/16,Allow,Public
+06_FW_HTTPS_OUTBOUND_ALLOW,Outbound,443,TCP,2001:db8:1234::/48,Allow,Any
+07_FW_SSH_OUTBOUND_BLOCK,Outbound,22,TCP,198.51.100.0/24,Block,Any
+08_FW_DNS_OUTBOUND_ALLOW,Outbound,53,UDP,2001:db8:abcd::2/128,Allow,Private
+09_FW_HTTP_INBOUND_BLOCK,Inbound,80,TCP,203.0.113.0/24,Block,Public

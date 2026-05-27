@@ -1,0 +1,46 @@
+rule creation_of_virtual_network_interface_for_tunneling {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects the creation of a TUN/TAP virtual network interface. Adversaries create these interfaces to encapsulate and tunnel protocols like DNS, aiming to bypass network security controls and exfiltrate data or establish C2 channels. This activity is a key prerequisite for tools like Iodine, which explicitly tunnel traffic over DNS through a TUN interface."
+    tags = "DNS, TUNNELING, EVASION, C2"
+    tactic = "TA0011"
+    technique = "T1572, T1071.004"
+    false_positives = "Legitimate VPN software (e.g., OpenVPN), containerization platforms (Docker, Kubernetes), and manual network administration by system engineers."
+    severity = "MEDIUM"
+
+  events:
+    $p.metadata.event_type = "PROCESS_LAUNCH"
+
+    // Detects command-line patterns associated with creating TUN/TAP interfaces.
+    // This is a strong indicator of preparation for protocol tunneling.
+    (
+      // Catches commands like "ip tuntap add dev tun0 mode tun"
+      re.regex($p.target.process.command_line, `\bip\s+tuntap\s+add\b`) or
+
+      // Catches the use of the 'tunctl' utility to create interfaces
+      re.regex($p.target.process.command_line, `\btunctl\s+-(b|d|u|t|p|f)`) or
+
+      // Catches the execution of Iodine, a well-known DNS tunneling tool
+      $p.target.process.file.name = "iodine" or
+      $p.target.process.file.name = "iodined"
+    )
+
+    // Potential for false positives:
+    // Legitimate VPN clients or container orchestration tools might perform these actions.
+    // Consider adding process path or parent process allowlisting if legitimate activity is found.
+    // Example: not $p.principal.process.file.path = "/usr/bin/dockerd"
+
+  outcome:
+    $risk_score = 55
+    $principal_hostname = $p.principal.hostname
+    $principal_user = $p.principal.user.userid
+    $principal_process_path = $p.principal.process.file.full_path
+    $principal_process_command_line = $p.principal.process.command_line
+    $target_process_path = $p.target.process.file.full_path
+    $target_process_command_line = $p.target.process.command_line
+    $target_process_sha256 = $p.target.process.file.sha256
+
+  condition:
+    $p
+}

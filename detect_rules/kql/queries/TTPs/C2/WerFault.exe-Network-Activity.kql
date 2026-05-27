@@ -1,0 +1,46 @@
+// Name: Suspicious Network Connection by WerFault.exe
+// Author: RW
+// Date: 2025-08-02
+// Description: Detects network connections from the Windows Error Reporting process (WerFault.exe)
+//              to non-Microsoft domains. WerFault.exe is a known target for process injection, where
+//              attackers hijack it to use its legitimate network access for malicious C2 communications.
+//              Legitimate activity for this process is typically limited to Microsoft-owned domains for error reporting.
+// Tactic: Command and Control, Defense Evasion
+// Technique: T1055, T1036.003, T1071
+// False Positive Sensitivity: Medium. Connections to non-Microsoft domains could be legitimate in some edge cases,
+// such as through a corporate proxy or to a third-party crash reporting service integrated with an application.
+// Filtering by known corporate proxies or trusted domains may be necessary.
+
+// Define a list of known legitimate domains for WerFault.exe to connect to.
+let KnownGoodDomains = dynamic([
+    ".microsoft.com",
+    ".windows.com",
+    ".msftncsi.com",
+    ".live.com",
+    "watson.microsoft.com"
+]);
+
+DeviceNetworkEvents
+| where Timestamp > ago(1d)
+// Focus on network connections initiated by the Windows Error Reporting process.
+| where InitiatingProcessFileName =~ "werfault.exe"
+// Ensure it's the legitimate system utility to reduce basic masquerading false positives.
+| where InitiatingProcessFolderPath matches regex @"(?i)C:\\Windows\\(System32|SysWOW64)\\werfault.exe"
+// Filter out connections that have no remote URL, as we can't analyze them.
+| where isnotempty(RemoteUrl)
+// The core detection logic: find connections to domains NOT in our known good list.
+// This will also inherently catch connections to private IPs that do not resolve to a Microsoft domain.
+| where not(RemoteUrl has_any (KnownGoodDomains))
+// Further tuning: Exclude connections to known corporate proxies or other legitimate non-Microsoft services if they exist in your environment.
+// | where RemoteUrl !has "my-corp-proxy.com"
+| project
+    Timestamp,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessFolderPath,
+    RemoteUrl,
+    RemoteIP,
+    RemotePort,
+    InitiatingProcessId,
+    InitiatingProcessParentFileName

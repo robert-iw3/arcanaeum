@@ -1,0 +1,47 @@
+// Name: Unusual PowerShell Command-Line Flags
+// Author: RW
+// Date: 2025-08-11
+// Description: Detects PowerShell execution with suspicious command-line flags often used in malicious contexts to
+//              evade detection and execute fileless attacks.
+// MITRE ATT&CK: T1059.001 (Command and Scripting Interpreter: PowerShell), T1027 (Obfuscated Files or Information)
+
+DeviceProcessEvents
+// Look for PowerShell process execution events.
+| where FileName in~ ("powershell.exe", "pwsh.exe")
+// Main detection logic: check for various suspicious flags.
+| where
+    // High-confidence: The -EncodedCommand flag is frequently used to hide malicious scripts from command-line logging.
+    ProcessCommandLine has_any ("-EncodedCommand", "-enc", " -e ")
+    or
+    // Medium-confidence: The -WindowStyle Hidden flag is used to run PowerShell without a visible window, a common tactic for stealth.
+    ProcessCommandLine has_any ("-W Hidden", "-WindowStyle Hidden")
+    or
+    // Medium-confidence: The -ExecutionPolicy Bypass flag allows running of unsigned scripts, often a precursor to malicious activity.
+    ProcessCommandLine has_any ("-Exec Bypass", "-ExecutionPolicy Bypass")
+    or
+    // Lower-confidence: -NonInteractive and -NoProfile are common in legitimate automated scripts, but can be combined with other flags by attackers.
+    // They are included for comprehensive coverage but may require significant tuning.
+    (ProcessCommandLine has_any ("-NonI", "-NonInteractive", "-NoP", "-NoProfile"))
+
+// FP Tuning: Legitimate administrative scripts, software deployment tools (e.g., SCCM, Intune), and monitoring solutions
+// frequently use these flags. Exclude known-good parent processes or command lines to reduce noise.
+// Example: | where InitiatingProcessFileName !in~ ("cmexec.exe", "MonitoringAgent.exe")
+// Example: | where ProcessCommandLine !contains "C:\\Program Files\\MyGoodApp\\script.ps1"
+
+// Extract the primary flag detected for easier analysis.
+| extend DetectedFlag = case(
+    ProcessCommandLine has_any ("-EncodedCommand", "-enc", " -e "), "-EncodedCommand",
+    ProcessCommandLine has_any ("-W Hidden", "-WindowStyle Hidden"), "-WindowStyle Hidden",
+    ProcessCommandLine has_any ("-Exec Bypass", "-ExecutionPolicy Bypass"), "-ExecutionPolicy Bypass",
+    ProcessCommandLine has_any ("-NonI", "-NonInteractive"), "-NonInteractive",
+    ProcessCommandLine has_any ("-NoP", "-NoProfile"), "-NoProfile",
+    "Unknown"
+)
+| project
+    TimeGenerated,
+    DeviceName,
+    DetectedFlag,
+    AccountName,
+    InitiatingProcessFileName,
+    FileName,
+    ProcessCommandLine

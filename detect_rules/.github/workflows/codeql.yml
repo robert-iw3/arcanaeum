@@ -1,0 +1,77 @@
+name: CodeQL Advanced Scanning
+
+on:
+  push:
+    branches: [ "main", "test", "develop" ]
+  pull_request:
+    branches: [ "main", "test", "develop" ]
+  schedule:
+    - cron: '30 2 * * 1' # Run every Monday at 2:30 AM UTC
+  workflow_dispatch:
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+      id-token: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: python
+            build-mode: none
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
+
+    - name: Setup Python
+      if: matrix.language == 'python'
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+
+    - name: Install Python dependencies
+      if: matrix.language == 'python'
+      run: |
+        if [ -f requirements.txt ]; then
+          pip install -r requirements.txt
+        elif [ -f pyproject.toml ]; then
+          pip install toml
+          python -c "import toml; print('\n'.join(toml.load('pyproject.toml').get('project', {}).get('dependencies', [])))" | pip install -r -
+        fi
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ matrix.language }}
+        build-mode: ${{ matrix.build-mode }}
+        queries: +security-and-quality
+        config: |
+          paths-ignore:
+            - tests/**
+            - test/**
+            - docs/**
+            - doc/**
+            - examples/**
+          queries:
+            - uses: security-and-quality
+            - uses: security-extended
+        source-root: .
+        debug: true
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: "${{ matrix.language }}-analysis"
+        upload: true
+        output: codeql-results
+        sarif-upload: true

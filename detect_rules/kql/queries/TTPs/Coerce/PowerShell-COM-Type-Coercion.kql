@@ -1,0 +1,39 @@
+// Name: PowerShell COM Type Coercion for Execution
+// Author: RW
+// Date: 2025-08-12
+// Description: Detects PowerShell scripts that define a custom .NET class with an overridden ToString() method and pass
+//              an object of this class to a Shell.Application COM object method. This abuses PowerShell's type coercion
+//              mechanism to execute commands in a stealthy manner.
+// MITRE ATT&CK: T1059.001, T1218.001
+// False Positives: This combination of actions is highly suspicious and unlikely in legitimate administration scripts. False positives may occur in highly customized automation or development environments. If necessary, exclude known safe scripts or parent processes.
+
+let suspiciousKeywords = dynamic([
+    "Add-Type",
+    "override",
+    "ToString",
+    "New-Object",
+    "-ComObject",
+    "Shell.Application",
+    "ShellExecute"
+]);
+DeviceEvents
+// Focus on PowerShell script execution events which contain script block content.
+| where ActionType in ("PowerShellCommand", "AmsiScriptContent")
+// Combine command line and script block text into a single field for easier searching.
+| extend ScriptContent = iff(ActionType == "AmsiScriptContent", tostring(AdditionalFields.ScriptBlockText), ProcessCommandLine)
+// Initial filter for scripts containing all the necessary keywords for this technique.
+| where ScriptContent has_all (suspiciousKeywords)
+// Apply a more specific regex to find the ToString() method override, ignoring case and whitespace variations. This is the core of the evasion.
+| where ScriptContent matches regex @"(?i)public\s+override\s+string\s+ToString\s*\("
+// Confirm the instantiation of the Shell.Application COM object, which is used as the execution vector.
+| where ScriptContent contains "New-Object -ComObject" and ScriptContent contains "Shell.Application"
+| project
+    Timestamp,
+    DeviceName,
+    ActionType,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    AccountName,
+    ScriptContent,
+    ReportId,
+    AdditionalFields

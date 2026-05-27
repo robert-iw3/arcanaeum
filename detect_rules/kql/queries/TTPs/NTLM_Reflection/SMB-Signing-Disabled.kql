@@ -1,0 +1,26 @@
+// Name: SMB Signing Disabled
+// Author: RW
+// Date: 2025-07-31
+// Description: Detects when SMB signing is disabled on a Windows machine by monitoring for specific registry key modifications. Disabling SMB signing (setting 'RequireSecuritySignature' or 'EnableSecuritySignature' to 0) removes a critical defense-in-depth protection and exposes the host to NTLM and Kerberos relay attacks, such as CVE-2025-33073.
+// Mitre TTPs: M1035
+// References:
+DeviceRegistryEvents
+// Look for the event of a registry value being set
+| where ActionType == "RegistryValueSet"
+// Filter for the specific registry keys that control SMB signing for the client and server
+| where RegistryKey endswith @"\services\lanmanserver\parameters" or RegistryKey endswith @"\services\lanmanworkstation\parameters"
+// Target the value names for enabling/requiring SMB signing
+| where RegistryValueName in~ ("EnableSecuritySignature", "RequireSecuritySignature")
+// Detect when the value is set to '0', which means disabled
+| where RegistryValueData == "0"
+// FP Tuning: This change may be performed by administrators for legacy system compatibility. Investigate the initiating process. If it's a legitimate administrative tool or script, it may be an authorized change. Consider excluding changes made by specific admin accounts or configuration management tools if they are known and accepted.
+// For example: | where InitiatingProcessAccountName !in ("corp\\configadmin", "SCCM_Service_Acct")
+| project
+    Timestamp,
+    DeviceName,
+    RegistryKey,
+    RegistryValueName,
+    RegistryValueData,
+    InitiatingProcessAccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine

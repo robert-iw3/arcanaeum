@@ -1,0 +1,18 @@
+{
+  "type": "detection-engine.rule",
+  "id": "kerberoasting-dcsync-detection",
+  "attributes": {
+    "risk_score": 90,
+    "enabled": true,
+    "name": "Kerberoasting, DCSync, and DACL Modification Detection",
+    "description": "Detects various Active Directory security events related to Kerberoasting (RC4), AS-REP Roasting, DCSync attacks, and malicious DACL modifications.",
+    "rule_id": "kerberoasting_dcsync_dacl",
+    "index": ["logs-winlogbeat.*"],
+    "language": "kuery",
+    "query": "(winlog.channel:\"Security\") AND (((winlog.event_id:4769 AND winlog.event_data.Status:\"0x0\" AND winlog.event_data.TicketEncryptionType:\"0x17\" AND NOT winlog.event_data.ServiceName:\"*$*\") OR (winlog.event_id:4768 AND winlog.event_data.Status:\"0x0\" AND winlog.event_data.ServiceName:\"krbtgt\" AND winlog.event_data.PreAuthType:\"0\" AND NOT winlog.event_data.TargetUserName:\"*$*\") OR (winlog.event_id:4662 AND winlog.event_data.ObjectServer:\"DS\" AND winlog.event_data.ObjectType:\"{19195a5b-6da0-11d0-afd3-00c04fd930c9}\" AND (winlog.event_data.Properties:\"*1131f6aa-9c07-11d1-f79f-00c04fc2dcd2*\" OR winlog.event_data.Properties:\"*1131f6ad-9c07-11d1-f79f-00c04fc2dcd2*\") AND NOT winlog.event_data.SubjectUserName:\"*$*\") OR (winlog.event_id:5136 AND winlog.event_data.LDAPDisplayName:\"nTSecurityDescriptor\" AND winlog.event_data.ObjectDN:\"*CN=AdminSDHolder,CN=System,*\" AND NOT winlog.event_data.SubjectUserSid:\"S-1-5-18\") OR (winlog.event_id:5136 AND winlog.event_data.LDAPDisplayName:\"nTSecurityDescriptor\" AND (winlog.event_data.Value:\"*(A;;GA;;*\" OR winlog.event_data.Value:\"*(A;;WD;;*\" OR winlog.event_data.Value:\"*(A;;WO;;*\") AND NOT winlog.event_data.SubjectUserSid:\"S-1-5-18\"))))",
+    "interval": "10m",
+    "severity": "critical",
+    "type": "query",
+    "version": "1"
+  }
+}

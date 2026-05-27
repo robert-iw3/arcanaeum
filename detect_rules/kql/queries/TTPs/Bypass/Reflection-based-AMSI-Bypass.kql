@@ -1,0 +1,27 @@
+// Name: Reflection-based AMSI Bypass
+// Author: RW
+// Date: 2025-07-31
+// Description: Detects PowerShell scripts using .NET reflection to modify internal AMSI utility fields, such as 'amsiInitFailed', to disable AMSI. This is a highly effective bypass technique.
+// Tags: TTPs, Defense Evasion, T1027, T1059.001
+
+DeviceEvents
+// Filter for PowerShell script block execution events (Event ID 4104).
+| where ActionType == "PowerShellScriptBlock"
+| extend ParsedFields = parse_json(AdditionalFields)
+| extend ScriptBlockText = tostring(ParsedFields.ScriptBlockText)
+// Look for the specific combination of class and field used in this bypass.
+| where isnotempty(ScriptBlockText)
+  and ScriptBlockText has "AmsiUtils"
+  and ScriptBlockText has "amsiInitFailed"
+  and ScriptBlockText has_any ("GetField", "SetValue", "NonPublic", "Static")
+// FP Tuning: This is a highly specific and suspicious technique.
+// False positives may occur with security assessment or red-teaming tools.
+// Exclude known tools by name or signer if necessary.
+// For example: | where InitiatingProcessFileName !in~ ("pentest-tool.exe")
+| project
+    Timestamp,
+    DeviceName,
+    AccountName = InitiatingProcessAccountName,
+    ParentProcess = InitiatingProcessFileName,
+    ParentCommandLine = InitiatingProcessCommandLine,
+    ScriptBlockText

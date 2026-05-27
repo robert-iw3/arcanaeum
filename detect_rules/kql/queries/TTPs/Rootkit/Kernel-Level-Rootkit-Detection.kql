@@ -1,0 +1,53 @@
+// Name: Kernel-Level Rootkit Activity Suspected
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects the loading of an unsigned or untrusted kernel driver (.sys file).
+//              This is a common technique used by rootkits to gain kernel-level access for persistence and defense evasion.
+// Tactic: Defense Evasion, Persistence, Privilege Escalation
+// Technique: T1014, T1543.003
+// False Positive Sensitivity: Medium
+
+// Define a list of known and trusted driver publishers to exclude from the detection.
+// This list should be customized to your environment to reduce noise from legitimate applications or hardware.
+let allow_list_publishers = dynamic([
+    "microsoft corporation",
+    "microsoft windows",
+    "microsoft windows hardware compatibility publisher",
+    "intel corporation",
+    "nvidia corporation",
+    "advanced micro devices, inc.",
+    "realtek semiconductor corp.",
+    "broadcom corporation",
+    "qualcomm atheros",
+    "dell inc."
+]);
+DeviceImageLoadEvents
+// Filter for driver load events (.sys files).
+| where FileName endswith ".sys"
+// Core detection logic: Look for drivers that are either unsigned or not signed by a trusted publisher.
+| where IsSigned == false or IsTrusted == false
+// FP Reduction: Exclude drivers from known legitimate publishers.
+| where tolower(Signature) !in (allow_list_publishers)
+// FP Reduction: Exclude drivers from the default system driver directory.
+// Note: This is a potential tuning point. Attackers may place malicious drivers in this directory.
+// Consider monitoring this path with stricter criteria if your baseline is well-established.
+| where FolderPath !startswith @"C:\Windows\System32\drivers"
+| summarize
+    make_set(InitiatingProcessFileName),
+    count(),
+    StartTime = min(Timestamp),
+    EndTime = max(Timestamp)
+    by DeviceName, FolderPath, FileName, SHA1, Signature, SignatureStatus, IsSigned, IsTrusted
+| project
+    StartTime,
+    EndTime,
+    DeviceName,
+    FileName,
+    FolderPath,
+    SHA1,
+    Signature,
+    SignatureStatus,
+    IsSigned,
+    IsTrusted,
+    InitiatingProcesses = set_InitiatingProcessFileName,
+    EventCount = count_

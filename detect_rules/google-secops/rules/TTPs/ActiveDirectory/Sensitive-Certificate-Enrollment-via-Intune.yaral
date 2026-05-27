@@ -1,0 +1,43 @@
+rule Anomalous_Intune_Cert_Request_Privileged_SID {
+  meta:
+    author = "RW"
+    description = "Detects suspicious certificate requests from Intune Certificate Connector or NDES servers containing privileged SIDs in the Subject Alternative Name, indicating potential ADCS privilege escalation."
+    severity = "CRITICAL"
+
+  events:
+    $e.metadata.event_type = "CERTIFICATE_REQUEST" // UDM event type for certificate requests or related actions.
+    $e.metadata.action = "ISSUE" // Filter for issued certificates.
+
+    // Filter for requests originating from known Intune Certificate Connector or NDES servers.
+    // This requires a Chronicle Reference List named "ndes_intune_connector_ips"
+    // containing the IP addresses of your legitimate NDES/Intune Connector servers.
+    $e.principal.ip in %ndes_intune_connector_ips
+
+    // Extract privileged SIDs from Subject Alternative Name (SAN).
+    $e.principal.x509_certificate.san.other_name = /tag:microsoft\.com,2022-09-14:sid:S-1-5-21-\d{1,15}-\d{1,15}-\d{1,15}-(500|512|516|518|519)/ nocase
+
+    // Filter for events with privileged SIDs and exclude common legitimate templates if known.
+    // Assuming 'Template_Name' maps to 'principal.x509_certificate.template_name'.
+    not $e.principal.x509_certificate.template_name in ("User", "ClientAuth")
+
+    // Ensure 'privileged_sid' was extracted (implicitly handled by the regex match).
+
+    // Implement the logic from `sensitive_intune_cert_enrollment_filter` here.
+    // This typically involves excluding known benign patterns based on environment-specific tuning.
+    // Example: AND not $e.principal.user.userid in %intune_cert_enrollment_whitelist
+    // Example: AND not $e.target.hostname in %intune_cert_enrollment_device_whitelist
+
+  outcome:
+    $firstTime = $e.metadata.event_timestamp.epoch_seconds // min(_time)
+    $lastTime = $e.metadata.event_timestamp.epoch_seconds // max(_time)
+    $dest = $e.target.hostname // dest (the CA server)
+    $requester_name = $e.principal.user.userid // Requester_Name
+    $privileged_sid = re.capture($e.principal.x509_certificate.san.other_name, `tag:microsoft\.com,2022-09-14:sid:(?<privileged_sid>S-1-5-21-\d{1,15}-\d{1,15}-\d{1,15}-(500|512|516|518|519))`, nocase).privileged_sid
+    $subject = $e.principal.x509_certificate.subject // Subject
+    $template_name = $e.principal.x509_certificate.template_name // Template_Name
+    $issuer = $e.principal.x509_certificate.issuer // Issuer
+    $count = 1
+
+  condition:
+    $e and $privileged_sid != "" // Ensure a privileged SID was extracted.
+}

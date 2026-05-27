@@ -1,0 +1,33 @@
+title: AWS IAM User Console Profile Modified via CLI
+id: 3d9c592d-9499-44b1-9881-9565b8f809ed
+status: experimental
+description: |
+  Detects an attempt to create or update an AWS IAM user's console login profile using the AWS Command Line Interface (CLI). This technique, as referenced in the Expel report, is used by attackers who have compromised a long-term access key (used by the CLI) to create a new way to access the environment via the AWS Management Console, enhancing persistence and ease of access.
+references:
+  - https://expel.com/blog/incident-report-from-cli-to-console-chasing-an-attacker-in-aws/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.persistence
+  - attack.t1098.001
+  - attack.t1078.004
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    # Detects API calls to create or change a user's console password
+    eventName:
+      - 'CreateLoginProfile'
+      - 'UpdateLoginProfile'
+    # Filters for actions performed by an IAM user, not a role or federated user
+    userIdentity.type: 'IAMUser'
+    # Filters for actions originating from the AWS Command Line Interface
+    userAgent|startswith: 'aws-cli'
+    # Ensures the action was successful
+    errorCode:
+  condition: selection
+falsepositives:
+  - Legitimate administrative scripts that manage user console passwords via the CLI. This is uncommon but possible.
+  - Consider filtering for specific administrative users or roles that are authorized to perform this action if it generates noise.
+level: high

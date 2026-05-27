@@ -1,0 +1,40 @@
+//
+// Rule Title: Kernel CET Violation Detected
+//
+// Author: RW
+// Date: 2025-08-03
+//
+// Description:
+// This rule detects Kernel Control-flow Enforcement Technology (CET) violations that have been logged in audit mode.
+// Kernel CET is a hardware-based exploit mitigation that protects against Return-Oriented Programming (ROP) attacks.
+// A violation indicates a potential attempt to hijack control flow in the kernel. While this could be caused by buggy drivers,
+// it is a strong indicator of a sophisticated exploit attempt. This detection relies on Kernel CET being enabled in "audit" mode,
+// which logs violations instead of causing a system crash.
+//
+// False Positive Sensitivity: Medium
+// - Legitimate but poorly written or outdated drivers can cause CET violations.
+// - It's important to investigate the faulting process/driver to determine if it's malicious or just buggy.
+// - Tuning may be required to exclude known-bad but non-malicious drivers.
+//
+// Detection Comment Level: Medium
+//
+
+DeviceEvents
+// Filter for CET violations logged in audit mode by Exploit Guard
+| where ActionType == "ExploitGuardCetHijackAudited"
+// A Kernel CET violation will likely originate from the System process or involve a kernel driver (.sys file).
+| where InitiatingProcessFileName == "System" or FileName endswith ".sys"
+| project
+    TimeGenerated,
+    DeviceName,
+    ActionType,
+    // The process that was the target of the exploit
+    InitiatingProcessFileName,
+    InitiatingProcessFolderPath,
+    InitiatingProcessCommandLine,
+    // The module that was the target of the exploit
+    FileName,
+    FolderPath,
+    SHA1,
+    ReportId,
+    DeviceId

@@ -1,0 +1,60 @@
+{
+  "rule_id": "zeek_suspicious_network_traffic_correlation",
+  "name": "Zeek Suspicious Network Traffic Correlation",
+  "description": "Detects suspicious network activity, including potential domain fronting (HTTP Host != SNI) and unusual file transfers (application/octet-stream without common file extensions) by correlating Zeek HTTP and SSL logs.",
+  "severity": "high",
+  "enabled": true,
+  "language": "esql",
+  "query": "from zeek-* | where zeek.session_id IS NOT NULL and (event.category IN ('zeek_ssl', 'zeek_http')) | stats sourcetypes = COLLECT(event.category), http_host = COLLECT(url.domain), sni = COLLECT(tls.server_name), http_method = COLLECT(http.request.method), uri = COLLECT(url.path), filenames = COLLECT(http.response.body.filenames), content_type = COLLECT(http.response.mime_type) BY zeek.session_id, source.address, destination.address, destination.port | where (('application/octet-stream' IN content_type and NOT (uri MATCHES '.*\\.(exe|zip|rar|dll|msi|iso|pkg|dmg)$' OR filenames IS NOT NULL)) OR (LENGTH(sourcetypes) > 1 and http_host IS NOT NULL and sni IS NOT NULL and http_host != sni and NOT http_host like CONCAT('%.', sni))) and NOT (sni like '*.google.com' OR sni like '*.akamaiedge.net' OR sni like '*.amazonaws.com' OR sni like '*.azureedge.net' OR sni like '*.cloudflare.net' OR sni like '*.fastly.net' OR sni like '*.cloudfront.net' OR http_host like '*.google.com' OR http_host like '*.akamaiedge.net' OR http_host like '*.amazonaws.com' OR http_host like '*.azureedge.net' OR http_host like '*.cloudflare.net' OR http_host like '*.fastly.net' OR http_host like '*.cloudfront.net') | keep @timestamp, source.address, destination.address, destination.port, http_host, sni, content_type, uri, http_method",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0011",
+        "name": "Command and Control",
+        "reference": "https://attack.mitre.org/tactics/TA0011/"
+      },
+      "technique": [
+        {
+          "id": "T1090",
+          "name": "Proxy",
+          "reference": "https://attack.mitre.org/techniques/T1090/"
+        },
+        {
+          "id": "T1090.003",
+          "name": "Domain Fronting",
+          "reference": "https://attack.mitre.org/techniques/T1090/003/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0008",
+        "name": "Lateral Movement",
+        "reference": "https://attack.mitre.org/tactics/TA0008/"
+      }
+    }
+  ],
+  "interval": "10m",
+  "from": "now-10m",
+  "max_signals": 100,
+  "risk_score": 85,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://www.elastic.co/guide/en/security/current/domain-fronting-activity-detected.html"
+  ],
+  "tags": [
+    "Zeek",
+    "Domain Fronting",
+    "Network Traffic",
+    "Command and Control"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "zeek.session_id, source.address, destination.address"
+}

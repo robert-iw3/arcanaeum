@@ -1,0 +1,68 @@
+---
+- name: Generate CA private key
+  command: openssl genrsa -out {{ nomad_config_dir }}/ca-key.pem 4096
+  args:
+    creates: "{{ nomad_config_dir }}/ca-key.pem"
+  become: yes
+  become_user: "{{ nomad_user }}"
+  tags: [tls]
+
+- name: Generate CA certificate
+  command: >
+    openssl req -x509 -new -nodes -key {{ nomad_config_dir }}/ca-key.pem
+    -sha256 -days {{ nomad_tls_days }} -out {{ nomad_tls_ca_file }}
+    -subj "/CN=Nomad CA"
+  args:
+    creates: "{{ nomad_tls_ca_file }}"
+  become: yes
+  become_user: "{{ nomad_user }}"
+  tags: [tls]
+
+- name: Generate Nomad private key
+  command: openssl genrsa -out {{ nomad_tls_key_file }} 4096
+  args:
+    creates: "{{ nomad_tls_key_file }}"
+  become: yes
+  become_user: "{{ nomad_user }}"
+  tags: [tls]
+
+- name: Generate Nomad certificate signing request
+  command: >
+    openssl req -new -key {{ nomad_tls_key_file }}
+    -out {{ nomad_config_dir }}/nomad.csr
+    -subj "/CN={{ nomad_tls_common_name }}/O=Nomad"
+    -addext "subjectAltName={{ nomad_tls_sans | join(',') }}"
+  args:
+    creates: "{{ nomad_config_dir }}/nomad.csr"
+  become: yes
+  become_user: "{{ nomad_user }}"
+  tags: [tls]
+
+- name: Generate Nomad certificate
+  command: >
+    openssl x509 -req -in {{ nomad_config_dir }}/nomad.csr
+    -CA {{ nomad_tls_ca_file }} -CAkey {{ nomad_config_dir }}/ca-key.pem
+    -CAcreateserial -out {{ nomad_tls_cert_file }}
+    -days {{ nomad_tls_days }} -sha256
+    -extfile <(echo "subjectAltName={{ nomad_tls_sans | map('regex_replace', '^', 'DNS:') | join(',') }},IP:{{ nomad_bind_addr }}")
+  args:
+    creates: "{{ nomad_tls_cert_file }}"
+  become: yes
+  become_user: "{{ nomad_user }}"
+  tags: [tls]
+
+- name: Set permissions on TLS files
+  file:
+    path: "{{ item }}"
+    owner: "{{ nomad_user }}"
+    group: "{{ nomad_group }}"
+    mode: "0600"
+  loop:
+    - "{{ nomad_tls_ca_file }}"
+    - "{{ nomad_tls_cert_file }}"
+    - "{{ nomad_tls_key_file }}"
+    - "{{ nomad_config_dir }}/ca-key.pem"
+    - "{{ nomad_config_dir }}/nomad.csr"
+    - "{{ nomad_config_dir }}/ca.srl"
+  become: yes
+  tags: [tls]

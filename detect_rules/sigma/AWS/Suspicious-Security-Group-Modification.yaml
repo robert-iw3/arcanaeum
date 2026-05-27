@@ -1,0 +1,30 @@
+title: AWS Security Group Modified to Allow Public SSH Access
+id: 06a74617-51ca-47f0-aeb8-c8b35f0306b2
+status: experimental
+description: >-
+  Detects when an AWS security group is modified via 'AuthorizeSecurityGroupIngress' to allow inbound SSH traffic from any IP address (0.0.0.0/0). Attackers may use this technique to open access to an EC2 instance from an external IP address to facilitate lateral movement.
+references:
+  - https://unit42.paloaltonetworks.com/cloud-lateral-movement-techniques/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.defense_evasion
+  - attack.t1562.007
+  - attack.lateral_movement
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    eventName: 'AuthorizeSecurityGroupIngress'
+    errorCode:      # Filter for successful API calls
+    requestParameters.ipPermissions.items:
+      ipProtocol: 'tcp' # Corresponds to the SSH protocol
+      fromPort: 22 # The standard port for SSH
+      toPort: 22
+      ipRanges.items.cidrIp: '0.0.0.0/0' # Detects when SSH is opened to the entire internet, a common attacker TTP and high-risk misconfiguration
+  condition: selection
+falsepositives:
+  - This may be a legitimate action by an administrator to set up a bastion host or for other management purposes.
+  - It is recommended to filter out trusted roles or user identities that are authorized to perform this action.
+level: medium

@@ -1,0 +1,68 @@
+// Rule Title: Potential Network Device Compromise Attempt
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects suspicious network connections from endpoints to the management or file transfer interfaces of
+//              network devices (e.g., routers, firewalls, VPNs). This activity could indicate an attempt to exploit a
+//              vulnerability, install malicious firmware, or exfiltrate configuration data, as seen in attacks by
+//              state-sponsored actors and ransomware groups.
+// MITRE TTPs: T1542.001
+
+// --- Environment-Specific Variables ---
+// FP Tuning: Populate these lists with IP addresses specific to your environment.
+// Add the IP addresses of your core network infrastructure (routers, switches, firewalls, VPNs).
+let NetworkDeviceIPs = dynamic([
+    "10.0.0.1", "192.168.1.1", "172.16.0.1" // -- placeholder --
+]);
+// Add the IP addresses of known administrative workstations or jump servers that manage network devices.
+let AdminWorkstationIPs = dynamic([
+    "10.0.1.10", "192.168.1.100" // -- placeholder --
+]);
+// --- Detection Logic ---
+// Define ports commonly used for device management and configuration.
+let ManagementPorts = dynamic([
+    22,   // SSH
+    23,   // Telnet
+    80,   // HTTP
+    443,  // HTTPS
+    161,  // SNMP
+    514,  // Syslog
+    8080, // Alt-HTTP
+    8443  // Alt-HTTPS
+]);
+// Define ports for file transfers, often used for firmware/config updates.
+let FileTransferPorts = dynamic([
+    21,   // FTP
+    69    // TFTP
+]);
+DeviceNetworkEvents
+// Look for connections to specified network devices.
+| where RemoteIP in (NetworkDeviceIPs)
+// Filter for connections to management or file transfer ports.
+| where RemotePort in (ManagementPorts) or RemotePort in (FileTransferPorts)
+// Exclude traffic from known administrative hosts to reduce false positives.
+| where not(LocalIP in (AdminWorkstationIPs))
+// FP Tuning: Exclude common web browsers accessing standard web ports, but still alert on other processes.
+| where not(InitiatingProcessFileName in~ ('msedge.exe', 'chrome.exe', 'firefox.exe') and RemotePort in (80, 443, 8080, 8443))
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    make_set(RemotePort),
+    make_set(InitiatingProcessFileName),
+    make_set(InitiatingProcessCommandLine),
+    EventCount = count()
+    by DeviceName, LocalIP, RemoteIP, AccountName
+| extend
+    PortsContacted = set_RemotePort,
+    ProcessesUsed = set_InitiatingProcessFileName,
+    CommandLines = set_InitiatingProcessCommandLine
+| project
+    StartTime,
+    EndTime,
+    DeviceName,
+    AccountName,
+    LocalIP,
+    RemoteIP,
+    PortsContacted,
+    ProcessesUsed,
+    CommandLines,
+    EventCount

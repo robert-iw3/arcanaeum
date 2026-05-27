@@ -1,0 +1,88 @@
+rule MeetC2_Google_Calendar_C2_Activity {
+  meta:
+    author = "RW"
+    date = "2025-09-06"
+    description = "Detects potential Command and Control (C2) activity using Google Calendar, inspired by the MeetC2 framework. This rule looks for suspicious calendar event content or high-frequency beaconing to the Google Calendar API from a single source IP."
+    tactic = "TA0011"
+    technique = "T1071.001, T1102.002"
+    false_positives = "Legitimate applications using the Google Calendar API may generate a high volume of requests. Calendar sharing with service accounts for legitimate automation purposes can also trigger the ACL portion of this rule."
+    severity = "MEDIUM"
+
+  events:
+    // Part 1: Match suspicious Google Workspace calendar audit events.
+    $gcp_cal.metadata.event_type = "GCP_CALENDAR_ACTIVITY"
+    $gcp_cal.principal.ip = $ip
+    (
+      // Pattern 1: Command string in event summary, as seen in MeetC2 PoC.
+      re.regex($gcp_cal.gcp.calendar.summary, `Meeting from nobody:.*\[COMMAND\]`) nocase
+      or
+      // Pattern 2: Output tags in event description.
+      (
+        re.regex($gcp_cal.gcp.calendar.description, `\[OUTPUT\]`) nocase
+        and
+        re.regex($gcp_cal.gcp.calendar.description, `\[/OUTPUT\]`) nocase
+      )
+      or
+      // Pattern 3: Calendar shared with a service account, required for MeetC2 setup.
+      (
+        $gcp_cal.metadata.product_event_type = "calendar.acl.create"
+        and
+        re.regex($gcp_cal.gcp.calendar.acl.scope.value, `gserviceaccount\.com$`)
+      )
+    )
+
+    // Part 2: Match network traffic beaconing to the Google Calendar API.
+    $network_beacon.metadata.event_type = "NETWORK_HTTP"
+    $network_beacon.principal.ip = $ip
+    // Filter for traffic to the specific Google Calendar API endpoint used for polling.
+    $network_beacon.network.http.url contains "www.googleapis.com/calendar/v3/calendars/"
+    and $network_beacon.network.http.url contains "/events"
+
+    // FP Mitigation: Exclude common browsers and known good applications.
+    // This list should be customized for the environment.
+    not re.regex($network_beacon.principal.process.file.full_path, `(?i)(chrome|msedge|firefox|outlook|teams)\.exe$`)
+
+  match:
+    // Group events by source IP over a 10 minute window.
+    $ip over 10m
+
+  outcome:
+    // Use a conditional to determine which part of the rule triggered for better context.
+    $detection_method = if(
+        $gcp_cal,
+        if(
+            any re.regex(gcp_cal.gcp.calendar.summary, `Meeting from nobody:.*\[COMMAND\]`) nocase,
+            "MeetC2 Command Pattern in Event Summary",
+            if(
+                (any re.regex(gcp_cal.gcp.calendar.description, `\[OUTPUT\]`) nocase),
+                "MeetC2 Output Pattern in Event Description",
+                "Calendar Shared with Service Account"
+            )
+        ),
+        "Potential C2 Beaconing to Google Calendar API"
+    )
+
+    // Assign a higher risk score for more specific content matches.
+    $risk_score = if($gcp_cal, 60, 40)
+
+    // Common fields for investigation.
+    $principal_ip = $ip
+    $principal_hostname = array_distinct($network_beacon.principal.hostname)
+    $event_count = count_distinct($gcp_cal.metadata.id) + count_distinct($network_beacon.metadata.id)
+
+    // Fields specific to GCP Calendar events.
+    $gcp_actor_email = array_distinct($gcp_cal.principal.user.email_addresses)
+    $gcp_event_summary = array_distinct($gcp_cal.gcp.calendar.summary)
+    $gcp_event_description = array_distinct($gcp_cal.gcp.calendar.description)
+    $gcp_acl_recipient = array_distinct($gcp_cal.gcp.calendar.acl.scope.value)
+
+    // Fields specific to Network Beaconing events.
+    $network_request_count = count_distinct($network_beacon.metadata.id)
+    $principal_process_path = array_distinct($network_beacon.principal.process.file.full_path)
+    $target_urls = array_distinct($network_beacon.network.http.url)
+
+  condition:
+    // Trigger if either a suspicious calendar event is found OR beaconing is detected.
+    // The PoC polls every 30s, so >15 requests in 10 mins is a strong indicator.
+    $gcp_cal or #network_beacon > 15
+}

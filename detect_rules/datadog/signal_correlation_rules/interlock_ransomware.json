@@ -1,0 +1,65 @@
+{
+  "name": "Interlock Ransomware Activity",
+  "queries": [
+    {
+      "name": "known_malicious_hash",
+      "query": "@process.hash:(\"2acaa9856ee29337c06cc2858fd71b860f53219504e6756faa3812019b5df5a6\" OR \"0b47e53f2ada0555588aa8a6a4491e14d7b2528c9a829ebb6f7e9463963cd0e4\")",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "suspicious_powershell_command",
+      "query": "@process.name:powershell.exe AND @process.cmdline:(*irm\\ * OR *iex\\ * OR *Invoke-RestMethod* OR *Invoke-Expression* OR *-w\\ h* OR *-windowstyle\\ hidden*)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "registry_run_key_modification",
+      "query": "@registry.path:*\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run* AND @registry.value:(ChromeUpdater OR 0neDrive)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "c2_communication",
+      "query": "@network.destination.ip:(\"168.119.96.41\" OR \"95.217.22.175\") OR @network.destination.domain:(cluders.org OR bronxy.cc OR *trycloudflare.com*)",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    },
+    {
+      "name": "scheduled_task_creation",
+      "query": "@process.name:schtasks.exe AND @process.cmdline:(\"*/create*\" AND (\"*/du 9999:59*\" OR \"*BitLocker Encrypt All Drives*\" AND \"*\\\\OneDriveCloud\\\\taskhostw.exe*\"))",
+      "data_source": "logs",
+      "aggregation": "event_count"
+    }
+  ],
+  "cases": [
+    {
+      "name": "Interlock Ransomware Activity",
+      "status": "high",
+      "condition": "event_count_0 >= 1 OR event_count_1 >= 1 OR event_count_2 >= 1 OR event_count_3 >= 1 OR event_count_4 >= 1"
+    }
+  ],
+  "options": {
+    "evaluation_window": 3600,
+    "keep_alive": 3600,
+    "max_signal_duration": 3600,
+    "correlation_based_signal": {
+      "correlation_inputs": [
+        {
+          "rule_id": "interlock_ransomware_correlation"
+        }
+      ],
+      "correlated_by_fields": [
+        "@host",
+        "@usr"
+      ],
+      "distinct_fields": [
+        "case_id"
+      ]
+    }
+  },
+  "message": "Interlock Activity: {{distinct_count}} method(s) on host {{host}} by user {{usr}}: {{case_names}}",
+  "type": "correlation_based_signal",
+  "tags": [],
+  "is_enabled": true
+}

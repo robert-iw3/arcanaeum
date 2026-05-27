@@ -1,0 +1,60 @@
+{
+  "rule_id": "linux_process_masquerading_detection",
+  "name": "Linux Process Masquerading Detection",
+  "description": "Detects process masquerading on Linux systems, including fake kernel threads, unusual Apache httpd locations, and suspicious D-Bus process executions. This can indicate defense evasion by an attacker.",
+  "severity": "high",
+  "enabled": true,
+  "language": "esql",
+  "query": "FROM logs-endpoint.events-* | WHERE @timestamp IS NOT NULL AND event.category == 'process' AND ((process.name LIKE '[%]' AND process.name LIKE '%]' AND process.executable != '') OR (process.name == 'httpd' AND process.command_line LIKE '%-D%' AND process.executable NOT IN ('/usr/sbin/*', '/usr/local/apache2/bin/*')) OR (process.name LIKE 'dbus-%' AND process.executable != '/usr/bin/*')) | EVAL technique = CASE(process.name LIKE '[%]' AND process.name LIKE '%]', 'Kernel Thread Masquerading', process.name == 'httpd', 'Apache httpd Masquerading', process.name LIKE 'dbus-%', 'D-Bus Process Masquerading', NULL), process_name = process.name | STATS firstTime = MIN(@timestamp), lastTime = MAX(@timestamp), count = COUNT(*) BY host.name AS host, user.name AS user, technique, process_name, process.command_line AS process, process.executable AS process_path | KEEP host, user, technique, process_name, process, process_path, count",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0005",
+        "name": "Defense Evasion",
+        "reference": "https://attack.mitre.org/tactics/TA0005/"
+      },
+      "technique": [
+        {
+          "id": "T1036",
+          "name": "Masquerading",
+          "reference": "https://attack.mitre.org/techniques/T1036/"
+        },
+        {
+          "id": "T1036.004",
+          "name": "Masquerade Task or Service",
+          "reference": "https://attack.mitre.org/techniques/T1036/004/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0002",
+        "name": "Execution",
+        "reference": "https://attack.mitre.org/tactics/TA0002/"
+      }
+    }
+  ],
+  "interval": "15m",
+  "from": "now-15m",
+  "max_signals": 100,
+  "risk_score": 80,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://www.elastic.co/guide/en/security/current/linux-process-masquerading.html",
+    "https://www.elastic.co/guide/en/security/current/detect-linux-kernel-rootkit.html"
+  ],
+  "tags": [
+    "Linux",
+    "Process Masquerading",
+    "Defense Evasion"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "host, user, technique, process_name"
+}

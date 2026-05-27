@@ -1,0 +1,51 @@
+// Name: Potential AI Agent Tool Misuse
+// Author: RW
+// Date: 2025-08-15
+// Description: This rule detects when an AI agent invokes external tools (e.g., file system utilities, shell interpreters, network tools)
+// in a manner that could indicate malicious activity, such as reconnaissance, sensitive data access, or exfiltration. Such misuse can be
+// coerced through prompt injection attacks.
+// False Positive Sensitivity: Medium
+// References:
+// - From Prompts to Pwns: Exploiting and Securing AI Agents (Black Hat USA 2025)
+// - https://developer.nvidia.com/blog/agentic-autonomy-levels-and-security/
+// - https://owasp.org/www-project-top-10-for-large-language-model-applications/llm-top-10-2023/llm01-prompt-injection
+// Tactics: Collection, Discovery, Exfiltration, Execution
+// Techniques: T1005, T1059, T1082, T1567
+// Assumes a log source that captures the tools and parameters used by an AI agent.
+
+// Define tools that can be used to access file contents.
+let sensitiveFileTools = dynamic(["cat", "type", "head", "tail", "more", "Get-Content"]);
+// Define patterns that indicate access to sensitive files or directories.
+let sensitiveFilePaths = dynamic(["/etc/passwd", "/etc/shadow", ".ssh/id_rsa", ".aws/credentials", "secrets.txt", ".env", "C:\\Windows\\System32\\config\\SAM"]);
+
+// Define tools that execute shell commands.
+let shellExecutionTools = dynamic(["bash", "sh", "zsh", "powershell.exe", "cmd.exe", "terminal"]);
+// Define common discovery commands.
+let discoveryCommands = dynamic(["whoami", "hostname", "id", "uname", "ipconfig", "ifconfig", "net user", "net group", "ps aux", "tasklist", "printenv", "env"]);
+
+// Define tools commonly used for data transfer.
+let networkExfilTools = dynamic(["curl", "wget", "Invoke-WebRequest", "iwr"]);
+// Define command parameters often used to POST data for exfiltration.
+let exfilParameters = dynamic(["-d ", "--data", "-F ", "--form", "-X POST", "-Method Post"]);
+
+// This table is hypothetical. Replace 'AIAgentToolUsageLogs' with the actual table containing your AI agent's tool usage data.
+// Fields 'ToolName' and 'ToolParameters' are assumed to exist.
+AIAgentToolUsageLogs
+| where
+    // Condition 1: Agent uses a file utility to read a potentially sensitive file.
+    (ToolName in (sensitiveFileTools) and ToolParameters has_any (sensitiveFilePaths)) or
+    // Condition 2: Agent uses a shell to run a discovery command.
+    (ToolName in (shellExecutionTools) and ToolParameters has_any (discoveryCommands)) or
+    // Condition 3: Agent uses a network tool with parameters indicative of data exfiltration.
+    (ToolName in (networkExfilTools) and ToolParameters has_any (exfilParameters))
+// FP Tuning: An agent's intended function might involve some of these actions (e.g., a DevOps agent running 'ps aux').
+// Create allowlists for specific applications or users that are expected to perform these actions.
+// Example: `| where not (Application == "DevOpsAssistant" and ToolParameters has "ps aux")`
+| project
+    TimeGenerated,
+    Application, // The application hosting the AI agent
+    UserPrincipalName, // The user whose prompt initiated the action
+    PromptText, // The user's original prompt, for context
+    ToolName, // The tool that was invoked
+    ToolParameters, // The parameters passed to the tool, indicating the specific action
+    SrcIpAddr // The source IP of the request

@@ -1,0 +1,61 @@
+rule C2CommunicationOverNonStandardPort {
+  meta:
+    name = "C2 Communication Over Non-Standard Port"
+    author = "RW"
+    description = "Detects outbound network connections from endpoints to non-standard ports, excluding a list of common application ports and processes, to flag potentially malicious activity."
+    tags = "T1571, T1071"
+    severity = "MEDIUM"
+    false_positives = "P2P applications, online games, legitimate remote administration/collaboration tools. Tune CommonPorts and ProcessAllowList for your environment."
+
+  events:
+    // Focus on network connection events
+    $e.metadata.event_type = "NETWORK_CONNECTION"
+    // Ensure it's a successful outbound connection initiated by a process
+    $e.network.direction = "OUTBOUND"
+    $e.network.tcp.flags = "SYN,ACK,ESTABLISHED" // Assuming successful connection established
+    $e.principal.process.file.full_path != "" // InitiatingProcessFileName must be present
+    // Exclude connections to private, loopback, or multicast IP addresses.
+    // Chronicle UDM has a `principal.ip_geo_artifact.network.is_private` field, but it might be eventually consistent.
+    // It's generally more robust to explicitly check against private IP ranges in the rule itself.
+    not $e.target.ip in %private_ip_ranges // Use a Chronicle reference list for private IP ranges
+    not $e.target.ip = "127.0.0.1"
+    not $e.target.ip = "::1"
+    // The core detection logic: find connections to ports that are NOT in the common list.
+    $e.target.port not in %common_ports // Use a Chronicle reference list for common ports
+    // Exclude common processes that are expected to make diverse network connections.
+    $e.principal.process.file.full_path not in %process_allowlist // Use a Chronicle reference list for process allowlist
+
+  match:
+    // Group by initiating process, remote IP, and remote port over a 1-day window
+    $e.principal.process.file.full_path, $e.target.ip, $e.target.port
+    group by $e.principal.process.file.full_path, $e.principal.process.command_line, $e.principal.process.parent_process.file.full_path, $e.target.ip, $e.target.port, $e.target.hostname
+    // The timeframe of 1d is handled by Chronicle's rule engine for live detections.
+    // For historical hunts, you'd specify the timeframe in the hunt itself.
+    // and then apply the event count filter.
+
+  outcome:
+    // Summarize to create a concise alert for each unique connection pattern.
+    $first_seen = min($e.metadata.event_timestamp)
+    $last_seen = max($e.metadata.event_timestamp)
+    $event_count = count($e.metadata.event_id)
+    $total_bytes_sent = sum($e.network.sent_bytes)
+    $total_bytes_received = sum($e.network.received_bytes)
+    $device_name = any($e.principal.asset.hostname) // UDM field for device name
+
+  condition:
+    // Trigger if the event count is above the threshold
+    $event_count > 2
+}
+
+// Reference Lists:
+// 1.  **common_ports:** Create a Chronicle Reference List named `common_ports` and populate it with:
+//     20, 21, 22, 23, 25, 53, 80, 110, 123, 135, 137, 138, 139, 143,
+//     443, 445, 465, 587, 993, 995, 1433, 1521, 3306, 3389, 5060, 5061,
+//     5900, 8080, 8443
+//
+// 2.  **process_allowlist:** Create a Chronicle Reference List named `process_allowlist` and populate it with:
+//     msedge.exe, chrome.exe, firefox.exe, iexplore.exe,
+//     svchost.exe, teams.exe, outlook.exe, zoom.exe,
+//     onedrive.exe, dropbox.exe, ms-teamsupdate.exe
+//
+// 3.  **private_ip_ranges:** Create a Chronicle Reference List named `private_ip_ranges` and populate it with CIDR ranges for private IPs (e.g., 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16).

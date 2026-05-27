@@ -1,0 +1,36 @@
+// Name: msedge.dll Created in Unexpected System Location
+// Author: RW
+// Date: 2025-08-12
+// Description: Detects the creation or modification of "msedge.dll" in unexpected system directories.
+//              The legitimate location for this file is within the Program Files directory. This activity
+//              is a strong indicator of DLL side-loading or hijacking, potentially related to exploits
+//              leveraging applications like WinRAR to drop malicious DLLs.
+// Tactic: Defense Evasion, Persistence
+// Technique: T1574.002
+// False Positive Sensitivity: Medium
+
+DeviceFileEvents
+// Look for file creation or modification events.
+| where ActionType in ("FileCreated", "FileModified")
+// The target DLL is msedge.dll.
+| where FileName =~ "msedge.dll"
+// Focus on specific system paths where this DLL should not exist.
+| where FolderPath in~ (
+        @"C:\Windows\",
+        @"C:\Windows\System\",
+        @"C:\Windows\System32\",
+        @"C:\Windows\SysWOW64\"
+    )
+// FP Tuning: This behavior is highly anomalous. A legitimate msedge.dll resides in Program Files.
+// Further investigation should focus on the initiating process (e.g., winrar.exe, explorer.exe) and
+// whether the created DLL is signed by Microsoft. An unsigned msedge.dll in these locations is a high-fidelity indicator of compromise.
+| project
+    Timestamp,
+    DeviceName,
+    ActionType,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    FileName,
+    FolderPath,
+    SHA1,
+    MD5

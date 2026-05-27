@@ -1,0 +1,20 @@
+[
+  {
+    "type": "expert",
+    "name": "Detect Suspicious Write to SQL Server Binn Directory (Potential CLR Abuse Proxy)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**.exe\" }\n      Exclude OBJECT_NAME { -v \"C:\\\\Program Files\\\\**\" -v \"C:\\\\Program Files (x86)\\\\**\" -v \"C:\\\\Windows\\\\System32\\\\**\" }\n   }\n   Target {\n      Match FILE {\n         Include OBJECT_NAME { -v \"**\\\\Microsoft SQL Server\\\\**\\\\MSSQL\\\\Binn\\\\**.dll\" }\n         Include -access \"WRITE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects non-standard processes writing DLLs to SQL Server's Binn directory (Microsoft SQL Server\\**\\MSSQL\\Binn\\*.dll). Proxy indicator for potential malicious CLR assembly staging or SQL binary tampering. Excludes legitimate program files paths to reduce FPs. Note: Actual CLR assemblies are stored in the database (not as files); this catches rare file-based abuse or dropper activity. Tune for any custom SQL tools/updaters."
+  },
+  {
+    "type": "expert",
+    "name": "Detect CLR Integration Enabled on SQL Server (Potential Persistence Setup)",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"sqlservr.exe\" }\n   }\n   Target {\n      Match REGISTRY {\n         Include OBJECT_NAME { -v \"HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Microsoft\\\\Microsoft SQL Server\\\\**\\\\Configuration\\\\CLR enabled\" }\n         Include -access \"WRITE,CREATE\"\n         Include -value_data \"1\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "Medium",
+    "enabled": true,
+    "description": "Detects sqlservr.exe process writing 'CLR enabled = 1' to registry (via sp_configure). Common prerequisite for loading malicious CLR assemblies for persistence/code execution. High value when combined with suspicious assembly creation or unusual sqlservr.exe parents. Tune for legitimate DBA activity."
+  }
+]

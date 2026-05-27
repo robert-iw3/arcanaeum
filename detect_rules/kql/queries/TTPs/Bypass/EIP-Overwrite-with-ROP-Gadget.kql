@@ -1,0 +1,27 @@
+// Name: EIP Overwrite with ROP Gadget
+// Author: RW
+// Date: 2025-08-03
+// Description: Detects when an exploit protection mechanism, such as Exploit Guard, identifies a
+//              buffer overflow that diverts code execution to a Return-Oriented Programming (ROP) gadget.
+//              This occurs when the instruction pointer (EIP/RIP) is overwritten to point to a small,
+//              existing code snippet ending in a 'ret' instruction, rather than directly to shellcode.
+// False Positive Sensitivity: Medium
+// MITRE TTPs: T1055, T1068, T1093
+
+DeviceEvents
+// Filter for Exploit Guard events that specifically detect ROP or related techniques.
+// ExploitGuardRop detects control-flow transfers characteristic of ROP chains.
+// ExploitGuardEafPlus detects calls to exported APIs from illegitimate locations, a common ROP payload objective.
+| where ActionType in ("ExploitGuardRop", "ExploitGuardEafPlus")
+// FP Tuning: Some legitimate applications with custom control flow mechanisms, packers, or DRM might trigger these events.
+// Exclude known legitimate processes if they cause false positives.
+// | where InitiatingProcessFileName !in~ ("legit_app1.exe", "legit_app2.exe")
+| project
+    Timestamp,
+    DeviceName,
+    ActionType,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessId,
+    ReportId, // Use ReportId to find related events for deeper investigation.
+    AdditionalFields // This field often contains crucial context like the target address or module.

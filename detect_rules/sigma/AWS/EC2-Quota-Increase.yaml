@@ -1,0 +1,31 @@
+title: AWS EC2 Service Quota Increase Request
+id: be33cbde-378d-4835-aad0-aff05bdc003e
+status: experimental
+description: |
+  Detects an attempt to increase the service quota for EC2 instances. This activity is often a precursor to cryptocurrency mining, where attackers need to provision a large number of virtual machines. The referenced report notes this as a preparatory step after creating new user accounts.
+references:
+  - https://expel.com/blog/incident-report-from-cli-to-console-chasing-an-attacker-in-aws/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.impact
+  - attack.t1496
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    # Detects the API call to request a service quota increase
+    eventName: 'RequestServiceQuotaIncrease'
+    # Filters for requests specifically related to the EC2 service
+    requestParameters.serviceCode: 'ec2'
+    # Focuses on actions taken by IAM users, which are more likely to be compromised than roles
+    userIdentity.type: 'IAMUser'
+    # Ensures the request was successfully submitted
+    errorCode:
+  condition: selection
+falsepositives:
+  - Legitimate requests by administrators to increase EC2 limits for expected growth or new projects.
+  - This detection can be made higher fidelity by correlating it with other events, such as the user making the request having been created very recently (e.g., within the last 24 hours).
+  - Consider creating an exclusion list for known administrative users or roles that are authorized to perform this action.
+level: medium

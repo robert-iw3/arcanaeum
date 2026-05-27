@@ -1,0 +1,49 @@
+// Name: SACL Canary Object Read
+// Author: RW
+// Date: 2025-08-07
+// Description: Detects when a specially configured Active Directory "canary" object has its properties read.
+// This technique is highly effective for detecting reconnaissance activities, including those using tools like SoaPy over ADWS or traditional LDAP queries.
+// An access attempt on a canary object is a high-fidelity indicator of reconnaissance.
+//
+// False Positive Sensitivity: Medium
+// This detection relies on pre-configured canary objects that should not be accessed during normal operations.
+// False positives can occur if legitimate administrative tools or scripts inadvertently access these objects.
+// It is crucial to populate the canary_objects list accurately and add any legitimate accounts to the allowlist.
+//
+// Prerequisites:
+// This detection requires System Access Control Lists (SACLs) to be configured on designated canary objects in Active Directory.
+// The SACL should be configured to audit "ReadProperty" access for the "Everyone" or "Authenticated Users" principal.
+// This will generate Event ID 4662 when the object's properties are read.
+//
+// MITRE ATT&CK: T1087.002, T1018
+
+let timeframe = 1h;
+// Add the Distinguished Names (DNs) of your canary objects to this list.
+// Example: 'CN=AdminCanary,OU=Canaries,DC=contoso,DC=local'
+let canary_objects = dynamic([]);
+// Add any accounts that are known to legitimately access canary objects to this list.
+let account_allowlist = dynamic([]);
+SecurityEvent
+| where TimeGenerated > ago(timeframe)
+// Event ID 4662 is generated for object operations when SACLs are configured.
+| where EventID == 4662
+// Filter for events where a property was read, a key indicator of enumeration.
+| where Accesses has "ReadProperty"
+// Focus on AD objects by filtering out file system objects.
+| where ObjectType !in ("File", "Key")
+// The core of the detection: check if the accessed object is a known canary.
+| where ObjectName in (canary_objects)
+// Extract the user from the SubjectAccount field (e.g., DOMAIN\user).
+| extend UserName = tostring(split(SubjectAccount, '\\')[1]),
+           DomainName = tostring(split(SubjectAccount, '\\')[0])
+// Filter out common legitimate accounts and any specifically allowlisted accounts.
+| where UserName !in (account_allowlist) and SubjectAccount !~ "SYSTEM" and not(UserName endswith "$")
+| project
+    TimeGenerated,
+    Computer,
+    SubjectAccount,
+    ObjectName,
+    ObjectType,
+    Accesses,
+    IpAddress,
+    IpPort

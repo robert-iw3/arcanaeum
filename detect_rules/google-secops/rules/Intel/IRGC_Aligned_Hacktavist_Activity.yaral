@@ -1,0 +1,51 @@
+rule iranian_proxy_and_hacktivist_activity {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects a range of tactics, techniques, and procedures (TTPs) associated with Iranian state-aligned and proxy hacktivist groups, including Handala Hack, Charming Kitten (APT35), and Cyber Av3ngers. This rule identifies potential wiper malware behavior, spear-phishing from known malicious domains, and network scanning for Industrial Control Systems (ICS)."
+    tags = "IRAN, HACKTIVIST, PROXY, APT35, CHARMING KITTEN, HANDALA HACK, CYBER AV3NGERS, WIPER, PHISHING, ICS"
+    tactic = "TA0040, TA0001, TA0007"
+    technique = "T1485, T1566, T1046"
+    false_positives = "Legitimate administrative scripts or applications may execute from temporary or user-profile directories. Network scanning for ICS/OT systems may be legitimate in some environments. The rule should be tuned to exclude known-good behavior."
+
+  events:
+    // Event 1: Detects potential wiper activity by looking for processes launched from unusual/temporary directories.
+    // This logic is derived from threat hunting queries for malware like that used by Handala Hack.
+    $wiper.metadata.event_type = "PROCESS_LAUNCH"
+    $wiper.principal.hostname = $hostname
+    re.regex($wiper.target.process.file.path, `(?i)(\\windows\\(temp|debug|servicing|media|repair)|\\users\\(public|default)|\\recycle\.bin|\\perflogs|\\temp)`)
+
+    // Event 2: Detects spear-phishing emails from domains associated with Charming Kitten (APT35).
+    $spearphish.metadata.event_type = "EMAIL_DELIVERED"
+    $spearphish.principal.hostname = $hostname
+    re.regex($spearphish.network.email.from, `(?i)rasaanah-iiis\.org|beginningofgraylife\.ddns\.net|yellowparallelworld\.ddns\.net|defaultbluemarker\.info|coral-polydactyl-dragonfruit\.glitch\.me|east-healthy-dress\.glitch\.me|wulpfsrqupnuqorhexiw\.supabase\.co|cloud-meeting-online\.onrender\.com|view-document-online\.onrender\.com|cloud-document-edit\.onrender\.com|prism-west-candy\.glitch\.me|editorservices\.onrender\.com|tgtoolsservice\.onrender\.com|ndrrftqrlblfecpupppp\.supabase\.co`)
+
+    // Event 3: Detects network traffic targeting Unitronics PLCs, a known target of the Cyber Av3ngers group.
+    // This may be noisy in environments where such devices are common. Consider scoping to non-OT network segments.
+    $ics_scan.metadata.event_type = "NETWORK_FLOW"
+    $ics_scan.target.port = 20256 // Unitronics PCOM port
+    $ics_scan.principal.hostname = $hostname
+
+  match:
+    $hostname over 1h
+
+  outcome:
+    // Risk score is elevated due to the specific nature of the threats.
+    $risk_score = 75
+    // Provides context on which threat was detected.
+    $threat_type = if($wiper, "Potential Wiper Activity", if($spearphish, "Charming Kitten Phishing Domain", if($ics_scan, "ICS Scanning (Unitronics)", "Unknown")))
+    $threat_group = if($wiper, "Handala Hack (Suspected)", if($spearphish, "Charming Kitten (APT35)", if($ics_scan, "Cyber Av3ngers", "Unknown")))
+    // MITRE ATT&CK mapping based on the detected event.
+    $tactic = if($wiper, "Impact", if($spearphish, "Initial Access", if($ics_scan, "Discovery", "Unknown")))
+    $technique = if($wiper, "Data Destruction (T1485)", if($spearphish, "Phishing (T1566)", if($ics_scan, "Network Service Scanning (T1046)", "Unknown")))
+    // Aggregating key fields for investigation.
+    $principal_hostname = array_distinct($hostname)
+    $wiper_process_path = array_distinct($wiper.target.process.file.path)
+    $phishing_sender = array_distinct($spearphish.network.email.from)
+    $ics_scan_source_ip = array_distinct($ics_scan.principal.ip)
+    $ics_scan_target_ip = array_distinct($ics_scan.target.ip)
+    $event_count = count_distinct($wiper.metadata.id) + count_distinct($spearphish.metadata.id) + count_distinct($ics_scan.metadata.id)
+
+  condition:
+    $wiper or $spearphish or $ics_scan
+}

@@ -1,0 +1,98 @@
+// Name: Mission Data Manipulation or Exfiltration from Ground Systems
+// Author: RW
+// Date: 2025-08-15
+// Description: Detects potential manipulation or exfiltration of mission-critical data from sensitive ground systems. The rule has two main parts:
+// 1. Data Staging: Identifies the creation of large archive files (e.g., .zip, .rar) on critical systems, which is a common precursor to exfiltration (T1074).
+// 2. Data Egress: Identifies unusually large outbound data transfers from these same systems to external IP addresses, potentially indicating exfiltration over a C2 channel or other means (T1041, T1030).
+// Tactic: Collection, Exfiltration
+// Technique: T1074, T1041, T1030, T1052
+// False Positive Sensitivity: Medium. Legitimate activities, such as system backups, software distribution, or authorized large data transfers, may trigger this alert.
+// It is crucial to tune the 'CriticalSystems' list and the 'ExfilThresholdBytes' to match your environment's baseline. Consider excluding known backup destinations or legitimate data sharing partner IPs.
+// References:
+// - https://attack.mitre.org/techniques/T1074/
+// - https://attack.mitre.org/techniques/T1041/
+// - https://attack.mitre.org/techniques/T1030/
+
+let lookback = 1d;
+// --- CONFIGURATION SECTION ---
+// Define the hostnames of critical ground systems that process mission data.
+// Example: dynamic(["SAT-CONTROL-01", "IMAGE-PROCESSOR-5", "GROUND-STATION-7"])
+let CriticalSystems = dynamic([]);
+// Define common file extensions used for staging data for exfiltration.
+let StagingExtensions = dynamic([".zip", ".rar", ".7z", ".tar", ".gz", ".tgz", ".iso"]);
+// Define the threshold for a large data transfer in bytes. Default is 50MB. This should be tuned to your environment's baseline.
+let ExfilThresholdBytes = 52428800;
+// Define private IP ranges to identify external connections.
+let PrivateIPRanges = dynamic(["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8"]);
+// --- END CONFIGURATION SECTION ---
+
+// Logic Part 1: Detect potential data staging on critical systems.
+let StagingDetection =
+DeviceFileEvents
+| where TimeGenerated > ago(lookback)
+// Focus on file creation events on the specified critical systems.
+| where ActionType == "FileCreated" and DeviceName in~ (CriticalSystems)
+// Look for common archive file extensions.
+| where FileName has_any (StagingExtensions)
+// Filter for files that are unusually large, suggesting aggregation of multiple files.
+| where FileSize > (ExfilThresholdBytes / 2) // Staged files might be smaller than the full exfil, so we use a lower threshold.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    StagedFiles = make_set(pack("file", FileName, "size", FileSize)),
+    count()
+    by
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine
+| extend
+    DetectionMethod = "Potential Data Staging Detected",
+    // Add empty fields for union compatibility.
+    RemoteIP = "", DestinationPort = "", TotalBytesOut = 0;
+
+// Logic Part 2: Detect large data egress from critical systems.
+let EgressDetection =
+DeviceNetworkEvents
+| where TimeGenerated > ago(lookback)
+// Focus on network connections originating from the specified critical systems.
+| where DeviceName in~ (CriticalSystems)
+// Filter for connections to external, non-private IP addresses.
+| where isnotempty(RemoteIP) and not(ipv4_is_in_any_range(RemoteIP, PrivateIPRanges))
+// Filter for outbound data transfers exceeding the defined threshold.
+| where TotalBytesOut > ExfilThresholdBytes
+// FP Tuning: Exclude connections to known good destinations like backup servers or partner networks.
+// | where RemoteIP !in ("<trusted_ip_1>", "<trusted_ip_2>")
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    TotalBytesOut = sum(TotalBytesOut),
+    DestinationPorts = make_set(DestinationPort),
+    count()
+    by
+    DeviceName,
+    RemoteIP,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine
+| extend
+    DetectionMethod = "Large Data Egress Detected",
+    // Add empty fields for union compatibility.
+    StagedFiles = pack_array(""), DestinationPort = tostring(DestinationPorts);
+
+// Combine the results from both detection methods.
+union StagingDetection, EgressDetection
+| project
+    StartTime,
+    EndTime,
+    DetectionMethod,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RemoteIP,
+    DestinationPort,
+    TotalBytesOut,
+    StagedFiles
+| extend
+    timestamp = StartTime,
+    HostName = tostring(split(DeviceName, ".")[0]),
+    DvcHostname = DeviceName,
+    AccountCustomEntity = RemoteIP

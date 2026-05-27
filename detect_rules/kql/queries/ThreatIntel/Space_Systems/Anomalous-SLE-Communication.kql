@@ -1,0 +1,61 @@
+// Name: Anomalous SLE Communication Detected
+// Author: RW
+// Date: 2025-08-19
+// Description: This rule establishes a baseline of normal Space Link Extension (SLE) message frequency between assets
+// and detects significant deviations. A sudden spike or drop in messages like CLTU-BIND, START, or STOP could indicate
+// session manipulation, denial-of-service attempts, or unauthorized control, as described in the provided intelligence.
+// Tactic: Impact, Initial Access
+// Technique: T1499.003 (Application or System Exploitation), T1190 (Exploit Public-Facing Application)
+// False Positive Sensitivity: Medium. Anomaly detection is sensitive to environmental changes.
+// False positives can occur during scheduled maintenance, operational procedure changes, or initial learning periods.
+// A longer baseline period (e.g., 14-30 days) is recommended for accuracy. Tune the 'anomaly_threshold' to adjust sensitivity.
+
+// IMPORTANT: This query requires a data source with Deep Packet Inspection (DPI) capabilities (e.g., Zeek, Corelight) and a sufficiently long data retention period to build a reliable baseline.
+// You must replace 'NetworkTrafficPayloads' with your table name and ensure it has fields for payload content and size.
+let DpiLogs = view () {
+    NetworkTrafficPayloads // Replace with your table
+};
+
+// Define time parameters. The baseline period should be significantly longer than the detection period.
+let detection_period = 1h;
+let baseline_period = 14d;
+let bin_size = 10m;
+// Set the sensitivity for anomaly detection. Higher values are less sensitive. Typical values are 1.5-3.
+let anomaly_threshold = 1.5;
+
+// Define the ASN.1 signatures for SLE messages based on the intelligence.
+// NOTE: Only CLTU-BIND ('bf64') is explicitly identified. The others are placeholders and MUST be verified against the SLE protocol specification for your environment.
+let SleMessages = datatable(MessageType:string, Signature:string) [
+    "CLTU-BIND", "bf64",
+    "CLTU-UNBIND", "bf65", // Placeholder
+    "CLTU-START", "bf66", // Placeholder
+    "CLTU-STOP", "bf67", // Placeholder
+    "CLTU-TRANSFER_DATA", "bf68" // Placeholder
+];
+
+DpiLogs
+| where TimeGenerated between (ago(baseline_period) .. now())
+| where isnotempty(Payload)
+// To increase fidelity, filter for traffic involving critical assets like Mission Control Systems or Ground Stations.
+// Example: | where SourceIp in (critical_assets_watchlist) or DestinationIp in (critical_assets_watchlist)
+| parse kind=regex Payload with * "a0" Signature:string rest
+| extend Signature = tolower(substring(Signature, 0, 4))
+| lookup SleMessages on Signature
+| where isnotempty(MessageType)
+// Create a time series of message counts for each source-destination-message type combination.
+| make-series MessageCount=count() on TimeGenerated from ago(baseline_period) to now() step bin_size by SourceIP, DestinationIP, MessageType
+// Apply anomaly detection to the time series.
+| extend (Anomalies, Score, Baseline) = series_decompose_anomalies(MessageCount, anomaly_threshold, -1, 'linefit')
+| mv-expand TimeGenerated, MessageCount, Anomalies, Score, Baseline
+| where TimeGenerated >= ago(detection_period)
+// Filter for events that are flagged as anomalies.
+| where Anomalies > 0
+| project
+    TimeGenerated,
+    SourceIP,
+    DestinationIP,
+    MessageType,
+    MessageCount,
+    Baseline = round(Baseline, 2),
+    AnomalyScore = round(Score, 2)
+| order by TimeGenerated desc

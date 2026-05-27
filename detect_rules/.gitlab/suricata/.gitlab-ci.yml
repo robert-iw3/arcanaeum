@@ -1,0 +1,34 @@
+stages:
+  - transform
+
+suricata_transform_rules:
+  stage: transform
+  image: python:3.12
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "release"'
+      changes:
+        - suricata/custom/*
+      when: always
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}-pip
+    paths:
+      - .cache/pip
+  variables:
+    PIP_CACHE_DIR: .cache/pip
+  script:
+    - set -e
+    - cd suricata
+    - pip install --upgrade pip
+    - pip install pyyaml>=6.0.1
+    - python parse_suricata_rules.py
+    - if command -v suricata; then suricata -T -c transformed_rules/suricata_datasets.yaml -S transformed_rules/*.rules; else echo "Suricata not installed, skipping rule validation"; fi
+    - git config user.name "GitLab CI"
+    - git config user.email "ci@gitlab.com"
+    - git add transformed_rules/*
+    - git diff --quiet && git diff --staged --quiet || git commit -m "Update transformed Suricata rules"
+    - git push "https://oauth2:$CI_JOB_TOKEN@$CI_SERVER_HOST/$CI_PROJECT_PATH.git" HEAD:$CI_COMMIT_REF_NAME
+  artifacts:
+    paths:
+      - suricata/transformed_rules/*
+    expire_in: 7 days
+    when: always

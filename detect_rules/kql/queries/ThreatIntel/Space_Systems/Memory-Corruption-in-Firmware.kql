@@ -1,0 +1,49 @@
+// name: Potential Memory Corruption Exploit via Large Data Transfer to Satellite Control Systems
+// author: RW
+// date: 2025-08-18
+// description: Detects unusually large data transfers from a single external source to a known satellite control system.
+// This could indicate an attempt to exploit a memory corruption vulnerability (e.g., buffer overflow) in the satellite's
+// firmware by sending a malformed telecommand (TC) with an oversized payload.
+// references: https://www.ndss-symposium.org/wp-content/uploads/2023/02/ndss2023_s25_paper.pdf
+// data_source: network_traffic
+// false_positive_sensitivity: medium
+
+let timeframe = 1h;
+// Define a threshold for what is considered an unusually large data transfer.
+// This is a critical tuning parameter and should be adjusted based on normal traffic patterns to the control systems.
+let data_volume_threshold = 1000000; // 1 MB
+
+// Define the list of authorized Ground Station IP addresses and administrative networks.
+let authorized_ips = datatable(ip_address:string) [
+    "203.0.113.10", // Placeholder for authorized Ground Station (GS) 1
+    "198.51.100.55", // Placeholder for authorized GS 2
+    "192.0.2.0/24"   // Placeholder for an authorized administrative network range
+];
+
+// Define the list of satellite control system IP addresses or hostnames.
+let satellite_control_systems = datatable(target_address:string) [
+    "198.18.0.1", // Placeholder for satellite control system 1
+    "sat-control.corp.net" // Placeholder for satellite control system 2
+];
+
+// Using CommonSecurityLog as a placeholder for network traffic logs. Adjust table name as needed.
+CommonSecurityLog
+| where TimeGenerated > ago(timeframe)
+// Filter for traffic to satellite control systems from external, non-authorized IPs.
+| where (DestinationIP in (satellite_control_systems) or DestinationHost in (satellite_control_systems))
+    and (isnotempty(SourceIP) and not(ipv4_is_private(SourceIP)))
+    and SourceIP !in (authorized_ips)
+// Summarize traffic from each source to each destination over the timeframe.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    TotalBytesSent = sum(SentBytes),
+    TotalBytesReceived = sum(ReceivedBytes),
+    DestinationPorts = make_set(DestinationPort),
+    EventCount = count()
+    by SourceIP, DestinationIP, DestinationHost
+// Alert if the total data sent from a single source exceeds the defined threshold.
+| where TotalBytesSent > data_volume_threshold
+// FP Mitigation: The 'data_volume_threshold' is a heuristic. Legitimate activities like large file transfers or software updates could trigger this.
+// It's crucial to establish a baseline of normal traffic volumes to these specific systems and adjust the threshold accordingly.
+// Also, ensure the 'authorized_ips' and 'satellite_control_systems' lists are comprehensive and accurate.

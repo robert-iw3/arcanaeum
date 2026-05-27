@@ -1,0 +1,69 @@
+rule insider_threat_activity_on_critical_systems {
+
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects when a privileged user on a critical space system performs suspicious actions, such as disabling security controls, followed by either account manipulation or accessing an unusually large number of sensitive files. This combination of events could indicate malicious insider activity."
+    reference = "id-76c7b8b0b6d27f004dcbec4248f3eaded30e1641a5a37b59d97465c08c28876d"
+    tactic = "TA0005, TA0003, TA0009"
+    technique = "T1562.001, T1098, T1078"
+    false_positives = "Legitimate administrative activities, such as system maintenance or troubleshooting, might trigger this rule. Tuning the privileged user lists, critical system lists, and the data access threshold is essential to reduce false positives."
+    severity = "HIGH"
+
+  events:
+    // Event for a privileged user disabling or modifying a security tool.
+    $tampering.metadata.event_type = "PROCESS_LAUNCH"
+    $tampering.principal.hostname = $hostname
+    $tampering.principal.user.userid = $user
+    // The user performing the action should be part of a privileged group.
+    // The '%privileged_users' list should contain user IDs of administrators.
+    $user in %privileged_users
+    // The activity must occur on a designated critical system.
+    // The '%critical_space_systems' list should contain hostnames of ground control stations, etc.
+    $hostname in %critical_space_systems
+    // Detects use of common system utilities to manage services or processes.
+    re.regex($tampering.target.process.file.path, `(?i)(sc|net|powershell|pwsh|taskkill)\.exe$`)
+    // Detects commands used to stop, disable, or kill services/processes.
+    re.regex($tampering.target.process.command_line, `(?i)(stop|disable|delete|kill|set-service\s+.*-startuptype\s+disabled)`)
+    // The command should target a known security service.
+    // The '%security_services_regex' list should contain patterns for AV, EDR, or logging services.
+    re.regex($tampering.target.process.command_line, %security_services_regex)
+
+    // Event for account manipulation by the same user.
+    $account_manipulation.metadata.event_type = "GROUP_MEMBER_ADDED"
+    $account_manipulation.principal.hostname = $hostname
+    $account_manipulation.principal.user.userid = $user
+    // Focus on additions to sensitive groups like Administrators or Domain Admins.
+    // The '%privileged_groups_regex' list should be tuned for your environment.
+    re.regex($account_manipulation.target.user.group.name, %privileged_groups_regex)
+
+    // Event for accessing a large volume of files in sensitive locations.
+    $data_hoarding.metadata.event_type = "FILE_OPEN"
+    $data_hoarding.principal.hostname = $hostname
+    $data_hoarding.principal.user.userid = $user
+    // Focus on file access within directories known to hold sensitive data.
+    // The '%sensitive_data_paths_regex' list should contain paths to mission data, credentials, etc.
+    re.regex($data_hoarding.target.file.path, %sensitive_data_paths_regex)
+
+  match:
+    // Correlate these activities by the same user on the same host within a 2-hour window.
+    $user, $hostname over 2h
+
+  outcome:
+    // Set a high risk score due to the combination of suspicious insider actions.
+    $risk_score = 80
+    $principal_hostname = array_distinct($hostname)
+    $principal_user_userid = array_distinct($user)
+
+    // Capture details about the suspicious activities.
+    $tampering_commands = array_distinct($tampering.target.process.command_line)
+    $manipulated_accounts = array_distinct($account_manipulation.target.user.userid)
+    $manipulated_groups = array_distinct($account_manipulation.target.user.group.name)
+    $sensitive_files_accessed_count = count_distinct($data_hoarding.target.file.full_path)
+    $event_count = count_distinct($tampering.metadata.id) + count_distinct($account_manipulation.metadata.id) + $sensitive_files_accessed_count
+
+  condition:
+    // Trigger if security tampering occurs, followed by either account manipulation or significant data access.
+    // The threshold for data hoarding (e.g., > 100) should be tuned based on normal user behavior.
+    $tampering and (#account_manipulation > 0 or #data_hoarding > 100)
+}

@@ -1,0 +1,56 @@
+// Name: Suspicious OAuth Application Consent
+// Author: RW
+// Date: 2025-08-09
+// Description: This rule detects when a user grants consent to an OAuth application that requests high-risk permissions.
+// This is a key TTP in OAuth consent phishing attacks, where attackers trick users into granting malicious applications
+// access to their data and services.
+// False Positives: Legitimate applications may require some of these permissions. It is crucial to tune the 'applicationAllowList'.
+// Investigate the application's publisher status; unverified publishers are a significant risk factor.
+
+let highRiskPermissions = dynamic([
+    "Mail.ReadWrite",
+    "Mail.Send",
+    "MailboxSettings.ReadWrite",
+    "Calendars.ReadWrite",
+    "Contacts.ReadWrite",
+    "Files.ReadWrite.All",
+    "Directory.ReadWrite.All",
+    "User.ReadWrite.All",
+    "Group.ReadWrite.All",
+    "Application.ReadWrite.All",
+    "AppRoleAssignment.ReadWrite.All",
+    "Policy.ReadWrite.All",
+    "Domain.ReadWrite.All",
+    "user_impersonation"
+]);
+// Add well-known and trusted Application IDs (Client IDs) to this list to reduce false positives.
+let applicationAllowList = dynamic([
+    // Example: "00000002-0000-0000-c000-000000000000", // Azure AD Graph API
+    // Example: "00000003-0000-0000-c000-000000000000"  // Microsoft Graph
+]);
+AuditLogs
+| where Category == "ApplicationManagement" and OperationName == "Consent to application" and Result == "Success"
+// mv-expand to parse the TargetResources field which contains details about the consented application
+| mv-expand TargetResources
+| where TargetResources.type == "ServicePrincipal"
+| extend AppDisplayName = tostring(TargetResources.displayName)
+| extend AppId = tostring(TargetResources.servicePrincipalId) // This is the Client ID of the application
+| where isnotempty(AppId) and not(AppId in (applicationAllowList))
+// mv-expand again to parse the modifiedProperties which contains the granted permissions
+| mv-expand TargetResources.modifiedProperties
+| where TargetResources_modifiedProperties.displayName == "ConsentAction.Permissions"
+| extend PermissionsGranted = todynamic(TargetResources_modifiedProperties.newValue)
+| mv-expand Permission = PermissionsGranted
+| extend Permission = tostring(Permission)
+// Check if any of the granted permissions are in our high-risk list or follow a risky pattern
+| where Permission in (highRiskPermissions) or Permission has_any (".ReadWrite.All", ".Read.All")
+| extend UserPrincipalName = tostring(InitiatedBy.user.userPrincipalName)
+| extend IpAddress = tostring(InitiatedBy.user.ipAddress)
+| summarize
+    TimeGenerated = arg_max(TimeGenerated, *),
+    GrantedPermissions = make_set(Permission)
+    by OperationName, UserPrincipalName, IpAddress, AppDisplayName, AppId
+| extend
+    timestamp = TimeGenerated,
+    AccountCustomEntity = UserPrincipalName,
+    IpCustomEntity = IpAddress

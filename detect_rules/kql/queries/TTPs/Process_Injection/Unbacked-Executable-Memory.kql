@@ -1,0 +1,46 @@
+// Name: Unbacked Executable Memory Allocation
+// Author: RW
+// Date: 2025-08-02
+// Description: Detects the allocation of private, executable memory within a process. This is a common behavior for legitimate Just-In-Time (JIT) compilers, but it is also a core primitive for malware and fileless attacks to stage and execute shellcode.
+// False Positives: Medium. This behavior is common in browsers, .NET applications, Java applications, and some software packers. Tuning is required to filter out legitimate processes.
+// Tactic: Defense Evasion, Execution
+// Technique: T1055
+
+// Note: The specific table and field names (e.g., ActionType, MemoryProtection, MemoryType) may vary depending on your EDR/logging solution.
+// This query assumes an event is generated for memory allocation API calls like VirtualAlloc.
+DeviceEvents
+// Look for an event type that corresponds to memory allocation. "VirtualAllocApiCall" is a placeholder.
+| where ActionType == "VirtualAllocApiCall"
+// Filter for memory regions that are executable.
+// Corresponds to PAGE_EXECUTE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY.
+| where MemoryProtection has_any ("Execute", "ExecuteRead", "ExecuteReadWrite", "ExecuteWriteCopy")
+// Filter for memory that is not backed by a file on disk (MEM_PRIVATE).
+| where MemoryType == "Private"
+// FP Tuning: Exclude common processes known to use JIT compilation or other legitimate dynamic code generation.
+| where not(InitiatingProcessFileName has_any (
+    "chrome.exe",
+    "firefox.exe",
+    "msedge.exe",
+    "javaw.exe",
+    "powershell.exe",
+    "csc.exe",
+    "MSBuild.exe"
+    // Add other legitimate applications that perform this behavior here.
+))
+// FP Tuning: Exclude processes signed by trusted publishers if noise is high.
+// | where not(isnotempty(InitiatingProcessSigner) and InitiatingProcessSigner has "Microsoft Corporation")
+| summarize
+    FirstSeen = min(Timestamp),
+    LastSeen = max(Timestamp),
+    Allocations = count(),
+    ProtectionTypes = make_set(MemoryProtection)
+    by DeviceId, InitiatingProcessFileName, InitiatingProcessId, InitiatingProcessCommandLine
+| project
+    Timestamp = FirstSeen,
+    LastSeen,
+    DeviceId,
+    ProcessName = InitiatingProcessFileName,
+    ProcessId = InitiatingProcessId,
+    ProcessCommandLine = InitiatingProcessCommandLine,
+    AllocationCount = Allocations,
+    MemoryProtectionTypes = ProtectionTypes

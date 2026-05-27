@@ -1,0 +1,42 @@
+// Name: Shade BIOS Virtual Memory Handling
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects the virtual memory manipulation technique used by Shade BIOS. To access physical memory from its
+//              runtime DXE driver, the malware uses "Partial Identity Mapping." This involves temporarily swapping the
+//              page table (e.g., modifying the CR3 register or PML4[0] entry) to switch from the OS's virtual address
+//              space to an identity-mapped space. This rule looks for anomalous modifications to page table structures from unexpected processes.
+// RequiredDataConnectors: This detection requires a highly specialized data source capable of monitoring CPU control register writes
+// (like CR3) or direct page table modifications.
+// This is not a standard log source and may require hypervisor-level introspection (example: vmWare NSX/sVM/vShield)
+// or advanced EDR agents with firmware visibility (example: crowdstrike/sentinel one).
+// otherwise detect via mem forensic analysis: https://github.com/tandasat/kraft_dinner
+// Tactic: Defense Evasion
+// TacticID: TA0005
+// Technique: Direct Kernel Object Manipulation
+// TechniqueID: T1543.002
+
+let shadeBiosVirtualMemory = (v_table_name:string) {
+    table(v_table_name)
+    // This query assumes a custom log table with fields for low-level CPU/kernel event monitoring.
+    // The ActionType 'PageTableModification' is a placeholder for this specific activity.
+    | where ActionType == "PageTableModification"
+    // The key indicator is the process initiating the change. The OS kernel and hypervisor components are expected to do this.
+    // Activity from any other process, or from a null/unknown context, is highly suspicious.
+    | where isempty(InitiatingProcessFolderPath) or (InitiatingProcessFolderPath !has @"C:\Windows\System32\" and InitiatingProcessFileName !in ("ntoskrnl.exe", "hvix64.exe", "hvax64.exe"))
+    // FP Tuning: Some legitimate third-party drivers (e.g., for virtualization or security products) might perform low-level page table management.
+    // If false positives occur, exclude known-good signed drivers.
+    // For example: | where InitiatingProcessFileName !in ("known_good_driver.sys")
+    | project
+        TimeGenerated,
+        DeviceName,
+        ActionType,
+        InitiatingProcessFileName,
+        InitiatingProcessFolderPath,
+        Description = "Anomalous modification of page table detected."
+    | extend
+        timestamp = TimeGenerated,
+        HostCustomEntity = DeviceName,
+        ProcessCustomEntity = InitiatingProcessFileName
+};
+// Replace 'LowLevelCpuEvents' with the actual table name containing the required monitoring logs.
+shadeBiosVirtualMemory('LowLevelCpuEvents')

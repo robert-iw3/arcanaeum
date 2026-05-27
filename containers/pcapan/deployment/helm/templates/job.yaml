@@ -1,0 +1,28 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Chart.Name }}-analyzer
+  namespace: {{ .Release.Namespace }}
+spec:
+  template:
+    spec:
+      containers:
+      - name: {{ .Chart.Name }}
+        image: {{ .Values.image.analyzer.repository }}:{{ .Values.image.analyzer.tag }}
+        imagePullPolicy: {{ .Values.image.analyzer.pullPolicy }}
+        command: ["pcapan", "--dir", "/pcaps", "--whitelist", "/whitelist.yaml", "--output", "/results.json"]
+        volumeMounts:
+        - name: pcaps
+          mountPath: /pcaps
+        - name: whitelist
+          mountPath: /whitelist.yaml
+          subPath: whitelist.yaml
+      volumes:
+      - name: pcaps
+        persistentVolumeClaim:
+          claimName: {{ .Chart.Name }}-pvc
+      - name: whitelist
+        configMap:
+          name: {{ .Chart.Name }}-config
+      restartPolicy: Never
+  backoffLimit: 3

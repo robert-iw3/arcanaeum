@@ -1,0 +1,53 @@
+title: Suspicious SSH Key Push to VM
+id: 231f386d-931e-4edf-bfaf-91877574b92e
+status: experimental
+description: Detects attempts to push SSH public keys to a Virtual Machine (VM) across AWS, Azure, and GCP. Attackers with sufficient permissions can use this technique to add their own SSH keys to a VM, granting them persistent and unauthorized access.
+references:
+  - https://unit42.paloaltonetworks.com/cloud-virtual-machine-attack-vectors/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.persistence
+  - attack.initial_access
+logsource:
+  category: cloud
+detection:
+  aws_ssh_push:
+        # Detects SSH key push using EC2 Instance Connect
+    logsource:
+      service: cloudtrail
+      product: aws
+    eventName: 'SendSSHPublicKey'
+  azure_ssh_push:
+        # Detects installation of the VMAccess extension used to manage users and push SSH keys
+    logsource:
+      service: activitylogs
+      product: azure
+    operation_name: 'Microsoft.Compute/virtualMachines/extensions/write'
+    status: 'Succeeded'
+    properties:
+      type|contains: 'VMAccess'       # Covers VMAccessForLinux and VMAccessAgent
+  gcp_metadata_ssh_push:
+        # Detects modification of instance or project metadata to add SSH keys
+    logsource:
+      service: gcp.audit
+    methodName:
+      - 'v1.compute.instances.setMetadata'
+      - 'v1.compute.projects.setCommonInstanceMetadata'
+    resource:
+      request:
+        metadata:
+          items:
+            key: 'ssh-keys'
+  gcp_oslogin_ssh_push:
+        # Detects SSH key import using the OS Login feature
+    logsource:
+      service: gcp.audit
+    methodName: 'v1.oslogin.users.importSshPublicKey'
+  condition: aws_ssh_push or azure_ssh_push or gcp_metadata_ssh_push or gcp_oslogin_ssh_push
+falsepositives:
+  - Legitimate administrative activities involving SSH key management for users or service accounts.
+  - Automated configuration management tools (e.g., Terraform, Ansible) provisioning or updating VMs.
+  - Emergency break-glass procedures to gain access to a VM.
+  - To reduce false positives, filter for events initiated by non-administrative users, from untrusted IP ranges, or outside of expected change windows.
+level: medium

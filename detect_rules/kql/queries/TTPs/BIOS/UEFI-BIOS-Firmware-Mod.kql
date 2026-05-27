@@ -1,0 +1,48 @@
+// Rule Title: UEFI/BIOS Firmware Modification Attempt
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects attempts to modify system boot configuration or create suspicious files in the EFI System Partition (ESP).
+//              Such behavior is associated with UEFI bootkits like BlackLotus, LoJax, and MosaicRegressor, which modify the boot process for persistence.
+// MITRE TTPs: T1542.001, T1542.003
+
+(union isfuzzy=true
+    (
+        // Detects suspicious modification of boot configuration using bcdedit.exe
+        DeviceProcessEvents
+        | where ProcessCommandLine has_all ("bcdedit", "/set", "path")
+        | extend
+            BootEntry = extract(@"(?i)/set\s+({[\w-]+}|current|default|bootmgr)\s+", 1, ProcessCommandLine),
+            NewPath = extract(@"(?i)\spath\s+([\\\w\.\\]+)", 1, ProcessCommandLine)
+        | where isnotempty(BootEntry) and isnotempty(NewPath)
+        // FP Tuning: Legitimate recovery tools or dual-boot configurations might use different paths.
+        // Add any known legitimate paths for your environment to this exclusion list.
+        | where not (
+            NewPath matches regex @"(?i)\\Windows\\system32\\winload\.(efi|exe)"
+            or NewPath matches regex @"(?i)\\EFI\\Microsoft\\Boot\\bootmgfw\.efi"
+            )
+        | extend
+            RuleName = "Suspicious BCDEDIT Boot Path Modification",
+            SuspiciousEntity = NewPath,
+            EntityType = "File"
+        | project-reorder TimeGenerated, DeviceName, RuleName, SuspiciousEntity, EntityType, InitiatingProcessFileName, ProcessCommandLine
+    ),
+    (
+        // Detects suspicious file creation in the EFI System Partition (ESP)
+        DeviceFileEvents
+        | where ActionType == "FileCreated"
+        // Key directories within the EFI System Partition (ESP)
+        | where FolderPath has_all (@"\EFI\", @"\Boot\") and FileName endswith ".efi"
+        // FP Tuning: Windows updates and installers legitimately write to the ESP.
+        // This list of legitimate processes may need to be expanded based on your environment.
+        | where not(InitiatingProcessFileName in~ (
+            "bcdboot.exe", "TiWorker.exe", "TrustedInstaller.exe", "svchost.exe",
+            "setup.exe", "dism.exe", "wuauclt.exe", "msiexec.exe", "bootim.exe"
+            )
+        )
+        | extend
+            RuleName = "Suspicious EFI File Creation",
+            SuspiciousEntity = FileName,
+            EntityType = "File"
+        | project-reorder TimeGenerated, DeviceName, RuleName, SuspiciousEntity, EntityType, InitiatingProcessFileName, InitiatingProcessCommandLine, FolderPath
+    )
+)

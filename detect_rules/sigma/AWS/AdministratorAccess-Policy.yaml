@@ -1,0 +1,28 @@
+title: AWS AdministratorAccess Policy Attached to an IAM User
+id: 6bb7ebe5-07c4-4d82-9363-7b53d2d9e90b
+status: experimental
+description: |
+  Detects the attachment of the AWS-managed 'AdministratorAccess' policy to an IAM user. This action grants full administrative privileges over the AWS account and is a critical privilege escalation technique used by attackers to gain complete control after an initial compromise, as seen in the referenced Expel report.
+references:
+  - https://expel.com/blog/incident-report-from-cli-to-console-chasing-an-attacker-in-aws/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.privilege_escalation
+  - attack.t1078.004
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+    # Detects the specific API call for attaching a policy to a user
+    eventName: 'AttachUserPolicy'
+    # Filters for the attachment of the full AdministratorAccess policy
+    requestParameters.policyArn: 'arn:aws:iam::aws:policy/AdministratorAccess'
+    # Ensures the action was successful
+    errorCode:
+  condition: selection
+falsepositives:
+  - Legitimate creation of a new administrator account by authorized personnel.
+  - This alert is high-fidelity for indicating a high-impact change but may be noisy in environments where administrative users are frequently created. It should be correlated with other signals like the user being newly created or the action originating from an unusual source.
+level: high

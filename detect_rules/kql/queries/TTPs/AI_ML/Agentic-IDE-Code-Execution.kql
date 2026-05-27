@@ -1,0 +1,88 @@
+// Name: Agentic IDE Unauthorized Code Execution
+// Author: RW
+// Date: 2025-08-15
+// Description: Detects potential unauthorized code execution originating from an Agentic IDE like Cursor.
+// This can occur when the IDE's AI assistant is manipulated by malicious instructions embedded in project
+// files (e.g., .cursorrules) or code comments, leading it to run unexpected commands.
+// This detection is based on the "From Prompts to Pwns" presentation.
+// False Positive Sensitivity: Medium
+// References:
+// - From Prompts to Pwns: Exploiting and Securing AI Agents (Black Hat USA 2025)
+// - https://developer.nvidia.com/blog/tag/ai-red-team/
+// Tactics: Execution
+// Techniques: T1059
+// Assumes log sources like DeviceProcessEvents and DeviceFileEvents.
+
+// Define the process names of common Agentic IDEs or IDEs with powerful agent plugins.
+let agenticIdeProcesses = dynamic([
+    "cursor.exe", // Cursor IDE
+    "Code.exe"    // VS Code, which can have agentic extensions
+]);
+
+// Define shell or utility processes that are suspicious when spawned by an IDE without explicit user action.
+let suspiciousChildProcesses = dynamic([
+    "powershell.exe", "pwsh.exe",
+    "cmd.exe",
+    "bash.exe", "sh.exe", "zsh.exe",
+    "curl.exe", "wget.exe"
+]);
+
+// Define parts of commands that are highly suspicious in this context.
+let suspiciousCommandPatterns = dynamic([
+    "Invoke-Expression", "IEX", "DownloadString", // PowerShell download cradles
+    "whoami", "hostname", "id", "ipconfig", "ifconfig", // Discovery commands
+    "net user", "net group",
+    "/etc/passwd", "/etc/shadow", // Sensitive file access
+    "nc.exe", "ncat.exe" // Netcat for reverse shells
+]);
+
+(union isfuzzy=true
+    (
+        // Condition 1: An agentic IDE spawns a suspicious process with a suspicious command line.
+        DeviceProcessEvents
+        | where InitiatingProcessFileName in~ (agenticIdeProcesses)
+          and FileName in~ (suspiciousChildProcesses)
+          and ProcessCommandLine has_any (suspiciousCommandPatterns)
+        // FP Tuning: Some developer tasks or extensions might legitimately run shell commands.
+        // Consider excluding known-good command lines or scripts if they cause noise.
+        // Example: `| where not (ProcessCommandLine contains "run-build-script.ps1")`
+        | project
+            TimeGenerated,
+            DetectionMethod = "Suspicious Process from Agentic IDE",
+            DeviceName,
+            AccountName,
+            SuspiciousProcess = FileName,
+            SuspiciousCommandLine = ProcessCommandLine,
+            ParentProcess = InitiatingProcessFileName,
+            FilePath,
+            SHA256
+    ),
+    (
+        // Condition 2: A .cursorrules file is created, which can contain malicious instructions for the Cursor IDE.
+        DeviceFileEvents
+        | where ActionType in ("FileCreated", "FileRenamed") and FileName =~ ".cursorrules"
+        // FP Tuning: A developer might create this file for legitimate reasons. However, its creation,
+        // especially in a newly cloned repository, warrants investigation.
+        // Correlating this with network activity from the IDE could increase fidelity.
+        | project
+            TimeGenerated,
+            DetectionMethod = "Suspicious Agentic IDE Config File Created",
+            DeviceName,
+            AccountName,
+            SuspiciousProcess = InitiatingProcessFileName,
+            SuspiciousCommandLine = strcat("File created: ", FileName),
+            ParentProcess = "",
+            FilePath = FolderPath,
+            SHA256
+    )
+)
+| project-reorder
+    TimeGenerated,
+    DetectionMethod,
+    DeviceName,
+    AccountName,
+    ParentProcess,
+    SuspiciousProcess,
+    SuspiciousCommandLine,
+    FilePath,
+    SHA256

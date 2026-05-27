@@ -1,0 +1,109 @@
+{
+  "rule_id": "llmnr_nbt_ns_poisoning_detection",
+  "name": "LLMNR/NBT-NS Poisoning Detection",
+  "description": "Detects potential LLMNR or NBT-NS poisoning activity by identifying a single source IP responding to a large number of unique destination IPs on ports 137 or 5355.",
+  "severity": "high",
+  "enabled": true,
+  "language": "esql",
+  "query": "from logs-packetbeat-* | where network.transport == 'udp' and destination.port in (137, 5355) | stats victim_count = COUNT(DISTINCT destination.ip) BY source.ip | where victim_count > 10 | keep source.ip, victim_count | sort victim_count DESC",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0008",
+        "name": "Lateral Movement",
+        "reference": "https://attack.mitre.org/tactics/TA0008/"
+      },
+      "technique": [
+        {
+          "id": "T1557",
+          "name": "Adversary-in-the-Middle",
+          "reference": "https://attack.mitre.org/techniques/T1557/"
+        }
+      ]
+    }
+  ],
+  "interval": "15m",
+  "from": "now-15m",
+  "max_signals": 100,
+  "risk_score": 75,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://attack.mitre.org/techniques/T1557/001/"
+  ],
+  "tags": [
+    "Packetbeat",
+    "LLMNR",
+    "NBT-NS",
+    "Lateral Movement"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "source.ip"
+}
+{
+  "rule_id": "rogue_dns_server_detection",
+  "name": "Potential Rogue DNS Server Detection",
+  "description": "Detects potential rogue DNS server activity by identifying a single destination IP receiving DNS queries (A/AAAA/ANY) from multiple unique source IPs. This rule uses an exception list to exclude authorized DNS servers.",
+  "severity": "high",
+  "enabled": true,
+  "language": "esql",
+  "query": "from logs-packetbeat-* | where dns.question.type IN ('AAAA', 'ANY', 'A') and destination.ip != '0.0.0.0' | stats victim_count = COUNT(DISTINCT source.ip) BY destination.ip | where victim_count > 1 | keep destination.ip, victim_count | sort victim_count DESC",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0008",
+        "name": "Lateral Movement",
+        "reference": "https://attack.mitre.org/tactics/TA0008/"
+      },
+      "technique": [
+        {
+          "id": "T1557",
+          "name": "Adversary-in-the-Middle",
+          "reference": "https://attack.mitre.org/techniques/T1557/"
+        }
+      ]
+    }
+  ],
+  "interval": "15m",
+  "from": "now-15m",
+  "max_signals": 100,
+  "risk_score": 80,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://attack.mitre.org/techniques/T1557/001/"
+  ],
+  "tags": [
+    "Packetbeat",
+    "DNS",
+    "Lateral Movement"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "exemptions": [
+    {
+      "name": "authorized_dns_servers_exemption",
+      "_comment": "Execute ../aux_rule_files/create_kibana_dns_exception_list.sh to create the list",
+      "description": "Exempts authorized DNS server IPs.",
+      "conditions": [
+        {
+          "field": "destination.ip",
+          "operator": "included",
+          "type": "list",
+          "list_id": "authorized_dns_servers"
+        }
+      ],
+      "enabled": true
+    }
+  ],
+  "custom_query_fields": [],
+  "event_group": "destination.ip"
+}

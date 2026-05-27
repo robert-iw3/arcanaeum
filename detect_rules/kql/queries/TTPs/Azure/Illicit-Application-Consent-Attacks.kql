@@ -1,0 +1,46 @@
+// Name: Illicit Application Consent Grant
+// Author: RW
+// Date: 2025-08-31
+// Description: Detects when a user grants consent to an application that requests high-privilege delegated permissions.
+// This is a key indicator of an illicit consent attack, where an attacker tricks a user into granting a malicious
+// application access to their data and services, often bypassing MFA.
+// MITRE ATT&CK: T1528 (Steal Application Access Token), T1566.001 (Phishing: Spearphishing Link)
+// False Positive Sensitivity: Medium
+
+// Define a list of high-privilege delegated permissions that are suspicious when granted by a non-admin user.
+let highPrivPermissions = dynamic([
+    "Application.ReadWrite.All",
+    "Directory.ReadWrite.All",
+    "Group.ReadWrite.All",
+    "Mail.ReadWrite",
+    "Mail.ReadWrite.Shared",
+    "MailboxSettings.ReadWrite",
+    "User.ReadWrite.All",
+    "Files.ReadWrite.All",
+    "Contacts.ReadWrite"
+]);
+AuditLogs
+| where Category == "ApplicationManagement" and OperationName == "Consent to application" and Result == "success"
+// Potential for false positives: Some legitimate, sanctioned applications may require high privileges.
+// Consider excluding known Application IDs or specific consenting users/groups to reduce noise.
+// For example: `| where TargetResources[0].displayName !in ("Known Good App")`
+// Further tuning could involve checking if the application publisher is verified, which requires more complex queries or joining with other data.
+| mv-apply property = todynamic(TargetResources[0].modifiedProperties) on (
+    where property.DisplayName == "ConsentAction.Permissions" // Find the property that lists the granted permissions
+    | project PermissionsGranted = tostring(property.NewValue)
+)
+| where isnotempty(PermissionsGranted)
+| where PermissionsGranted has_any (highPrivPermissions) // Check if any of the granted permissions are in the high-privilege list
+| extend
+    ConsentingUser = tostring(InitiatedBy.user.userPrincipalName),
+    ConsentingUserIp = tostring(InitiatedBy.user.ipAddress),
+    ApplicationName = tostring(TargetResources[0].displayName),
+    ApplicationId = tostring(TargetResources[0].id) // This is the Service Principal ID of the application
+| project
+    TimeGenerated,
+    OperationName,
+    ConsentingUser,
+    ConsentingUserIp,
+    ApplicationName,
+    ApplicationId,
+    PermissionsGranted

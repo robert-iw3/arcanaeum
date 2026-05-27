@@ -1,0 +1,49 @@
+// Name: Active Directory Reconnaissance via ADWS
+// Author: RW
+// Date: 2025-08-07
+// Description: Detects potential Active Directory reconnaissance activity conducted over Active Directory Web Services (ADWS).
+// Adversaries use tools like SoaPy to query AD via ADWS (TCP/9389) for a stealthier alternative to raw LDAP.
+// When a query is made via ADWS, the ADWS service on the Domain Controller issues a corresponding LDAP query locally.
+// This results in an LDAP search event (1644) showing a loopback address as the client.
+// This rule looks for a high number of unique LDAP queries originating from the loopback address, initiated by a single user.
+//
+// False Positive Sensitivity: Medium
+// Legitimate administrative activity using Remote Server Administration Tools (RSAT), such as the Active Directory Administrative Center
+// or PowerShell's Active Directory module, can generate these events. Baselining and tuning the query threshold and account allowlist is recommended.
+//
+// Prerequisites:
+// This detection requires enabling advanced audit logging for Active Directory Domain Services on Domain Controllers.
+// Specifically, the "Field Engineering" diagnostic registry key for NTDS must be set to a value of 5 to generate Event ID 1644.
+// Key: HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\NTDS\Diagnostics
+// Value: 15 Field Engineering
+// Type: REG_DWORD
+// Data: 5
+//
+// MITRE ATT&CK: T1087.002, T1018
+
+let timeframe = 1h;
+// Set a threshold for the number of unique queries from a single user. This may need tuning for your environment.
+let query_threshold = 20;
+// Add any accounts that are known to perform legitimate ADWS/RSAT activity to this list.
+let account_allowlist = dynamic([]);
+SecurityEvent
+| where TimeGenerated > ago(timeframe)
+// Filter for NTDS Search event, which logs LDAP queries.
+| where EventID == 1644
+| parse EventData with * 'Client:' ClientAddress ' ' * 'Filter:' SearchFilter ' ' * 'User:' UserName
+// ADWS queries are proxied by the ADWS service on the DC, resulting in a local LDAP query.
+// The client address in the log will therefore be a loopback address.
+| where ClientAddress has_any ("::1:", "127.0.0.1:")
+| extend UserName = tostring(split(UserName, @'\r')[0])
+| extend SearchFilter = tostring(split(SearchFilter, @'\r')[0])
+| where isnotempty(UserName) and isnotempty(SearchFilter)
+// Exclude common false positives like machine accounts and allowed admin/service accounts.
+| where not(UserName endswith '$') and UserName !in (account_allowlist)
+// Summarize activity to detect reconnaissance scanning behavior.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    UniqueQueryCount = dcount(SearchFilter),
+    Queries = make_set(SearchFilter, 100)
+    by UserName, Computer
+| where UniqueQueryCount > query_threshold

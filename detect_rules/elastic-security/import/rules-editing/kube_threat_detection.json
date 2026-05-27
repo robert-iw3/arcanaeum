@@ -1,0 +1,23 @@
+{
+  "type": "detection-engine.rule",
+  "id": "kube-threat-detection",
+  "attributes": {
+    "risk_score": 85,
+    "enabled": true,
+    "name": "Kubernetes Threat Detection",
+    "description": "Detects various Kubernetes threats, including high/critical vulnerabilities, privileged containers, container escape attempts, insecure API access, and untrusted registry usage.",
+    "rule_id": "kubernetes_threat_detection",
+    "index": [
+      "logs-vuln.*",
+      "logs-kube_audit.*",
+      "logs-endpoint.events.*",
+      "logs-container_inventory.*"
+    ],
+    "language": "kuery",
+    "query": "(event.module:\"vulnerability\" AND vulnerability.severity:(\"High\" OR \"Critical\")) OR (event.module:\"kubernetes\" AND kubernetes.pod.security_context.privileged:\"true\" AND NOT kubernetes.audit.user.username:(\"system:masters\" OR \"cluster-admin\" OR \"azure-operator\")) OR ((process.parent.executable:/\\*runc*/ OR process.parent.executable:/\\*containerd-shim*/) AND process.name:(\"nsenter\" OR \"insmod\" OR \"modprobe\" OR \"chroot\")) OR (event.module:\"kubernetes\" AND kubernetes.audit.verb:\"create\" AND kubernetes.audit.objectRef.resource:\"clusterrolebindings\" AND kubernetes.audit.requestObject.roleRef.name:(\"cluster-admin\" OR \"admin\") AND NOT kubernetes.audit.user.username:(\"system:masters\" OR \"cluster-admin\" OR \"azure-operator\")) OR (event.module:\"container\" AND container.image.name IS NOT NULL AND NOT container.image.name:/mcr.microsoft.com\\/\\*\\/ AND NOT container.image.name:/docker.io\\/\\*\\/ AND NOT container.image.name:/k8s.gcr.io\\/\\*\\/ AND NOT container.image.name:/quay.io\\/\\*\\/ AND NOT container.image.name:/gcr.io\\/\\*\\/)",
+    "interval": "15m",
+    "severity": "high",
+    "type": "query",
+    "version": "1"
+  }
+}

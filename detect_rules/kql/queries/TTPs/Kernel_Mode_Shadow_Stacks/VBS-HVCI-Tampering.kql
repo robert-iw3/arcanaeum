@@ -1,0 +1,45 @@
+//
+// Rule Title: VBS or HVCI Tampering via Registry Modification
+//
+// Author: RW
+// Date: 2025-08-03
+//
+// Description:
+// This rule detects attempts to disable Virtualization-Based Security (VBS), Hypervisor-Enforced Code Integrity (HVCI),
+// or Kernel Shadow Stacks by modifying their corresponding registry keys. Disabling these features can be a precursor
+// to attacks that bypass modern exploit mitigations like Kernel Mode Shadow Stacks (KMSS).
+//
+// False Positive Sensitivity: Medium
+// - Legitimate system administrators or management tools (e.g., SCCM, Intune, Group Policy) may modify these settings for configuration or troubleshooting purposes.
+// - Consider filtering by specific processes if noise is observed from legitimate tools.
+//   Example: | where not(InitiatingProcessFolderPath endswith @"\ccmexec.exe")
+//
+// Detection Comment Level: Medium
+//
+
+// Define the registry keys related to VBS, HVCI, and Kernel Shadow Stacks
+let securityFeatureKeys = dynamic([
+    @"\REGISTRY\MACHINE\SYSTEM\CurrentControlSet\Control\DeviceGuard\EnableVirtualizationBasedSecurity",
+    @"\REGISTRY\MACHINE\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity\Enabled",
+    @"\REGISTRY\MACHINE\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\KernelShadowStacks\Enabled"
+]);
+DeviceRegistryEvents
+| where ActionType == "RegistryValueSet"
+// Filter for modifications to the specified security feature registry keys
+| where RegistryKey in~ (securityFeatureKeys)
+// Check if the feature is being disabled (value set to 0)
+| where RegistryValueData in ("0", "DWORD (0)")
+| project
+    TimeGenerated,
+    DeviceName,
+    ActionType,
+    RegistryKey,
+    RegistryValueData,
+    InitiatingProcessCommandLine,
+    InitiatingProcessParentFileName,
+    InitiatingProcessAccountDomain,
+    InitiatingProcessAccountName,
+    InitiatingProcessFolderPath,
+    InitiatingProcessId,
+    ReportId,
+    DeviceId

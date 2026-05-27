@@ -1,0 +1,87 @@
+{
+  "rule_id": "unauthorized_remote_access_tool_execution",
+  "name": "Unauthorized Remote Access Tool Execution",
+  "description": "Detects the execution of known remote access and remote management tools by unauthorized users or parent processes. This activity could be indicative of an attacker attempting to gain or maintain remote access to a system.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "from logs-endpoint.events.* | where event.category == 'process' and event.type == 'start' and (process.name in ('AnyDesk.exe', 'TeamViewer.exe', 'ngrok.exe', 'TacticalRMM.exe', 'tailscale.exe', 'tailscaled.exe', 'tsh.exe') or process.name like 'Splashtop%' or process.name like 'ScreenConnect.Client%' or process.name like 'ConnectWiseControl.Client%' or process.name like 'Pulseway%' or process.name like 'level%' or process.name like 'fleetdeck%') | stats count = COUNT(*) by host.name, user.name, process.parent.name, process.name, process.command_line | keep host.name, user.name, process.parent.name, process.name, process.command_line, count",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0003",
+        "name": "Persistence",
+        "reference": "https://attack.mitre.org/tactics/TA0003/"
+      },
+      "technique": [
+        {
+          "id": "T1563",
+          "name": "Remote Access Tool",
+          "reference": "https://attack.mitre.org/techniques/T1563/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0008",
+        "name": "Lateral Movement",
+        "reference": "https://attack.mitre.org/tactics/TA0008/"
+      },
+      "technique": [
+        {
+          "id": "T1021",
+          "name": "Remote Services",
+          "reference": "https://attack.mitre.org/techniques/T1021/"
+        }
+      ]
+    }
+  ],
+  "interval": "5m",
+  "from": "now-5m",
+  "max_signals": 100,
+  "risk_score": 90,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [],
+  "tags": [
+    "Remote Access",
+    "Persistence",
+    "Lateral Movement"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "exemptions": [
+    {
+      "name": "authorized_remote_users_exemption",
+      "description": "Exempts authorized users from remote access tool detection.",
+      "conditions": [
+        {
+          "field": "user.name",
+          "operator": "included",
+          "type": "list",
+          "list_id": "authorized_remote_users"
+        }
+      ],
+      "enabled": true
+    },
+    {
+      "name": "authorized_remote_parents_exemption",
+      "description": "Exempts authorized parent processes from remote access tool detection.",
+      "conditions": [
+        {
+          "field": "process.parent.name",
+          "operator": "included",
+          "type": "list",
+          "list_id": "authorized_remote_parents"
+        }
+      ],
+      "enabled": true
+    }
+  ],
+  "custom_query_fields": [],
+  "event_group": "host.name, process.name, user.name"
+}

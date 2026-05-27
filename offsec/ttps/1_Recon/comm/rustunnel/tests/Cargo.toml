@@ -1,0 +1,44 @@
+[package]
+name    = "rustunnel-integration-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# No lib — all code lives in the [[test]] binaries via `mod common`.
+[dependencies]
+rustunnel-server   = { path = "../crates/rustunnel-server" }
+rustunnel-protocol = { path = "../crates/rustunnel-protocol" }
+
+tokio              = { workspace = true }
+tokio-tungstenite  = { workspace = true }
+tokio-rustls       = { workspace = true }
+tokio-util         = { workspace = true }
+rustls             = { workspace = true }
+futures-util       = { workspace = true }
+yamux              = { workspace = true }
+arc-swap           = { workspace = true }
+rcgen              = { workspace = true }
+axum               = { workspace = true }
+reqwest            = { workspace = true }
+sqlx               = { workspace = true }
+uuid               = { workspace = true }
+serde_json         = { workspace = true }
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true }
+tempfile           = { workspace = true }
+
+[[test]]
+name = "auth"
+path = "integration/auth.rs"
+
+[[test]]
+name = "http_tunnel"
+path = "integration/http_tunnel.rs"
+
+[[test]]
+name = "tcp_tunnel"
+path = "integration/tcp_tunnel.rs"
+
+[[test]]
+name = "reconnect"
+path = "integration/reconnect.rs"

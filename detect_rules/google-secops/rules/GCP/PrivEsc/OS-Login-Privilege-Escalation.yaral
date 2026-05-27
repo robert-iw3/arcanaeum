@@ -1,0 +1,32 @@
+rule gcp_os_login_ssh_key_added {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects when a new SSH key is added to a user's OS Login profile in Google Cloud Platform. Attackers with sufficient permissions can add their own SSH key to a user's profile, including an administrative user, to gain persistent access or escalate privileges on Compute Engine instances where that user can log in."
+    tags = "GCP, IAM, PERSISTENCE, PRIVILEGE_ESCALATION"
+    tactic = "TA0003, TA0004"
+    technique = "T1098, T1078"
+    false_positives = "Legitimate administrative actions to provision or update user access. This activity should be correlated with change management tickets or verified with the principal user. Consider adding known administrative or automation accounts to an exception list to reduce noise."
+
+  events:
+    // Detects the addition of an SSH key to an OS Login profile.
+    // This corresponds to the 'gcloud compute os-login ssh-keys add' command or the ImportSshPublicKey API call.
+    $e.metadata.event_type = "GCP_OSLOGIN_SSH_KEY_ADD"
+
+  outcome:
+    $risk_score = 60
+    // The user who added the SSH key.
+    $principal_user_userid = array_distinct($e.principal.user.userid)
+    $principal_ip = array_distinct($e.principal.ip)
+    // The user account to which the SSH key was added.
+    $target_user_userid = array_distinct($e.target.user.userid)
+    // The project associated with the OS Login profile.
+    $project_id = array_distinct($e.target.resource.project_id)
+    // The fingerprint of the added SSH key.
+    $ssh_key_fingerprint = array_distinct($e.target.public_key.fingerprint)
+    // For tuning, consider creating a reference list of legitimate admin/automation accounts
+    // and adding a condition like: $principal_user_userid not in %gcp_legit_admin_accounts
+
+  condition:
+    $e
+}

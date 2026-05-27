@@ -1,0 +1,30 @@
+title: AWS Bedrock LLM Reconnaissance
+description: >-
+  Detects reconnaissance attempts against Amazon Bedrock. Attackers invoke a model with an invalid 'max_tokens_to_sample' parameter (e.g., -1) to check if the service is enabled. This action results in a 'ValidationException' error, which confirms to the attacker that the credentials have access to the LLM service without generating a legitimate request or incurring significant costs.
+references:
+  - https://www.sysdig.com/blog/llmjacking-stolen-cloud-credentials-used-in-new-ai-attack
+author: RW
+date: 2025-08-19
+tags:
+  - attack.reconnaissance
+  - attack.t1595
+  - cloud
+  - aws
+  - aws.bedrock
+  - ai.llm
+logsource:
+  service: cloudtrail
+detection:
+  selection:
+    # Corresponds to the AWS Bedrock service
+    eventSource: 'bedrock.amazonaws.com'
+    # API call used to interact with the LLM
+    eventName: 'InvokeModel'
+    # Error returned for invalid parameters, indicating access but failed validation
+    errorCode: 'ValidationException'
+    # Specific error message for the invalid token sample size
+    errorMessage|contains: 'max_tokens_to_sample'
+  condition: selection
+falsepositives:
+  - Legitimate developers or tools testing API boundaries or misconfigurations could trigger this rule. However, this specific error for the 'InvokeModel' call is highly indicative of the described reconnaissance technique.
+level: medium

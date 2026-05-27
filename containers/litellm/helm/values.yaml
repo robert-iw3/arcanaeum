@@ -1,0 +1,103 @@
+litellm:
+  image: ghcr.io/berriai/litellm:main-v1.76.1
+  port: 4000
+  configPath: /app/litellm_config.yaml
+  resources:
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+    requests:
+      cpu: "0.5"
+      memory: "1Gi"
+
+caddy:
+  image: caddy:2.8
+  port: 80
+  resources:
+    limits:
+      cpu: "0.5"
+      memory: "512Mi"
+    requests:
+      cpu: "0.2"
+      memory: "256Mi"
+
+postgres:
+  image: postgres:17
+  resources:
+    limits:
+      cpu: "0.5"
+      memory: "1Gi"
+    requests:
+      cpu: "0.2"
+      memory: "512Mi"
+
+ollama:
+  image: ollama/ollama:0.11.8
+  resources:
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+    requests:
+      cpu: "1"
+      memory: "2Gi"
+
+openWebui:
+  image: ghcr.io/open-webui/open-webui:0.6.10
+  resources:
+    limits:
+      cpu: "0.5"
+      memory: "512Mi"
+    requests:
+      cpu: "0.2"
+      memory: "256Mi"
+
+yakgpt:
+  image: yakgpt/yakgpt:latest
+  resources:
+    limits:
+      cpu: "0.5"
+      memory: "512Mi"
+    requests:
+      cpu: "0.2"
+      memory: "256Mi"
+
+nextchat:
+  image: yidadaa/chatgpt-next-web:v2.16.1
+  resources:
+    limits:
+      cpu: "0.5"
+      memory: "512Mi"
+    requests:
+      cpu: "0.2"
+      memory: "256Mi"
+
+ollamaWebui:
+  image: ollama-webui:local
+  resources:
+    limits:
+      cpu: "0.5"
+      memory: "512Mi"
+    requests:
+      cpu: "0.2"
+      memory: "256Mi"
+
+redis:
+  image: redis:7.2
+  resources:
+    limits:
+      cpu: "0.25"
+      memory: "256Mi"
+    requests:
+      cpu: "0.1"
+      memory: "128Mi"
+
+prometheus:
+  image: prom/prometheus:v2.53.0
+  port: 9090
+  resources:
+    limits:
+      cpu: "0.25"
+      memory: "256Mi"
+    requests:
+      cpu: "0.1"
+      memory: "128Mi"

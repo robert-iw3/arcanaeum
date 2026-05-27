@@ -1,0 +1,66 @@
+title: Combined SQL Injection (SQLi) Detection
+id: 6d56fdb0-a2ef-4162-aad9-5bfdc1c34d1c
+status: experimental
+description: >-
+  Detects a wide range of SQL Injection (SQLi) attacks by combining signatures for multiple techniques.
+  This rule identifies general attempts, error-based, time-based, database reconnaissance, and authentication bypass attacks.
+  Note: This is a composite rule that requires data from web server, database audit, and authentication logs for full coverage.
+author: RW
+date: 2025-08-23
+tags:
+  - attack.injection
+  - attack.t1190
+logsource:
+  category: webserver # Primary log category. Other categories like 'database' and 'authentication' are required for full coverage.
+detection:
+  # Catches common, generic SQLi patterns in URLs.
+  general_sqli:
+    url.original|contains:
+      - "' or "
+      - "' and "
+      - ' union select '
+      - '--'
+      - '/*'
+      - "';"
+  # Detects keywords used in time-based blind SQLi attacks.
+  time_based_keywords:
+    url.original|contains:
+      - 'sleep('
+      - 'waitfor delay'
+      - 'benchmark('
+      - 'pg_sleep('
+  # Checks if the server response time is unusually high.
+  time_based_duration:
+    time_taken|gt: 5 # Threshold in seconds. This may need tuning based on your environment's baseline response times.
+  # Detects common database error messages being returned to the client.
+  error_based:
+    message|contains: # This field can map to http.response.body.content or other error message fields.
+      - 'error in your sql syntax'
+      - 'unclosed quotation mark'
+      - 'ora-*' # Catches common Oracle DB errors like ORA-00942
+      - 'invalid column name'
+      - 'sql command not properly ended'
+  # Detects reconnaissance activity against database metadata tables. Requires database audit logs.
+  db_recon:
+    db.statement|contains:
+      - 'information_schema'
+      - 'sys.objects'
+      - 'pg_catalog'
+      - 'sqlite_master'
+  # Detects keywords used in authentication bypass attempts. Requires authentication logs.
+  auth_bypass_keywords:
+    user.name|contains:
+      - "' or "
+      - "'or'--"
+      - ' or 1=1'
+      - "admin'--"
+  # Checks for a successful login outcome.
+  auth_bypass_outcome:
+    event.outcome: 'success'
+  condition: general_sqli or (time_based_keywords and time_based_duration) or error_based or db_recon or (auth_bypass_keywords and auth_bypass_outcome)
+falsepositives:
+  - Vulnerability scanners may trigger the 'general_sqli' or 'time_based_sqli' detections. It is recommended to exclude known scanner IP addresses or user agents.
+  - The 'time_based_sqli' detection's time threshold may need to be adjusted to avoid flagging legitimate slow-loading pages.
+  - The 'db_recon' detection may be triggered by legitimate database administration tools, monitoring scripts, or Object-Relational Mapping (ORM) frameworks. Exclude known service accounts or trusted source IPs.
+  - The 'error_based' detection can be triggered by legitimate application bugs that expose database errors.
+level: high

@@ -1,0 +1,43 @@
+// Name: Shade BIOS Memory Persistence via UEFI Memory Map Modification
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects attempts by UEFI malware, such as Shade BIOS, to persist in memory after OS boot. This is achieved by
+//              hooking the gBS->GetMemoryMap() service to reclassify boot-time memory regions (EfiBootServicesCode/Data) as
+//              runtime-persistent regions (EfiRuntimeServicesCode/Data), thus preventing the OS from reclaiming them.
+// RequiredDataConnectors: This detection requires a specialized data source capable of monitoring UEFI firmware behavior, such
+// as memory map modifications during the boot process.
+// This is not a standard log source and may require hypervisor-level introspection (example: vmWare NSX/sVM/vShield)
+// or advanced EDR agents with firmware visibility (example: crowdstrike/sentinel one).
+// otherwise detect via mem forensic analysis: https://github.com/tandasat/kraft_dinner
+// Tactic: Persistence
+// TacticID: TA0003
+// Technique: Boot or Logon Autostart Execution: UEFI
+// TechniqueID: T1542.001
+
+let shadeBiosMemoryPersistence = (v_table_name:string) {
+    table(v_table_name)
+    // This query assumes a custom log table or a standard table like DeviceEvents with custom fields for UEFI monitoring.
+    // The ActionType 'UefiMemoryMapModification' is a placeholder for the specific event that logs this activity.
+    | where ActionType == "UefiMemoryMapModification"
+    // Define the memory types involved in the reclassification.
+    | extend OriginalType = tostring(AdditionalFields.OriginalMemoryType),
+             NewType = tostring(AdditionalFields.NewMemoryType),
+             ModulePath = tostring(AdditionalFields.ModulePath)
+    // Core detection logic: Identify the reclassification from a boot-time type to a runtime type.
+    | where OriginalType in ("EfiBootServicesCode", "EfiBootServicesData") and NewType in ("EfiRuntimeServicesCode", "EfiRuntimeServicesData")
+    // FP Tuning: Legitimate firmware updates or advanced diagnostics could perform unusual memory operations.
+    // If false positives from signed, legitimate tools occur, they can be excluded here.
+    // For example: | where ModulePath !contains "KnownGoodFirmwareTool.efi"
+    | project
+        TimeGenerated,
+        DeviceName,
+        ActionType,
+        OriginalMemoryType = OriginalType,
+        NewMemoryType = NewType,
+        AttackerModule = ModulePath
+    | extend
+        timestamp = TimeGenerated,
+        HostCustomEntity = DeviceName
+};
+// Replace 'UefiEvents' with the actual table name containing UEFI monitoring logs.
+shadeBiosMemoryPersistence('UefiEvents')

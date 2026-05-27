@@ -1,0 +1,59 @@
+{
+  "rule_id": "aws_suspicious_ecs_task_activity",
+  "name": "AWS Suspicious ECS Task Activity",
+  "description": "Detects suspicious API calls from ECS tasks, such as creating IAM users or policies, or managing secrets. This activity could indicate an attacker has compromised an ECS task and is attempting to escalate privileges or move laterally within the AWS environment.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "FROM logs-aws.cloudtrail-* | WHERE aws.cloudtrail.invokedBy == 'ecs-tasks.amazonaws.com' AND event.action IN ('AssumeRole', 'CreatePolicy', 'AttachRolePolicy', 'PutRolePolicy', 'CreateUser', 'CreateAccessKey', 'UpdateAssumeRolePolicy', 'RegisterContainerInstance', 'DeregisterContainerInstance', 'CreateSecret', 'PutSecretValue', 'CreateFunction', 'RunInstances') | keep event.action, aws.cloudtrail.awsRegion, source.ip, aws.cloudtrail.userIdentity.arn, user_agent.original",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0004",
+        "name": "Privilege Escalation",
+        "reference": "https://attack.mitre.org/tactics/TA0004/"
+      }
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0003",
+        "name": "Persistence",
+        "reference": "https://attack.mitre.org/tactics/TA0003/"
+      }
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0006",
+        "name": "Credential Access",
+        "reference": "https://attack.mitre.org/tactics/TA0006/"
+      }
+    }
+  ],
+  "interval": "10m",
+  "from": "now-10m",
+  "max_signals": 100,
+  "risk_score": 95,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://www.sweet.security/blog/ecscape-understanding-iam-privilege-boundaries-in-amazon-ecs"
+  ],
+  "tags": [
+    "AWS",
+    "CloudTrail",
+    "ECS",
+    "Container",
+    "Privilege Escalation",
+    "Persistence",
+    "Credential Access"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "aws.cloudtrail.userIdentity.arn, event.action"
+}

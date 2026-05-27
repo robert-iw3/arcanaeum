@@ -1,0 +1,72 @@
+rule lateral_movement_remote_admin_tools {
+
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects the use of common remote administration tools (PsExec, WMI, PowerShell Remoting, RDP) for lateral movement."
+    tactic = "TA0008"
+    technique = "T1021, T1047, T1021.001, T1021.006"
+    false_positives = "This activity is very common for system administrators. To increase fidelity, focus on activity originating from non-administrative users or standard workstations. Consider using reference lists to filter for activity between specific asset groups (e.g., ground stations to sensitive networks)."
+
+  events:
+    $process.metadata.event_type = "PROCESS_LAUNCH"
+    (
+      // T1021.001: PsExec execution
+      (
+        $process.target.process.file.name in ("psexec.exe", "psexec64.exe") and
+        re.regex($process.target.process.command_line, `\\\\`)
+      )
+      or
+      // T1047: WMI remote command execution
+      (
+        $process.target.process.file.name = "wmic.exe" and
+        re.regex($process.target.process.command_line, `(?i)/node:`)
+      )
+      or
+      // T1021.006: PowerShell Remoting
+      (
+        $process.target.process.file.name in ("powershell.exe", "pwsh.exe") and
+        re.regex($process.target.process.command_line, `(?i)(Invoke-Command|Enter-PSSession|New-PSSession)`) and
+        re.regex($process.target.process.command_line, `(?i)-ComputerName`)
+      )
+      or
+      // T1021.001: Remote Desktop command-line execution
+      (
+        $process.target.process.file.name = "mstsc.exe" and
+        re.regex($process.target.process.command_line, `(?i)/v:`)
+      )
+    )
+
+    // False Positive Tuning: This activity is very common for system administrators.
+    // To increase fidelity, focus on activity originating from non-administrative users or standard workstations.
+    // Example: $process.principal.user.userid not in %admin_accounts
+    // Example: $process.principal.hostname not in %admin_workstations
+
+  outcome:
+    // Risk score can be adjusted based on environment sensitivity.
+    $risk_score = 45
+
+    // Identify the specific technique used for easier investigation.
+    $technique = if($process.target.process.file.name in ("psexec.exe", "psexec64.exe"),
+        "T1021.001 - PsExec",
+        if($process.target.process.file.name = "wmic.exe",
+            "T1047 - WMI",
+            if($process.target.process.file.name in ("powershell.exe", "pwsh.exe"),
+                "T1021.006 - PowerShell Remoting",
+                "T1021.001 - RDP"
+            )
+        )
+    )
+
+    // Extract the target device from the command line.
+    $target_hostname = re.capture($process.target.process.command_line, `(?:/node:|/v:|\\\\|-ComputerName)\s*\"?([^\s\"]+)`)
+
+    // Key fields for investigation.
+    $principal_hostname = $process.principal.hostname
+    $principal_user = $process.principal.user.userid
+    $parent_process = $process.principal.process.file.full_path
+    $command_line = $process.target.process.command_line
+
+  condition:
+    $process
+}

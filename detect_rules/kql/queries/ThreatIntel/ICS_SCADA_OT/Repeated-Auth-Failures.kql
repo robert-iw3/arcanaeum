@@ -1,0 +1,54 @@
+// Name: OPC UA Brute-Force Followed by Success
+// Author: RW
+// Date: 2025-08-14
+// Description: Detects a high number of failed OPC UA authentication attempts from a single source, followed by a successful
+// authentication within a short time window. This pattern can indicate a brute-force or password spraying attack.
+// References: https://www.cisa.gov/news-events/ics-advisories/icsa-25-072-09
+// MITRE TTPs: T1566.001
+
+// Define the time window and failure threshold.
+let lookback = 1h;
+let failure_threshold = 10; // Medium sensitivity threshold. Tune based on expected user behavior and lockout policies.
+
+// This rule assumes logs from an OPC UA-aware source (e.g., Zeek, specific vendor logs) are available.
+// The table and field names may need to be adjusted for your environment.
+union isfuzzy=true OpcUa*, Zeek*, CommonSecurityLog, DeviceNetworkEvents
+| where TimeGenerated > ago(lookback)
+// Filter for authentication-related events. 'ActivateSession' is where user auth typically occurs.
+// The keywords for success/failure need to be validated against your specific log format.
+| extend AuthResult = case(
+    // Success indicators
+    EventResult =~ "Success" or Message has_any("Authentication result: Good", "succeeded", "granted"), "Success",
+    // Failure indicators
+    EventResult =~ "Failure" or Message has_any("fail", "denied", "BadUserAccessDenied", "BadIdentityTokenInvalid"), "Failure",
+    // Default
+    "Unknown"
+  )
+| where AuthResult in ("Success", "Failure")
+// FP Tuning: Exclude service accounts or known testing IPs that might have noisy login patterns.
+// For example: | where SrcIp !in ('10.1.1.1', '192.168.5.20')
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    FailureCount = countif(AuthResult == "Failure"),
+    SuccessCount = countif(AuthResult == "Success"),
+    // Collect usernames if available to provide more context in the alert.
+    Usernames = make_set_if(UserName, isnotempty(UserName) and AuthResult == "Success")
+    by SrcIp, DstIp, DstHostname, bin(TimeGenerated, 30m)
+// The core detection logic: a high number of failures and at least one success from the same source.
+| where FailureCount >= failure_threshold and SuccessCount > 0
+| extend
+    timestamp = StartTime,
+    HostName = DstHostname,
+    IPAddress = DstIp
+| project
+    timestamp,
+    StartTime,
+    EndTime,
+    IPAddress,
+    HostName,
+    SrcIp,
+    Usernames,
+    FailureCount,
+    SuccessCount,
+    Description = "A high number of OPC UA authentication failures was followed by a success from the same source IP."

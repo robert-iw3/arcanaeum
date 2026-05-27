@@ -1,0 +1,67 @@
+{
+  "type": "detection-engine.rule",
+  "id": "aws_suspicious_delegated_admin_activity",
+  "attributes": {
+    "rule_id": "aws_suspicious_delegated_admin_activity",
+    "name": "AWS Suspicious Delegated Administrator Activity",
+    "description": "Detects the creation or enabling of delegated administrator accounts for sensitive AWS services via CloudTrail events. This can indicate an attacker attempting to establish persistence or elevate privileges by granting administrative permissions to a controlled account within the AWS Organization.",
+    "severity": "high",
+    "risk_score": 80,
+    "enabled": true,
+    "language": "kql",
+    "query": "EventSource: \"organizations.amazonaws.com\" AND EventName IN (\"RegisterDelegatedAdministrator\", \"EnableOrganizationAdminAccount\") AND (requestParameters.servicePrincipal IN (\"sso.amazonaws.com\", \"cloudformation.amazonaws.com\", \"guardduty.amazonaws.com\", \"securityhub.amazonaws.com\", \"iam-access-analyzer.amazonaws.com\", \"config.amazonaws.com\") OR Event.Provider IN (\"sso.amazonaws.com\", \"cloudformation.amazonaws.com\", \"guardduty.amazonaws.com\", \"securityhub.amazonaws.com\", \"iam-access-analyzer.amazonaws.com\", \"config.amazonaws.com\"))",
+    "index": [
+      "logs-aws.cloudtrail-*"
+    ],
+    "version": 1,
+    "interval": "10m",
+    "from": "now-10m",
+    "max_signals": 100,
+    "output_index": ".alerts-security.alerts-default",
+    "threat": [
+      {
+        "framework": "MITRE ATT&CK",
+        "tactic": {
+          "id": "TA0004",
+          "name": "Privilege Escalation",
+          "reference": "https://attack.mitre.org/tactics/TA0004/",
+          "subtechniques": [
+            {
+              "id": "T1078.004",
+              "name": "Valid Accounts: Cloud Accounts",
+              "reference": "https://attack.mitre.org/techniques/T1078/004/"
+            }
+          ]
+        }
+      },
+      {
+        "framework": "MITRE ATT&CK",
+        "tactic": {
+          "id": "TA0003",
+          "name": "Persistence",
+          "reference": "https://attack.mitre.org/tactics/TA0003/",
+          "subtechniques": [
+            {
+              "id": "T1078.004",
+              "name": "Valid Accounts: Cloud Accounts",
+              "reference": "https://attack.mitre.org/techniques/T1078/004/"
+            }
+          ]
+        }
+      }
+    ],
+    "references": [
+      "https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-delegated-administrator.html"
+    ],
+    "tags": [
+      "AWS",
+      "CloudTrail",
+      "Privilege Escalation",
+      "Persistence"
+    ],
+    "actions": [],
+    "throttle": "no_throttle",
+    "custom_query_fields": [],
+    "event_group": "aws.cloudtrail.userIdentity.arn, recipient_account_id"
+  }
+}

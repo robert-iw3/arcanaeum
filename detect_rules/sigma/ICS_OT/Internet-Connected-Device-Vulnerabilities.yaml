@@ -1,0 +1,63 @@
+title: Exploitation Attempt Against Internet-Connected DER
+status: experimental
+description: >-
+  Detects potential exploitation attempts against internet-connected Industrial Control System (ICS) devices, particularly
+  Distributed Energy Resources (DER) like solar inverters and panels. This rule identifies atomic indicators of compromise,
+  such as probes for common web vulnerabilities or connections from known scanning tools. These events are often precursors
+  to broader attacks like brute-forcing or vulnerability exploitation.
+author: RW
+date: 2025-08-18
+tags:
+  - attack.initial_access
+  - attack.t0882
+  - attack.t0868
+  - ics
+logsource:
+  # comment: This rule is best applied to logs from internet-facing firewalls, WAFs, or network sensors (IDS/IPS).
+  category: network
+  product: firewall
+detection:
+  # comment: CRITICAL: This list must be populated with the public IP addresses of your internet-facing DER/OT assets to be effective.
+  filter_der_asset:
+    destination.ip:
+      - '203.0.113.88' # Placeholder for a solar inverter
+      - '198.51.100.12' # Placeholder for another DER asset
+
+  # comment: This filter ensures the detection only triggers on traffic originating from the internet.
+  filter_external_source:
+    not source.ip:
+      - '10.0.0.0/8'
+      - '172.16.0.0/12'
+      - '192.168.0.0/16'
+      - 'fc00::/7'
+
+  # comment: Identifies probes for common web vulnerabilities often found in embedded devices.
+  web_exploit_probe:
+    url.original|contains:
+      - '/etc/passwd'
+      - 'cmd.exe'
+      - 'id_rsa'
+      - 'phpinfo.php'
+      - 'setup.cgi'
+      - '..%2f' # Encoded path traversal
+      - '../'   # Path traversal
+
+  # comment: Identifies traffic from user agents associated with network scanning or exploitation tools.
+  scanner_user_agent:
+    http.user_agent|contains:
+      - 'nmap'
+      - 'masscan'
+      - 'zgrab'
+      - 'metasploit'
+      - 'shodan.io'
+      - 'censys'
+      - 'curl/'
+      - 'wget'
+
+  # comment: This rule detects individual suspicious events. To detect brute-force or port scanning, these events should be aggregated in a SIEM. For example, alert if a single source IP generates >20 events against a single destination IP in <10 minutes.
+  condition: (web_exploit_probe or scanner_user_agent) and filter_der_asset and filter_external_source
+falsepositives:
+  - Benign security research scanners that are not part of a malicious campaign.
+  - Legitimate, but unusual, administrative activity using tools like curl or wget.
+  - False matches on substrings in URLs or user agents.
+level: medium

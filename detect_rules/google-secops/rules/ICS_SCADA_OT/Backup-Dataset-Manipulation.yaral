@@ -1,0 +1,57 @@
+rule scada_ics_backup_dataset_manipulation {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects attempts to modify or create backup files on critical SCADA/ICS assets using non-standard or suspicious processes. This activity could indicate an attacker attempting to poison backup datasets to disrupt recovery efforts, as described in the threat intelligence. This rule requires UDM data from an EDR solution."
+    tactic = "TA0040"
+    technique = "T1565.001"
+    false_positives = "Legitimate administrative scripts or third-party backup software not included in the allowlist may trigger this alert. Review and tune the 'legitimate_backup_processes_list' reference list based on the software used in your OT environment."
+
+  events:
+    // Match file creation or modification events.
+    $file.metadata.event_type = "FILE_MODIFICATION"
+
+    // Filter for events occurring on designated critical ICS assets.
+    // Tuning: Populate the %ics_asset_list with hostnames of critical SCADA servers, HMIs, and engineering workstations.
+    $file.principal.hostname in %ics_asset_list
+
+    // Filter for files that appear to be backups, either by extension or folder path.
+    // Tuning: Add or remove backup file extensions and folder path keywords relevant to your environment.
+    (
+      re.regex($file.target.file.full_path, `\.(bak|bkf|zip|rar|7z|dmp|sql|apa|zap|mer)$`) nocase
+      or re.regex($file.target.file.directory, `\\backup|\\archive`) nocase
+    )
+
+    // Core detection logic: Trigger if the modifying process is suspicious OR is not a known legitimate backup tool.
+    (
+      // Tuning: Populate %suspicious_processes_list with LOLBins and other suspicious tools.
+      $file.principal.process.file.path in %suspicious_processes_list
+      or
+      // Tuning: Populate %legitimate_backup_processes_list with authorized backup software.
+      not $file.principal.process.file.path in %legitimate_backup_processes_list
+    )
+
+    // Capture key fields for correlation and outcome.
+    $file.principal.hostname = $hostname
+    $file.principal.user.userid = $user
+    $file.principal.process.file.path = $process_path
+    $file.principal.process.command_line = $commandline
+    $file.target.file.full_path = $filepath
+
+  match:
+    // Group related file modification events on the same host over a 30-minute window.
+    $hostname over 30m
+
+  outcome:
+    // Set a high risk score due to the potential impact on OT recovery.
+    $risk_score = 75
+    $principal_hostname = $hostname
+    $principal_user = array_distinct($user)
+    $initiating_processes = array_distinct($process_path)
+    $initiating_commandlines = array_distinct($commandline)
+    $modified_backup_files = array_distinct($filepath)
+    $event_count = count_distinct($file.metadata.id)
+
+  condition:
+    $file
+}

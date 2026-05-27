@@ -1,0 +1,32 @@
+// Name: Azure VM Run Command Execution
+// Author: RW
+// Date: 2025-08-31
+// Description: Detects the execution of commands on an Azure Virtual Machine using the 'Run Command' feature.
+// This could be an indicator of an attacker attempting to achieve remote code execution on a compromised VM.
+// MITRE ATT&CK: T1059.001 (PowerShell), T1021.004 (Remote Services)
+// False Positive Sensitivity: Medium
+
+AzureActivity
+| where OperationNameValue endswith "/runCommand/action" or OperationNameValue endswith "/runCommands/write" // Detects command execution via the 'Run Command' feature on compute resources
+| where ActivityStatusValue == "Success" // Filter for successful attempts to reduce noise
+// Potential for false positives: Legitimate administrative or automated tasks frequently use 'Run Command'.
+// Consider tuning by excluding known administrative accounts or service principals from the 'Caller' field.
+// For example: `| where Caller !in ("admin@contoso.com", "automation-sp-id")`
+| extend properties = todynamic(Properties)
+| extend requestBody = todynamic(tostring(properties.requestbody))
+| extend
+    commandId = tostring(requestBody.properties.commandId), // Extracts the built-in command name (e.g., RunPowerShellScript)
+    script = tostring(requestBody.properties.source.script), // Extracts the custom script content if provided directly
+    scriptUri = tostring(requestBody.properties.source.scriptUri) // Extracts the URI for a script stored elsewhere (e.g., GitHub, Storage Blob)
+| project
+    TimeGenerated,
+    Caller,
+    CallerIpAddress,
+    OperationName,
+    ActivityStatusValue,
+    SubscriptionId,
+    ResourceGroup,
+    ResourceId,
+    commandId,
+    script,
+    scriptUri

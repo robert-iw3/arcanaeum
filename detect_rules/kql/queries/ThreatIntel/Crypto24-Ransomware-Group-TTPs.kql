@@ -1,0 +1,130 @@
+// Name: Crypto24 Ransomware Group TTPs
+// Author: RW
+// Date: 2025-08-15
+// Description: This rule detects a variety of Tactics, Techniques, and Procedures (TTPs) associated with the Crypto24 ransomware group.
+// It combines several detection logics into a single query to identify suspicious account creation, malicious service installation,
+// EDR evasion tools, RDP enablement, and the uninstallation of security products via GPO.
+// False Positive Sensitivity: Medium. This is a high-level rollup query. Each sub-detection has its own false positive considerations.
+// Legitimate administrative activity may trigger parts of this rule. Tune by excluding known administrative accounts, tools, or scripts.
+// References: https://www.trendmicro.com/en_us/research/25/h/crypto24-ransomware-stealth-attacks.html
+
+// TTP 1: Suspicious Account Creation and Elevation
+let SuspiciousAccountActivity = () {
+    let TimeFrame = 5m;
+    let PrivilegedGroups = dynamic(["administrators", "remote desktop users"]);
+    let GroupAddEvents =
+        DeviceProcessEvents
+        | where FileName in~ ("net.exe", "net1.exe")
+        | where ProcessCommandLine has_all ("localgroup", "/add")
+        | extend Parts = extract_all(@"localgroup\s+(""([^""]+)""|([^\s""]+))\s+(""([^""]+)""|([^\s""]+))\s*/add", tolower(ProcessCommandLine))
+        | where array_length(Parts) > 0
+        | extend GroupName = coalesce(tostring(Parts[0][1]), tostring(Parts[0][2]))
+        | extend UserName = coalesce(tostring(Parts[0][4]), tostring(Parts[0][5]))
+        | where isnotempty(GroupName) and isnotempty(UserName) and GroupName in (PrivilegedGroups)
+        | project GroupAddTime = Timestamp, DeviceId, DeviceName, InitiatingProcessFileName, InitiatingProcessCommandLine, AccountName, AccountDomain, UserName, GroupName, GroupAddCommandLine = ProcessCommandLine;
+    let UserCreationEvents =
+        DeviceProcessEvents
+        | where FileName in~ ("net.exe", "net1.exe")
+        | where ProcessCommandLine has_all ("user", "/add") and ProcessCommandLine !has "localgroup"
+        | extend Parts = extract_all(@"user\s+(""([^""]+)""|([^\s""]+))", tolower(ProcessCommandLine))
+        | where array_length(Parts) > 0
+        | extend CreatedUserName = coalesce(tostring(Parts[0][1]), tostring(Parts[0][2]))
+        | where isnotempty(CreatedUserName)
+        | project UserCreationTime = Timestamp, DeviceId, CreatedUserName;
+    GroupAddEvents
+    | join kind=inner (UserCreationEvents) on DeviceId, $left.UserName == $right.CreatedUserName
+    | where GroupAddTime > UserCreationTime and (GroupAddTime - UserCreationTime) < TimeFrame
+    | project
+        Timestamp = GroupAddTime,
+        DeviceName,
+        DeviceId,
+        TTP = "Suspicious Account Creation and Elevation",
+        Evidence = GroupAddCommandLine,
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        AccountName,
+        AccountDomain;
+};
+(union isouter=true
+    (SuspiciousAccountActivity),
+    // TTP 2: Malicious Service Creation for Keylogger/Ransomware
+    (
+        DeviceProcessEvents
+        | where FileName =~ "sc.exe"
+        | where ProcessCommandLine has "create" and ProcessCommandLine has "svchost.exe" and ProcessCommandLine has_any ("-k WinMainSvc", "-k MSRuntime")
+        | project
+            Timestamp,
+            DeviceName,
+            DeviceId,
+            TTP = "Malicious Service Creation (Keylogger/Ransomware)",
+            Evidence = ProcessCommandLine,
+            InitiatingProcessFileName,
+            InitiatingProcessCommandLine,
+            AccountName,
+            AccountDomain
+    ),
+    // TTP 3: RealBlindingEDR Evasion Tool
+    (
+        let suspicious_files = dynamic(["AVB.exe", "AVMon.exe", "avb.exe"]);
+        let suspicious_paths = dynamic(["\\AppData\\Local\\Temp\\Low\\", "\\ProgramData\\update\\"]);
+        union
+        (
+            DeviceProcessEvents
+            | where FileName in~ (suspicious_files) and FolderPath has_any (suspicious_paths)
+            | project
+                Timestamp, DeviceName, DeviceId,
+                TTP = "EDR Evasion Tool Execution (RealBlindingEDR)",
+                Evidence = ProcessCommandLine,
+                InitiatingProcessFileName, InitiatingProcessCommandLine, AccountName, AccountDomain
+        ),
+        (
+            DeviceFileEvents
+            | where FileName in~ (suspicious_files) and FolderPath has_any (suspicious_paths)
+            | project
+                Timestamp, DeviceName, DeviceId,
+                TTP = "EDR Evasion Tool Creation (RealBlindingEDR)",
+                Evidence = strcat("File created: ", FolderPath, FileName),
+                InitiatingProcessFileName, InitiatingProcessCommandLine, AccountName, AccountDomain
+        )
+    ),
+    // TTP 4: RDP Enabled via Command Line
+    (
+        DeviceProcessEvents
+        | where
+            (FileName =~ "reg.exe" and ProcessCommandLine has_all ("add", "fDenyTSConnections", "/d", "0", "/f") and ProcessCommandLine contains @"System\CurrentControlSet\Control\Terminal Server"@)
+            or (FileName =~ "netsh.exe" and ProcessCommandLine has_all ("advfirewall", "firewall", "add", "rule", "localport=3389", "action=allow"))
+            or (FileName in~ ("takeown.exe", "icacls.exe") and ProcessCommandLine has @"\System32\termsrv.dll")
+        | extend TTP = case(
+            FileName =~ "reg.exe", "RDP Enabled via Registry",
+            FileName =~ "netsh.exe", "RDP Firewall Rule Added",
+            "Termsrv.dll Tampering"
+          )
+        | project
+            Timestamp,
+            DeviceName,
+            DeviceId,
+            TTP,
+            Evidence = ProcessCommandLine,
+            InitiatingProcessFileName,
+            InitiatingProcessCommandLine,
+            AccountName,
+            AccountDomain
+    ),
+    // TTP 5: Security Product Uninstaller via GPO
+    (
+        let removal_indicators = dynamic(["XBCUninstaller.exe", "VisionOne_removal", "uninstaller", "remover", "removal"]);
+        DeviceProcessEvents
+        | where FileName =~ "gpscript.exe"
+        | where ProcessCommandLine has_any (removal_indicators)
+        | project
+            Timestamp,
+            DeviceName,
+            DeviceId,
+            TTP = "Security Product Uninstaller via GPO",
+            Evidence = ProcessCommandLine,
+            InitiatingProcessFileName,
+            InitiatingProcessCommandLine,
+            AccountName,
+            AccountDomain
+    )
+)

@@ -1,0 +1,43 @@
+// Name: Stealthy Persistence with Non-Existent Executable
+// Author: RW
+// Date: 2025-09-08
+// Description: Detects a stealthy persistence technique where a scheduled task or service points to a non-existent file.
+// The Windows `CreateProcess` API then automatically searches for and executes a file with an appended `.exe` extension
+// (e.g., `file.jpg.exe` is run instead of the non-existent `file.jpg`). This rule identifies processes with double extensions
+// (e.g., `.jpg.exe`, `.exe.exe`) launched from common persistence-related parent processes.
+// Tactics: Persistence, Defense Evasion
+// Techniques: T1543.003, T1053.005
+// False Positive Sensitivity: Medium
+
+let NonExecExtensions = dynamic([".jpg", ".jpeg", ".png", ".gif", ".bmp", ".txt", ".log", ".tmp", ".dat", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".zip", ".rar"]);
+DeviceProcessEvents
+// Look for process creation events
+| where ActionType == "ProcessCreated"
+// The process name itself is a key indicator: it has a double extension like "file.jpg.exe" or "file.exe.exe"
+| where FileName matches regex @'\.[a-z0-9]{2,4}\.exe$' or FileName endswith ".exe.exe"
+// Focus on processes initiated by common parents associated with services and scheduled tasks
+| where InitiatingProcessFileName in~ ("svchost.exe", "services.exe", "taskhostw.exe", "taskeng.exe")
+// Extract the part of the filename that is meant to look like the "real" file (e.g., "file.jpg" from "file.jpg.exe")
+| extend AllegedFileName = reverse(substring(reverse(FileName), 4))
+// Further filter to ensure the first extension is one of the non-executable types we defined, or it's ".exe"
+| where (strcat(".", tostring(split(AllegedFileName,'.')[-1])) in (NonExecExtensions)) or (AllegedFileName endswith ".exe")
+// Reduce false positives by focusing on non-standard execution locations.
+// FP Note: Legitimate applications might write and execute temporary files in AppData. This may need tuning by adding more specific paths to the exclusion list below.
+| where FolderPath has_any (@"C:\Users\Public\", @"C:\ProgramData\", @"C:\PerfLogs\", @"C:\Temp\", @"C:\TMP\") or FolderPath matches regex @"C:\\Users\\[^\\]+\\AppData\\"
+// Exclude known good software that might use this pattern. This list should be populated based on environment specifics.
+//| where InitiatingProcessFolderPath !in~ (@"C:\...")
+| project
+    Timestamp,
+    DeviceName,
+    // The executed process with the double extension
+    ExecutedProcess = FileName,
+    ExecutedProcessCommandLine = ProcessCommandLine,
+    ExecutedProcessFolderPath = FolderPath,
+    // The file name it's masquerading as
+    MasqueradedAs = AllegedFileName,
+    // The parent process that launched it
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessId,
+    AccountName,
+    AccountDomain

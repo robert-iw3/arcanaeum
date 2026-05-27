@@ -1,0 +1,40 @@
+// Name: Potential ARP Spoofing Detected
+// Author: RW
+// Date: 2025-08-19
+// Description: This rule detects when a single IP address is associated with multiple MAC addresses in a short period.
+// This is a strong indicator of an ARP spoofing (or ARP poisoning) attack, which can be used to launch Man-in-the-Middle (MitM) attacks.
+// The provided intelligence highlights this technique as a precursor to exploiting the Space Link Extension (SLE) protocol.
+// Tactic: Credential Access, Defense Evasion
+// Technique: T1557.002, ARP Poisoning
+// False Positive Sensitivity: Medium. False positives can occur in environments with high device mobility, network configuration changes,
+// or specific high-availability setups (e.g., VRRP, HSRP). Tune by adjusting the time_window, mac_threshold, or by allowlisting known
+// high-availability virtual MAC addresses or specific IPs.
+
+// IMPORTANT: This query is a template. You must replace 'MyARPSourceTable' with the name of your table containing ARP data (e.g., from a network sensor, endpoint agent, or custom logs).
+// Required columns: TimeGenerated, a column for IP addresses (e.g., 'IpAddress'), and a column for MAC addresses (e.g., 'MacAddress').
+let arp_data = MyARPSourceTable;
+// Define the time window for analysis.
+let time_window = 10m;
+// Set the threshold for distinct MAC addresses. An alert is triggered if an IP is seen with more than this number of MACs.
+let mac_threshold = 1;
+
+arp_data
+| where isnotempty(IpAddress) and isnotempty(MacAddress)
+// The intelligence mentions targeting specific nodes like Mission Control Systems (MCS) or Ground Stations (GS).
+// Consider filtering for critical assets to increase fidelity and focus on high-value targets.
+// Example: | where IpAddress in (watchlist_of_critical_assets) or DeviceName has_any ("MCS", "GS")
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    AssociatedMacs = make_set(MacAddress),
+    MacCount = dcount(MacAddress),
+    ReportingDevices = make_set(DeviceName) // Assumes a DeviceName column exists, which is useful for context.
+  by IpAddress, bin(TimeGenerated, time_window)
+| where MacCount > mac_threshold
+| project
+    StartTime,
+    EndTime,
+    IpAddress,
+    AssociatedMacs,
+    MacCount,
+    ReportingDevices

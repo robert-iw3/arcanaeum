@@ -1,0 +1,75 @@
+title: Linux Multi-TTP Attack Pattern (Koske Malware)
+id: b629a576-81bb-4cc6-92b1-58933b813065
+status: experimental
+description: >-
+  Detects a combination of TTPs associated with the Koske malware and similar threats, including polyglot file execution, in-memory execution,
+  LD_PRELOAD abuse, and crontab persistence. A separate rule is recommended for file-based persistence, such as modifications to shell
+  configuration files (.bashrc, .profile).
+author: RW
+date: 2025-08-24
+tags:
+  - attack.execution
+  - attack.persistence
+  - attack.privilege_escalation
+  - attack.defense_evasion
+  - attack.t1059.004
+  - attack.t1204.002
+  - attack.t1574.006
+  - attack.t1546.004
+  - attack.t1053.003
+logsource:
+  category: process_creation
+  product: linux
+detection:
+    # Pattern 1: Execution of a script embedded in an image file (polyglot)
+  polyglot_base:
+    CommandLine|contains|all:
+      - '|'
+      - 'grep'
+      - '-a'
+  polyglot_shell:
+    CommandLine|contains:
+      - ' sh'
+      - ' bash'
+  polyglot_image:
+    CommandLine|contains:
+      - '.jpg'
+      - '.jpeg'
+      - '.png'
+      - '.gif'
+
+    # Pattern 2: In-memory execution or execution from temporary directories
+  inmemory_tmp:
+    ParentImage|endswith:
+      - '/sh'
+      - '/bash'
+    Image|startswith:
+      - '/tmp/'
+      - '/dev/shm/'
+  inmemory_cmd:
+    CommandLine|contains:
+      - 'bash -c'
+      - 'sh -c'
+      - 'bash -i'
+      - 'sh -i'
+
+    # Pattern 3: LD_PRELOAD abuse for hijacking execution flow
+  ldpreload:
+    CommandLine|contains: 'LD_PRELOAD='
+
+    # Pattern 4: Persistence via crontab
+  cron_edit:
+    Image|endswith: '/crontab'
+  filter_cron_view:
+    CommandLine|contains:
+      - ' -l'       # Exclude listing cron jobs
+      - ' -r'       # Exclude removing cron jobs
+
+  condition: (polyglot_base and polyglot_shell and polyglot_image) or inmemory_tmp or inmemory_cmd or ldpreload or (cron_edit and not filter_cron_view)
+
+falsepositives:
+  - Legitimate administrative scripts may execute from /tmp or /dev/shm.
+  - Software installation or update scripts can trigger the in-memory execution patterns.
+  - Use of LD_PRELOAD is common for system monitoring, debugging (e.g., jemalloc), or graphics driver hooks (e.g., MangoHud, Steam overlay).
+  - Administrators may edit crontab interactively (e.g., `crontab -e`), which could be flagged by `cron_edit`.
+level: high

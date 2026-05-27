@@ -1,0 +1,73 @@
+// name Malicious C2 Framework Detected via JA3/JA3S Fingerprint
+// author RW
+// description
+//   This rule detects potential C2 activity by matching the JA3 (client-side) or
+//   JA3S (server-side) TLS fingerprint against a list of known malicious fingerprints.
+//   JA3/JA3S creates a hash based on the parameters in a TLS handshake, which can be
+//   unique to specific malware or C2 frameworks like Cobalt Strike, Metasploit, and Empire.
+//   A match is a strong indicator of a compromised host communicating with a C2 server.
+// tags
+// - T1071.001
+// severity High
+// false_positives
+// - Legitimate applications that use the same TLS libraries as malicious tools could potentially generate a matching fingerprint, although this is uncommon.
+// - Attackers can use JA3/S randomization or spoofing to evade this detection.
+// - Authorized penetration testing or red team activity will be flagged.
+// datasources
+// - CommonSecurityLog (from Zeek, Palo Alto, etc.)
+// - VMConnection
+//
+// Define lists of known malicious JA3 (client) and JA3S (server) hashes.
+// This list should be periodically updated with new threat intelligence.
+
+let MaliciousJA3Hashes = dynamic([
+    "e7d705a3286e19ea42f587b344ee6865", // Cobalt Strike
+    "a0e9f5d64349fb13191bc781f81f42e1", // Empire, Cobalt Strike
+    "4d7a28d5f652494751259342149a1222", // Cobalt Strike
+    "6734f37431670b3ab4292b8f60f29984", // Metasploit
+    "6268c6b7a55651e83568134465714412", // Trickbot
+    "e20c5952f6424433577a639ab2459f83"  // AsyncRAT
+]);
+let MaliciousJA3SHashes = dynamic([
+    "b742b4075194d9c110154b3380b51c42", // Cobalt Strike
+    "3bda27285f336a8889a5d72c74665b27"  // Cobalt Strike
+]);
+// This query requires a log source with JA3 and JA3S hash fields.
+// Field names may vary (e.g., Ja3Hash, Ja3sHash, AdditionalExtensions).
+CommonSecurityLog
+| where TimeGenerated > ago(1d)
+// Ensure the necessary fields are present.
+| where isnotempty(JA3Hash) or isnotempty(JA3SHash)
+// Core detection logic: Check if the client or server TLS fingerprint matches a known malicious one.
+| where JA3Hash in (MaliciousJA3Hashes) or JA3SHash in (MaliciousJA3SHashes)
+// Add context about which hash matched for easier analysis.
+| extend MatchedOnJA3 = JA3Hash in (MaliciousJA3Hashes), MatchedOnJA3S = JA3SHash in (MaliciousJA3SHashes)
+// Summarize to create a concise alert and reduce noise.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    EventCount = count(),
+    DistinctDestinations = dcount(DestinationIP)
+    by
+    SourceIP,
+    DestinationIP,
+    DestinationPort,
+    JA3Hash,
+    JA3SHash,
+    MatchedOnJA3,
+    MatchedOnJA3S,
+    // UserAgent can provide valuable context if available.
+    UserAgent
+| project-reorder
+    StartTime,
+    EndTime,
+    EventCount,
+    SourceIP,
+    DestinationIP,
+    DestinationPort,
+    JA3Hash,
+    JA3SHash,
+    MatchedOnJA3,
+    MatchedOnJA3S,
+    UserAgent,
+    DistinctDestinations

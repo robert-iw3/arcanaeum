@@ -1,0 +1,95 @@
+// Name: Container Security Threat Detection
+// Author: RW
+// Date: 2025-08-23
+// Description: This rule combines multiple detection logics to identify various threats in a containerized environment,
+// including vulnerable images, runtime escape attempts, insecure API usage, and supply chain risks.
+// Note: This query unions data from multiple sources (vulnerability management, Kubernetes audit, EDR).
+// You may need to adjust table and field names (e.g., ContainerImageVulnerability, KubeAudit, DeviceProcessEvents) to match your environment.
+
+let lookback = 1d;
+
+// FP Tuning: Add legitimate container registries to this list to reduce noise from the supply chain detection.
+let trustedRegistries = dynamic(["mcr.microsoft.com", "docker.io", "k8s.gcr.io", "quay.io", "gcr.io"]);
+
+// FP Tuning: Add service accounts or admin users expected to perform privileged operations.
+let trustedActors = dynamic(["system:masters", "cluster-admin", "azure-operator"]);
+
+(
+    // Part 1: Detect high/critical severity vulnerabilities in container images.
+    // This logic requires a data source that provides vulnerability scan results.
+    // The table 'ContainerImageVulnerability' is a placeholder; adjust as needed (e.g., SecurityVulnerability).
+    ContainerImageVulnerability
+    | where TimeGenerated > ago(lookback)
+    | where VulnerabilitySeverity in~ ("High", "Critical")
+    | summarize arg_max(TimeGenerated, *) by VulnerabilityId, ContainerImage
+    | extend
+        Tactic = "Initial Access",
+        Technique = "Exploit Public-Facing Application",
+        DetectionSource = "Vulnerability Scan",
+        Entity = ContainerImage,
+        Description = strcat("High/Critical severity vulnerability '", VulnerabilityId, "' detected in image '", ContainerImage, "'.")
+)
+| union (
+    // Part 2: Detect insecure container configurations and runtime escape attempts.
+    // This section looks for the creation of privileged containers, which can facilitate host escapes.
+    KubeAudit
+    | where TimeGenerated > ago(lookback)
+    | where isnotempty(requestObject_spec_containers_securityContext_privileged) and requestObject_spec_containers_securityContext_privileged == true
+    | where not(user_username in (trustedActors)) // FP Tuning: Exclude known admin users/groups.
+    | project
+        TimeGenerated,
+        Tactic = "Privilege Escalation",
+        Technique = "Escape to Host",
+        DetectionSource = "Kubernetes Audit",
+        Entity = user_username,
+        Description = strcat("Privileged container '", todynamic(requestObject_spec_containers_s)[0].name, "' created by user '", user_username, "' in namespace '", objectRef_namespace, "'.")
+),
+(
+    // This section looks for suspicious processes often used for container escape or host modification.
+    DeviceProcessEvents
+    | where TimeGenerated > ago(lookback)
+    | where InitiatingProcessFolderPath has_any ("runc", "containerd-shim") // Process spawned by container runtime.
+    | where FileName in~ ("nsenter", "insmod", "modprobe", "chroot")
+    // FP Tuning: Some legitimate tools might use these commands. Profile baseline behavior and add more specific path or command-line exclusions if needed.
+    | project
+        TimeGenerated,
+        Tactic = "Privilege Escalation",
+        Technique = "Escape to Host",
+        DetectionSource = "EDR",
+        Entity = DeviceName,
+        Description = strcat("Suspicious process '", FileName, "' with command line '", ProcessCommandLine, "' executed from a container context on host '", DeviceName, "'.")
+),
+(
+    // Part 3: Detect insecure API access patterns in Kubernetes.
+    // This looks for a non-admin user creating a binding to a highly privileged role.
+    KubeAudit
+    | where TimeGenerated > ago(lookback)
+    | where verb_s == "create" and objectRef_resource_s == "clusterrolebindings"
+    | where requestObject_roleRef_name has_any ("cluster-admin", "admin")
+    | where not(user_username in (trustedActors))
+    | project
+        TimeGenerated,
+        Tactic = "Privilege Escalation",
+        Technique = "Valid Accounts",
+        DetectionSource = "Kubernetes Audit",
+        Entity = user_username,
+        Description = strcat("User '", user_username, "' created a cluster role binding to a privileged role '", requestObject_roleRef_name, "'.")
+),
+(
+    // Part 4: Detect supply chain threats, such as using images from untrusted registries.
+    // This logic requires a data source with container inventory information.
+    // The table 'ContainerInventory' is a placeholder; adjust as needed (e.g., KubePodInventory, ContainerLog).
+    ContainerInventory
+    | where TimeGenerated > ago(lookback)
+    | where isnotempty(Image)
+    | parse kind=relaxed Image with Registry "/" Repository
+    | where isnotempty(Registry) and not(Registry in (trustedRegistries))
+    | summarize by bin(TimeGenerated, 1h), Image, Computer
+    | project
+        TimeGenerated,
+        Tactic = "Initial Access",
+        Technique = "Supply Chain Compromise",
+        DetectionSource = "Container Inventory",
+        Entity = Image,
+        Description = strcat("Container started from untrusted registry: '", Image, "' on host '", Computer, "'.")
+)

@@ -1,0 +1,54 @@
+rule satellite_telemetry_anomalies {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects unexpected changes in satellite telemetry data, such as sudden power fluctuations or reboots. Such anomalies could indicate non-kinetic physical attacks (e.g., high-powered microwave weapons) or cyberattacks. This rule requires a custom UDM event type (e.g., SATELLITE_TELEMETRY)."
+    tactic = "TA0040, TA0001"
+    technique = "T1529, T1565.001"
+    false_positives = "Normal maintenance cycles, safe mode entry due to benign environmental factors (e.g., solar flares), or temporary sensor errors can generate false positives. Thresholds for power fluctuation and reboots must be tuned."
+    severity = "High"
+    tags = "Space, Satellite, Telemetry, Anomaly, Impact"
+
+  events:
+    // This rule requires a custom data source. 'SATELLITE_TELEMETRY' is a placeholder event type.
+    // Event for unexpected reboots. Assumes reboots are logged with a specific action.
+    $reboot.metadata.event_type = "SATELLITE_TELEMETRY"
+    $reboot.udm.action = "REBOOT"
+    $reboot.target.resource.name = $satellite_id
+
+    // Event for power level telemetry.
+    $power.metadata.event_type = "SATELLITE_TELEMETRY"
+    $power.target.resource.name = $satellite_id
+    // Ensure the power level field exists to avoid errors. A value of 0 is excluded as it could be a default/null value.
+    $power.udm.extensions.power_level_w > 0
+
+  match:
+    // Correlate events by satellite ID over a 1-hour window.
+    $satellite_id over 1h
+
+  outcome:
+    // --- Outcome variables for power fluctuation analysis ---
+    // FP Risk: The power fluctuation threshold is a critical tuning parameter.
+    // A 50% increase is a starting point and may need significant adjustment based on the specific satellite's normal operating behavior.
+    $power_fluctuation_threshold_percent = 1.5 // Represents a 50% increase
+    $max_power = max($power.udm.extensions.power_level_w)
+    $min_power = min($power.udm.extensions.power_level_w)
+    $is_power_anomaly = $max_power > ($min_power * $power_fluctuation_threshold_percent)
+
+    // --- General outcome variables for alerting ---
+    $risk_score = if($reboot, 90, 70) // Higher risk score for reboots
+    $target_resource_name = array_distinct($satellite_id)
+    $detection_methods = array_distinct(
+        if($reboot, "Unexpected Reboot", ""),
+        if($is_power_anomaly and #power >= 2, "Power Fluctuation Anomaly", "")
+    )
+    $reboot_count = count_distinct($reboot.metadata.id)
+    $power_event_count = count_distinct($power.metadata.id)
+    $min_power_observed = $min_power
+    $max_power_observed = $max_power
+
+  condition:
+    // Trigger if an unexpected reboot is detected OR if there's a significant power fluctuation.
+    // The power anomaly requires at least 2 data points to compare min and max.
+    $reboot or ($is_power_anomaly and #power >= 2)
+}

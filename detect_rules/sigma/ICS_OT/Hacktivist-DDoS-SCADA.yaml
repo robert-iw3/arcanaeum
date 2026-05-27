@@ -1,0 +1,113 @@
+title: Hacktivist TTPs Targeting ICS/OT Systems
+status: experimental
+description: >-
+  Detects TTPs associated with hacktivist groups like CARR and KillNet targeting ICS/OT environments.
+  It identifies potential DDoS symptoms, anomalous administrative tool usage on critical OT assets
+  (HMIs, EWS), and large-scale data exfiltration. These activities can indicate attempts to manipulate
+  SCADA systems or serve as a distraction for other malicious actions.
+references:
+  - https://attack.mitre.org/techniques/T1498/
+  - https://attack.mitre.org/techniques/T1059/
+  - https://attack.mitre.org/techniques/T1048/
+author: RW
+date: 2025-08-18
+tags:
+  - attack.impact
+  - attack.execution
+  - attack.exfiltration
+  - attack.t1498
+  - attack.t1059
+  - attack.t1048
+  - os.windows
+  - ot.scada
+logsource:
+  product: windows
+  category:
+    - process_creation
+    - network_connection
+detection:
+  # Pattern 1: Anomalous tool usage on critical OT assets, indicating potential manipulation.
+  manipulation:
+    category: process_creation
+    # This detection should be scoped to run only on critical OT assets (e.g., HMIs, EWS, SCADA servers).
+    # This filtering should be done in the SIEM to avoid performance issues and false positives.
+    Image|endswith:
+      - '\powershell.exe'
+      - '\cmd.exe'
+      - '\cscript.exe'
+      - '\wscript.exe'
+      - '\net.exe'
+      - '\netsh.exe'
+      - '\nmap.exe'
+      - '\nc.exe'
+      - '\netcat.exe'
+      - '\plink.exe'
+      - '\putty.exe'
+      - '\mstsc.exe'
+
+  # Pattern 2: Host-level symptoms of a DDoS or network flood attack.
+  # This is a conceptual detection that identifies any inbound connection from the public internet.
+  # The SIEM must be configured to aggregate these events and alert when a host receives connections
+  # from a high number of distinct source IPs over a short time period (e.g., >200 IPs in 5 minutes).
+  ddos_symptom:
+    category: network_connection
+  filter_ddos_is_internal:
+    SourceIp|startswith:
+      - '10.'
+      - '172.16.'
+      - '172.17.'
+      - '172.18.'
+      - '172.19.'
+      - '172.20.'
+      - '172.21.'
+      - '172.22.'
+      - '172.23.'
+      - '172.24.'
+      - '172.25.'
+      - '172.26.'
+      - '172.27.'
+      - '172.28.'
+      - '172.29.'
+      - '172.30.'
+      - '172.31.'
+      - '192.168.'
+      - '127.'
+      - '::1'
+      - 'fe80:'
+
+  # Pattern 3: Large data transfers from critical OT assets, indicating a potential data leak.
+  # This is a conceptual detection that identifies any outbound connection to the public internet.
+  # The SIEM must be configured to aggregate the total bytes out from a critical OT asset to external
+  # destinations and alert when it exceeds a baseline threshold (e.g., >50MB in 1 hour).
+  data_leak:
+    category: network_connection
+  filter_leak_is_internal:
+    DestinationIp|startswith:
+      - '10.'
+      - '172.16.'
+      - '172.17.'
+      - '172.18.'
+      - '172.19.'
+      - '172.20.'
+      - '172.21.'
+      - '172.22.'
+      - '172.23.'
+      - '172.24.'
+      - '172.25.'
+      - '172.26.'
+      - '172.27.'
+      - '172.28.'
+      - '172.29.'
+      - '172.30.'
+      - '172.31.'
+      - '192.168.'
+      - '127.'
+      - '::1'
+      - 'fe80:'
+
+  condition: manipulation or (ddos_symptom and not filter_ddos_is_internal) or (data_leak and not filter_leak_is_internal)
+falsepositives:
+  - Legitimate administrative activity on OT assets. Whitelisting of known tools, parent processes, and administrative users is required for the 'manipulation' pattern.
+  - The DDoS and data leak patterns are broad and rely heavily on SIEM-side aggregation and tuning. Without proper baselining and thresholding, they will be very noisy.
+  - It is critical to define and filter for your specific OT assets (e.g., by hostname, subnet, or asset inventory tag) to make this detection effective.
+level: medium

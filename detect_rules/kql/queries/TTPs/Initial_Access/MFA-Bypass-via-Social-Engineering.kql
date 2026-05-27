@@ -1,0 +1,54 @@
+// title: Password Reset Followed by MFA Method Change
+// description: >
+//   Detects when a user's password is reset, followed shortly by the registration or deletion of an MFA method for the same user.
+//   This pattern is a known TTP of adversaries like SCATTERED SPIDER, who use social engineering to call help desks,
+//   reset credentials, and enroll their own MFA device (or remove the legitimate user's) to gain persistent access to an account.
+// author: RW
+// date: 2025-08-22
+// tags:
+//   - attack.initial_access
+//   - attack.t1078.004
+//   - attack.t1098.005
+//   - threat_actor.scattered_spider
+// falsepositives:
+//   - Legitimate users performing account recovery with the help of IT support.
+//   - New user onboarding processes where a user sets their password and MFA for the first time.
+//   - To increase fidelity, this alert can be correlated with other suspicious activities, such as logins from new geolocations or subsequent bulk data export operations.
+// level: high
+
+let timeframe = 15m;
+// Find successful password resets. This includes both admin-initiated and self-service resets.
+let PasswordResets =
+    AuditLogs
+    | where TimeGenerated > ago(1d)
+    | where OperationName == "Reset password" and Result == "Success"
+    | extend TargetUserPrincipalName = tostring(TargetResources[0].userPrincipalName)
+    | extend InitiatingUserPrincipalName = tostring(InitiatedBy.user.userPrincipalName)
+    | extend InitiatingIpAddress = tostring(InitiatedBy.user.ipAddress)
+    | where isnotempty(TargetUserPrincipalName)
+    | project ResetTime = TimeGenerated, TargetUserPrincipalName, InitiatingUserPrincipalName, InitiatingIpAddress;
+// Find successful MFA method additions or deletions.
+let MFAMethodChanges =
+    AuditLogs
+    | where TimeGenerated > ago(1d)
+    | where OperationName in ("User registered security info", "User registered all required security info", "User deleted security info") and Result == "Success"
+    | extend UserPrincipalName = tostring(InitiatedBy.user.userPrincipalName)
+    | extend MfaChangeIpAddress = tostring(InitiatedBy.user.ipAddress)
+    | extend MfaOperation = OperationName
+    | where isnotempty(UserPrincipalName)
+    | project MfaChangeTime = TimeGenerated, UserPrincipalName, MfaChangeIpAddress, MfaOperation;
+// Correlate a password reset with a subsequent MFA change for the same user within the specified timeframe.
+PasswordResets
+| join kind=inner MFAMethodChanges on $left.TargetUserPrincipalName == $right.UserPrincipalName
+| where MfaChangeTime > ResetTime and (MfaChangeTime - ResetTime) < timeframe
+// To reduce false positives, consider correlating with SigninLogs to check for new or anomalous source IP locations for the MFA change event.
+// For example, you could join with a watchlist of known corporate IP ranges or filter out common user locations.
+| project
+    Timestamp = ResetTime,
+    AccountUpn = TargetUserPrincipalName,
+    PasswordResetTime = ResetTime,
+    PasswordResetInitiatedBy = InitiatingUserPrincipalName,
+    PasswordResetSrcIp = InitiatingIpAddress,
+    MfaChangeTime,
+    MfaChangeOperation,
+    MfaChangeSrcIp = MfaChangeIpAddress

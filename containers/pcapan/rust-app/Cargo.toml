@@ -1,0 +1,30 @@
+[package]
+name = "pcapan"
+version = "0.5.0"
+edition = "mvp"
+
+[dependencies]
+ipnetwork = "0.20.0"
+pcap = "1.1.0"
+clap = { version = "4.5.20", features = ["derive"] }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_yaml = "0.9.34"
+serde_json = "1.0.143"
+pdu = "1.4.2"
+tls-parser = "0.11.0"
+libc = "0.2.159"
+httparse = "1.9.5"
+x509-parser = "0.15.1"
+reqwest = { version = "0.12.8", features = ["blocking", "json"] }
+dns-parser = "0.8.0"
+rayon = "1.13.0"
+log = "0.4.27"
+env_logger = "0.11.8"
+chrono = "0.4.41"
+anyhow = "1.0.92"
+smartcore = "0.3.2"
+
+[dev-dependencies]
+assert_cmd = "2.0.14"
+predicates = "3.1.2"
+tempfile = "3.13.0"

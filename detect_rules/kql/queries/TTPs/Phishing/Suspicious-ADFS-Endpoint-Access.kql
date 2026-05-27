@@ -1,0 +1,48 @@
+// Name: Suspicious ADFS Endpoint Access
+// Author: RW
+// Date: 2025-08-20
+// Mitre TTPs: T1566.002
+// Description: Detects access to ADFS logon endpoints from unexpected external IP addresses.
+// This could indicate an attacker attempting to leverage a configured ADFS instance for phishing or other malicious redirection.
+// This rule is designed for web server or proxy logs.
+
+// --- Tuning Section ---
+// Add known legitimate external IP addresses of partners or services that use your ADFS. This is important for reducing false positives.
+let known_partner_ips = dynamic([]);
+// To reduce noise, add ISO 2-letter country codes you expect ADFS access from (e.g., "US", "GB"). If this list is populated, alerts will only be generated for IPs outside these countries.
+let allowed_countries = dynamic([]);
+// --- End Tuning Section ---
+
+let adfs_requests =
+union isfuzzy=true W3CIISLog, CommonSecurityLog
+// Normalize fields from different log sources. Adjust as needed for your specific log schemas.
+| extend RequestURL = iif(isnotempty(csUriStem), csUriStem, RequestURL),
+         SourceIp = iif(isnotempty(cIP), cIP, SourceIP),
+         DestinationHost = iif(isnotempty(sComputerName), sComputerName, DestinationHostName),
+         LogSourceTable = _TableName
+| where isnotempty(RequestURL) and RequestURL has "/adfs/ls/" // Key artifact: ADFS logon service endpoint
+| where isnotempty(SourceIp)
+| where not(ipv4_is_private(SourceIp)); // Focus on external IP addresses
+
+adfs_requests
+| where SourceIp !in (known_partner_ips) // Exclude known legitimate partner IPs
+// Optional: Geo-location filtering for more targeted detection.
+| extend GeoInfo = geo_info_from_ip_address(SourceIp)
+| extend Country = tostring(GeoInfo.country)
+// If allowed_countries is empty, this condition passes all events. Otherwise, it filters for countries NOT in the list.
+| where array_length(allowed_countries) == 0 or not(Country in~ (allowed_countries))
+// Correlate with Threat Intelligence for higher fidelity alerts.
+| join kind=leftouter (
+    ThreatIntelligenceIndicator
+    | where isnotempty(NetworkIP)
+    | summarize by NetworkIP
+) on $left.SourceIp == $right.NetworkIP
+| extend IsThreatIntelligenceMatch = isnotempty(NetworkIP)
+| project
+    TimeGenerated,
+    SourceIp,
+    Country,
+    RequestURL,
+    DestinationHost,
+    IsThreatIntelligenceMatch,
+    LogSourceTable

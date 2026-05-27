@@ -1,0 +1,53 @@
+// Name: Unsigned DLL Loaded After Remote Memory Write
+// Author: RW
+// Date: 2025-08-07
+// Description: Detects when a process writes to the memory of a remote process, which is then followed
+//              shortly by that remote process loading an unsigned DLL. This pattern is a strong indicator
+//              of DLL Injection, where an attacker forces a legitimate process to load a malicious
+//              library to evade defenses.
+// Tactics: Defense Evasion, Privilege Escalation
+// Techniques: T1055.001
+
+let timeframe = 1h;
+let lookupwindow = 2m;
+// FP Mitigation: Add legitimate processes known to perform remote memory writes (e.g., debuggers, security tools) to this allowlist.
+let injector_allowlist = dynamic([
+    "procexp.exe",
+    "procmon.exe",
+    "windbg.exe",
+    "msmpeng.exe"
+]);
+// Find remote memory write events, which is the first step of injection.
+let MemoryWriteEvents =
+    DeviceEvents
+    | where Timestamp > ago(timeframe)
+    | where ActionType in ("RemoteWriteProcessMemory", "RemoteVirtualAllocApiCall")
+    | where InitiatingProcessFileName !in (injector_allowlist)
+    | where InitiatingProcessId != TargetProcessId // Exclude self-injection which is less suspicious.
+    | project WriteTime = Timestamp, DeviceName, InjectorProcessName = InitiatingProcessFileName, InjectorProcessId = InitiatingProcessId, TargetProcessId;
+// Find unsigned DLL load events, the second part of the attack.
+let UnsignedDllLoads =
+    DeviceImageLoadEvents
+    | where Timestamp > ago(timeframe)
+    | where IsSigned == false
+    // FP Mitigation: You may need to allowlist specific unsigned DLLs that are known to be safe in your environment.
+    // | where FileName !in ("legit_unsigned.dll")
+    | project LoadTime = Timestamp, DeviceName, LoadingProcessName = InitiatingProcessFileName, LoadingProcessId = InitiatingProcessId, DllName = FileName, DllPath = FolderPath;
+// Join the two event types to find the malicious sequence on the same device.
+MemoryWriteEvents
+| join kind=inner (
+    UnsignedDllLoads
+) on $left.TargetProcessId == $right.LoadingProcessId and $left.DeviceName == $right.DeviceName
+// Correlate events where the DLL load happens shortly after the memory write.
+| where LoadTime between (WriteTime .. (WriteTime + lookupwindow))
+| project
+    Timestamp = LoadTime,
+    DeviceName,
+    InjectorProcessName,
+    InjectorProcessId,
+    TargetProcessName = LoadingProcessName,
+    TargetProcessId,
+    UnsignedDllName = DllName,
+    UnsignedDllPath = DllPath,
+    WriteTime,
+    LoadTime

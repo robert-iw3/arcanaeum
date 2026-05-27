@@ -1,0 +1,40 @@
+rule powershell_download_cradle {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects suspicious PowerShell execution containing command-line arguments and patterns commonly used for download cradles. This technique is frequently used by malware, such as in the Nova infostealer campaign, to download and execute subsequent stages."
+    tactic = "TA0002, TA0011"
+    technique = "T1059.001, T1105"
+    false_positives = "Legitimate administrative scripts or software deployment tools may use similar PowerShell commands. Tuning may be required by excluding trusted script paths, parent processes, or known domains."
+
+  events:
+    // Match PowerShell process launch events
+    $p.metadata.event_type = "PROCESS_LAUNCH"
+    $p.metadata.product_event_type = "CreateProcess"
+    re.regex($p.target.process.file.full_path, `\\powershell\.exe$`) nocase
+
+    // Detect specific execution flags seen in the campaign
+    and re.regex($p.target.process.command_line, `-NoProfile\s+-ExecutionPolicy\s+RemoteSigned`) nocase
+
+    // Detect common download cradle patterns
+    and re.regex($p.target.process.command_line, `(Invoke-Expression|IEX|New-Object\s+System\.Net\.WebClient|DownloadString|DownloadFile)`) nocase
+
+  outcome:
+    // Set a risk score for the detection
+    $risk_score = 40
+
+    // Extract key information for analysis
+    $principal_hostname = $p.principal.hostname
+    $principal_user = $p.principal.user.userid
+    $principal_process_path = $p.principal.process.file.full_path
+    $principal_process_cmdline = $p.principal.process.command_line
+    $target_process_path = $p.target.process.file.full_path
+    $target_process_cmdline = $p.target.process.command_line
+    $target_process_sha256 = $p.target.process.file.sha256
+
+    // Attempt to capture any URL from the command line
+    $download_url = re.capture($p.target.process.command_line, `(https?://[^\s"']+)`)
+
+  condition:
+    $p
+}

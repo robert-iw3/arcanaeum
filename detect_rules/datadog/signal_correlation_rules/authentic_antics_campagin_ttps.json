@@ -1,0 +1,69 @@
+{
+  "data": {
+    "type": "signal_correlation",
+    "attributes": {
+      "name": "AUTHENTIC ANTICS Malware Detection",
+      "enabled": true,
+      "cases": [
+        {
+          "name": "COM Hijacking Persistence",
+          "status": "high",
+          "query": "source:registry @registry.path:*\\\\Classes\\\\CLSID\\\\{1299CF18-C4F5-4B6A-BB0F-2299F0398E27}\\\\InprocServer32 @registry.value_name:(Default OR \"(Default)\") -@registry.value_data:*npmproxy.dll"
+        },
+        {
+          "name": "Outlook Process Impersonation",
+          "status": "high",
+          "query": "source:web @process.name:outlook.exe @url:*login.microsoftonline.com/common/oauth2/authorize* @url:*client_id=d3590ed6-52b3-4102-aeff-aad2292ab01c* @url:*redirect_uri=ms-appx-web%3a%2f%2fMicrosoft.AAD.BrokerPlugin%2fd3590ed6-52b3-4102-aeff-aad2292ab01c* @url:*prompt=login*"
+        },
+        {
+          "name": "Registry API Unhooking",
+          "status": "high",
+          "query": "source:alerts (@signature_id:(*Unhooking* OR *Tampering*) OR @signature:(*API\\ Unhooking* OR *Memory\\ Patching* OR *Defense\\ Evasion*)) @process.name:outlook.exe @object:*ntdll.dll*"
+        },
+        {
+          "name": "Environmental Keying Evasion",
+          "status": "high",
+          "query": "source:registry @process.name:outlook.exe @registry.path:*\\\\Microsoft\\\\Cryptography\\\\MachineGuid"
+        },
+        {
+          "name": "Stealthy Email Exfiltration",
+          "status": "high",
+          "query": "source:web @http.method:POST @url:https://outlook.office.com/api/v2.0/me/sendMail @form_data:*\\\"SaveToSentItems\\\":\\ \\\"false\\\"*"
+        },
+        {
+          "name": "Registry-Based Execution Control",
+          "status": "high",
+          "query": "source:registry @registry.path:*\\\\Software\\\\Microsoft\\\\Office\\\\16.0\\\\Outlook\\\\Logging @registry.value_name:Counter"
+        }
+      ],
+      "group_by_fields": ["@host", "@user", "@network.source.ip"],
+      "distinct_fields": ["case_id"],
+      "correlation": {
+        "expression": "distinct_count >= 2",
+        "timeframe": "1h"
+      },
+      "message": "AUTHENTIC ANTICS Malware Detection: {distinct_count} distinct TTPs detected on host {@host}, user {@user}, or source IP {@network.source.ip}. Techniques: {case_names}. Details: {@registry.path OR @url OR @form_data OR @object OR @signature}. Timeframe: {first_activity} to {last_activity}",
+      "severity": "high",
+      "tags": [
+        "security:attack",
+        "tactic:TA0003",
+        "tactic:TA0005",
+        "tactic:TA0006",
+        "tactic:TA0010",
+        "technique:T1546.015",
+        "technique:T1557",
+        "technique:T1187",
+        "technique:T1562.001",
+        "technique:T1480.001",
+        "technique:T1567",
+        "technique:T1112",
+        "attribution:APT28",
+        "attribution:FancyBear",
+        "attribution:GRU"
+      ],
+      "options": {
+        "evaluation_window": "1h"
+      }
+    }
+  }
+}

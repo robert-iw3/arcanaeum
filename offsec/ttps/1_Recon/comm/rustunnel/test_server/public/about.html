@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>About — rustunnel Demo</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <nav>
+    <a href="/">Home</a>
+    <a href="/about" class="active">About</a>
+    <a href="/live">Live Stats</a>
+    <a href="/api-demo">API</a>
+  </nav>
+
+  <main>
+    <div class="card">
+      <div class="badge">📖 How it works</div>
+      <h2 style="font-size:22px;margin-bottom:16px">Request flow</h2>
+      <p style="color:var(--muted);margin-bottom:20px">
+        Every request you make to the public URL travels through this path:
+      </p>
+      <pre>Browser
+  │
+  ▼  HTTPS
+rustunnel-server  (your VPS)
+  │  WebSocket + TLS
+  ▼  yamux stream
+rustunnel client  (your laptop / dev machine)
+  │  plain TCP
+  ▼
+this demo server  :3000</pre>
+    </div>
+
+    <div class="card">
+      <h2>Two WebSocket connections</h2>
+      <p style="color:var(--muted);margin-bottom:16px">
+        The client maintains two persistent connections to the server:
+      </p>
+      <div class="grid">
+        <div class="stat">
+          <div class="label">Control plane</div>
+          <div class="value" style="font-size:14px;color:var(--text);font-weight:600;line-height:1.5">
+            JSON frames<br>
+            <span style="color:var(--muted);font-size:12px">auth · registration · heartbeat</span>
+          </div>
+        </div>
+        <div class="stat">
+          <div class="label">Data plane</div>
+          <div class="value" style="font-size:14px;color:var(--text);font-weight:600;line-height:1.5">
+            Binary yamux<br>
+            <span style="color:var(--muted);font-size:12px">all proxied connections multiplexed</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Protocol frames</h2>
+      <p style="color:var(--muted);margin-bottom:12px">Key control frames exchanged at startup:</p>
+      <table>
+        <thead>
+          <tr><th>Frame</th><th>Direction</th><th>Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Auth</td><td>→ server</td><td>Send token + client version</td></tr>
+          <tr><td>AuthOk</td><td>← server</td><td>Receive session_id</td></tr>
+          <tr><td>RegisterTunnel</td><td>→ server</td><td>Request subdomain / port</td></tr>
+          <tr><td>TunnelRegistered</td><td>← server</td><td>Receive public URL</td></tr>
+          <tr><td>NewConnection</td><td>← server</td><td>Incoming request notification</td></tr>
+          <tr><td>Ping / Pong</td><td>↔</td><td>Heartbeat (every 30 s)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Reconnection</h2>
+      <p style="color:var(--muted)">
+        If the connection drops, the client reconnects automatically with
+        exponential backoff: <strong>1 s → 2 s → 4 s … 60 s</strong> with ±20% jitter.
+        Auth errors are the only fatal case — everything else retries.
+      </p>
+    </div>
+
+    <div class="btn-row">
+      <a href="/" class="btn outline">← Home</a>
+      <a href="/live" class="btn">Live stats →</a>
+    </div>
+  </main>
+
+  <footer>
+    rustunnel demo server &mdash; <a href="/api-demo">JSON API</a>
+  </footer>
+</body>
+</html>

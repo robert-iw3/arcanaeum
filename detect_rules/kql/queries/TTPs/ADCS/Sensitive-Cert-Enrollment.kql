@@ -1,0 +1,68 @@
+// name: Sensitive Certificate Enrollment via Intune Connector
+// id: 5b2c3d4e-5f6a-7b8c-9d0e-1f2a3b4c5d6e
+// version: 1
+// date: 2025-07-31
+// author: RW
+// description: |
+//   Detects the issuance of a certificate from an on-premises Active Directory Certificate Services (AD CS) authority that contains a Subject Alternative Name (SAN) with a strong-mapping SID of a highly privileged account (e.g., Domain Admin, Domain Controller).
+//   This activity is a key indicator of the attack path detailed by Dirk-jan Mollema, where an attacker with Intune privileges abuses the Intune Certificate Connector or NDES server to request a certificate for a privileged on-premises account.
+//   The rule specifically filters for certificate issuance events where the requester is a known Intune Connector/NDES server and the certificate's SAN contains a privileged SID, indicating a potential hybrid identity privilege escalation attempt.
+// severity: High
+// tactics:
+//   - PrivilegeEscalation
+//   - CredentialAccess
+// techniques:
+//   - T1649 # Steal or Forge Authentication Certificates
+//   - T1552.006 # Unsecured Credentials: Group Policy Preferences
+// dataSources:
+//   - WindowsEvent
+// how_to_implement: |
+//   You must be ingesting Active Directory Certificate Services (AD CS) logs from your Certificate Authority servers into your Log Analytics workspace. This is typically done by configuring the Azure Monitor Agent (AMA) to collect the `Microsoft-Windows-CertificationAuthority/Operational` log channel, which populates the `WindowsEvent` table.
+//   Most importantly, you MUST populate the `NdesAndIntuneConnectorServers` list in the query with the `RequesterName` of your Intune Certificate Connector and/or NDES servers to ensure the rule is properly targeted.
+// known_false_positives: |
+//   False positives are highly unlikely, as issuing certificates for privileged administrative accounts or groups via Intune is an insecure and non-standard practice. A false positive could occur during authorized security testing or in a severely misconfigured environment. Any alert should be treated as a high-priority incident.
+
+
+query: |
+  // comment: Define the list of NDES/Intune Connector servers. This list MUST be populated with the names of your servers.
+  let NdesAndIntuneConnectorServers = dynamic([
+      "ndes-server1.contoso.com",
+      "intune-connector1.contoso.com"
+      // Add the RequesterName (often FQDN or DOMAIN\\MACHINE$) of your NDES and Intune Certificate Connector servers here.
+  ]);
+  WindowsEvent
+  | where Provider == "Microsoft-Windows-CertificationAuthority" and EventID == 21 // EventID 21 = Certificate Issued
+  // comment: Filter for requests originating from the specified Intune Certificate Connector or NDES servers.
+  | extend RequesterName = tostring(EventData.RequesterName)
+  | where RequesterName in~ (NdesAndIntuneConnectorServers)
+  // comment: The Subject Alternative Name (SAN) is stored in the 'Attributes' field in the event's XML data.
+  | extend CertificateAttributes = tostring(EventData.Attributes)
+  // comment: Look for the specific SID tag format used for strong mapping in certificate SANs.
+  | where CertificateAttributes has "tag:microsoft.com,2022-09-14:sid:"
+  // comment: Extract the SID only if it matches a well-known privileged account or group (e.g., Domain Admins, Domain Controllers).
+  | extend PrivilegedSid = extract("tag:microsoft\\.com,2022-09-14:sid:(S-1-5-21-[0-9-]+-(500|512|516|518|519))", 1, CertificateAttributes)
+  | where isnotempty(PrivilegedSid)
+  | extend
+      CaServer = Computer,
+      SubjectName = tostring(EventData.SubjectName),
+      TemplateName = tostring(EventData.TemplateName)
+  | project
+      TimeGenerated,
+      CaServer,
+      RequesterName,
+      SubjectName,
+      TemplateName,
+      PrivilegedSid
+entityMappings:
+  - entityType: Host
+    fieldMappings:
+      - identifier: FullName
+        columnName: RequesterName
+  - entityType: Host
+    fieldMappings:
+      - identifier: FullName
+        columnName: CaServer
+customDetails:
+  SubjectName: SubjectName
+  TemplateName: TemplateName
+  PrivilegedSid: PrivilegedSid

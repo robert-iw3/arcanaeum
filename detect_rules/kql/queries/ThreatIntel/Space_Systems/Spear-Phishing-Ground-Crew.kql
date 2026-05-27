@@ -1,0 +1,49 @@
+// Name: Spear Phishing Campaign Targeting Satellite Ground Crew
+// Author: RW
+// Date: 2025-08-19
+// Description: Detects phishing emails targeting key personnel involved in satellite operations, such as ground station crew.
+// Adversaries may use open-source intelligence (OSINT) to identify these individuals and target them with spear phishing to gain initial access.
+// False Positive Sensitivity: Medium
+
+// Define the target group of users (e.g., satellite ground station personnel).
+// Tuning: This list should be populated with the User Principal Names (UPNs) of employees with privileged access to satellite control or ground station systems.
+let highValueUsers = dynamic([
+    "ground.control@example.com",
+    "mission.lead@example.com",
+    "sat.engineer@example.com",
+    "dr.eleanor.ann.arroway@seti.org"
+]);
+// Set the lookback period for the detection.
+let lookback = 1d;
+EmailEvents
+| where TimeGenerated > ago(lookback)
+// Filter for emails sent to the defined high-value users.
+| where RecipientEmailAddress in~ (highValueUsers)
+// Filter for emails that are classified as phishing. This is a high-fidelity signal from Defender for Office 365.
+| where ThreatTypes has "Phish"
+// Focus on emails that reached the user, as these pose the most immediate risk.
+| where DeliveryAction in ("Delivered", "Junked", "DeliveredAsSpam")
+// Correlate with URL click events to determine if the user interacted with a malicious link.
+| join kind=leftouter (
+    UrlClickEvents
+    | where TimeGenerated > ago(lookback)
+    // Look for clicks that were allowed or where the user clicked through a warning.
+    | where ActionType == "ClickAllowed" or IsClickedThrough has "true"
+    | project ClickTime = TimeGenerated, NetworkMessageId, ClickedUrl = Url, ClickedBy = UserPrincipalName
+) on NetworkMessageId
+| project
+    TimeGenerated,
+    Subject,
+    SenderFromAddress,
+    RecipientEmailAddress,
+    ThreatTypes,
+    DetectionMethods,
+    DeliveryAction,
+    InternetMessageId,
+    WasClicked = isnotempty(ClickTime),
+    ClickTime,
+    ClickedUrl,
+    ClickedBy
+| extend
+    timestamp = TimeGenerated,
+    AccountCustomEntity = RecipientEmailAddress

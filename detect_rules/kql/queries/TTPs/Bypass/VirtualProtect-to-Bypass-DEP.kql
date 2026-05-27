@@ -1,0 +1,29 @@
+// Name: Suspicious VirtualProtect for DEP Bypass
+// Author: RW
+// Date: 2025-08-03
+// Description: Detects attempts to bypass Data Execution Prevention (DEP) by using the VirtualProtect API
+//              to change a memory region's permissions to executable. This is a common technique used in
+//              exploits to run shellcode from memory areas like the stack or heap.
+// False Positive Sensitivity: Medium
+// MITRE TTPs: T1055, T1068, T1093
+
+DeviceEvents
+// Filter for VirtualProtect API calls, which are used to change memory protections.
+| where ActionType == "VirtualProtectApiCall"
+// Focus on changes where a non-executable memory region is made executable. This is the core of the DEP bypass.
+// Executable flags include PAGE_EXECUTE (0x10), PAGE_EXECUTE_READ (0x20), PAGE_EXECUTE_READWRITE (0x40), and PAGE_EXECUTE_WRITECOPY (0x80).
+| where ProtectionWasExecutable == false and NewProtection has_any ("PAGE_EXECUTE", "PAGE_EXECUTE_READ", "PAGE_EXECUTE_READWRITE", "PAGE_EXECUTE_WRITECOPY")
+// Prioritize alerts for memory regions that should not typically be executable, such as the stack, heap, or other private memory.
+| where MemoryRegionType in ("Stack", "Heap", "Private")
+// FP Tuning: Certain applications like JIT compilers (browsers, .NET) or DRM software may perform this action legitimately.
+// Exclude known legitimate processes to reduce noise.
+// | where InitiatingProcessFileName !in~ ("chrome.exe", "firefox.exe", "msedge.exe", "dotnet.exe", "csc.exe")
+| project
+    Timestamp,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessId,
+    MemoryRegionType,
+    PreviousProtection,
+    NewProtection

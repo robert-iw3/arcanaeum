@@ -1,0 +1,52 @@
+{
+  "rule_id": "unusual_web_user_agent_detection",
+  "name": "Unusual Web User Agent Detection",
+  "description": "Detects low-volume or non-standard user agents accessing web servers. This activity can indicate malicious scanning, web scraping, or command-and-control activity.",
+  "severity": "medium",
+  "enabled": true,
+  "language": "esql",
+  "query": "from logs-nginx*, logs-apache*, logs-iis* | where http.request.user_agent IS NOT NULL and http.request.user_agent != '-' and NOT (http.request.user_agent rlike '.*(Mozilla/|Opera/|curl/|Wget/|Python-urllib/|Go-http-client/|Java/).*' or http.request.user_agent rlike '.*(bot|spider|crawler|scanner).*') | stats count() by http.request.user_agent, source.ip, destination.ip | stats ua_total_count = sum(count()), Source_IPs = group_concat(source.ip), Destination_IPs = group_concat(destination.ip), Connection_Count = sum(count()) by http.request.user_agent | where ua_total_count < 10 | keep http.request.user_agent, ua_total_count, Source_IPs, Destination_IPs, Connection_Count | sort ua_total_count",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0008",
+        "name": "Lateral Movement",
+        "reference": "https://attack.mitre.org/tactics/TA0008/"
+      },
+      "technique": [
+        {
+          "id": "T1021",
+          "name": "Remote Services",
+          "reference": "https://attack.mitre.org/techniques/T1021/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0002",
+        "name": "Execution",
+        "reference": "https://attack.mitre.org/tactics/TA0002/"
+      }
+    }
+  ],
+  "interval": "1h",
+  "from": "now-1h",
+  "max_signals": 100,
+  "risk_score": 50,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [],
+  "tags": [
+    "Web Server",
+    "User Agent",
+    "Lateral Movement"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "http.request.user_agent"
+}

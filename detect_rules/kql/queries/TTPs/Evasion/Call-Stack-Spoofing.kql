@@ -1,0 +1,35 @@
+// Name: Anomalous Call Stack via Timer Queue for Evasion
+// Author: RW
+// Date: 2025-08-02
+// Description: Detects sensitive API calls, such as remote thread creation or cross-process memory writes, originating from a Windows thread pool timer. This is an indicator of call stack spoofing, an advanced evasion technique where an attacker uses asynchronous mechanisms like timer queues to hide the true origin of malicious code execution.
+// Tactic: Defense Evasion
+// Technique: T1055 - Process Injection
+// False Positive Sensitivity: Medium
+
+let sensitive_actions = dynamic([
+    "CreateRemoteThreadApiCall",
+    "WriteMemoryApiCall",
+    "QueueUserApcApiCall"
+]);
+DeviceEvents
+// Filter for sensitive actions often used in process injection.
+| where ActionType in (sensitive_actions)
+// Ensure call stack information is available for analysis.
+| where isnotempty(CallStack)
+// Look for call stacks originating from thread pool timers, a known call stack spoofing technique.
+| where CallStack has "TppTimer" or CallStack has "TppWorkerThread"
+// Focus on cross-process activity, which is more indicative of malicious behavior in this context.
+| where InitiatingProcessId != ProcessId
+// FP Mitigation: Some legitimate background services, updaters, or inter-process communication frameworks
+// might use timers. Exclude known legitimate processes that exhibit this behavior.
+| where not (InitiatingProcessFileName in~ ('known_good_app1.exe', 'known_good_app2.exe')) // Placeholder for FP tuning
+| project
+    TimeGenerated,
+    DeviceName,
+    ActionType,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    ProcessFileName,
+    ProcessCommandLine,
+    CallStack,
+    ReportId

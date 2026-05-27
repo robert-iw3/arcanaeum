@@ -1,0 +1,18 @@
+// Name: Unusual Process Relationship via PPL Loader
+// Author: RW
+// Date: 2025-08-23
+// Description: Detects when the 'CreateProcessAsPPL.exe' tool, identified in research, is used to launch legitimate Windows binaries like 'ClipUp.exe'.
+// This specific parent-child relationship is a strong indicator of an attempt to abuse the Protected Process Light (PPL) feature to tamper with system
+// components or security products.
+// False Positives: This detection is highly specific to the 'CreateProcessAsPPL.exe' tool.
+// False positives would only occur if this tool is used for legitimate testing or administrative purposes.
+// MITRE ATT&CK: T1055
+
+DeviceProcessEvents
+// Look for the specific parent process (PPL loader tool) mentioned in the research.
+// The tool name is specific, but using 'has' allows for variations in path.
+| where InitiatingProcessFileName has "CreateProcessAsPPL.exe"
+// The primary abuse case demonstrated was with ClipUp.exe.
+// This could be expanded to other legitimate binaries if similar abuse patterns are discovered.
+| where FileName =~ "clipup.exe"
+| project-reorder TimeGenerated, DeviceName, FileName, ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessCommandLine, ProcessId, InitiatingProcessId

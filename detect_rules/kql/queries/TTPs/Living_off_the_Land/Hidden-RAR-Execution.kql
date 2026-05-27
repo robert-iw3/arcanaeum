@@ -1,0 +1,28 @@
+// Name: Hidden RAR Execution via PowerShell
+// Author: RW
+// Date: 2025-08-08
+// Description: Detects PowerShell being used to execute rar.exe with a hidden window style, often from a temporary directory.
+//              This technique is used by threat actors to compress data for exfiltration or execute payloads while evading user detection.
+// False Positive Sensitivity: Medium
+// Tactics: Execution, Defense Evasion, Collection
+// Techniques: T1059.001, T1027, T1560.001
+
+DeviceProcessEvents
+// Identifies the execution of PowerShell
+| where FileName =~ "powershell.exe" or ProcessVersionInfoOriginalFileName =~ "powershell.exe"
+// Looks for the specific combination of arguments to run rar.exe hidden
+| where ProcessCommandLine has_all ("start-process", "windowstyle", "hidden", "rar.exe")
+// Checks if the execution involves the Windows Temp directory, a common staging area
+| where ProcessCommandLine has @"c:\windows\temp\"
+// FP Tuning: While uncommon, legitimate automation scripts might use this combination. If this is noisy, consider filtering based on the parent process or the user account executing the command.
+// For example: where InitiatingProcessFileName !in ("legit_automation.exe")
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    ProcessCommandLine,
+    InitiatingProcessCommandLine,
+    InitiatingProcessFileName,
+    ReportId,
+    ProcessId,
+    InitiatingProcessId

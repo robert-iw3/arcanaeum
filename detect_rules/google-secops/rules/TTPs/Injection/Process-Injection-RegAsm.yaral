@@ -1,0 +1,42 @@
+rule infostealer_regasm_process_injection {
+  meta:
+    author = "RW"
+    date = "2025-08-13"
+    description = "Detects process injection into the .NET Assembly Registration utility (RegAsm.exe). This is a known TTP used by infostealers, such as Nova, to evade defenses by executing malicious code within the context of a legitimate, signed Microsoft process."
+    tactic = "TA0005"
+    technique = "T1055"
+    false_positives = "Legitimate security software (AV/EDR), debuggers, or certain application frameworks may inject into processes. Tuning may be required by excluding known safe source processes or parent processes."
+
+  events:
+    // Match process injection events.
+    $inject.metadata.event_type = "PROCESS_INJECTION"
+
+    // The target of the injection is RegAsm.exe.
+    re.regex($inject.target.process.file.full_path, `\\regasm\.exe$`) nocase
+
+    // Reduce FPs by excluding injections from legitimate system processes.
+    // Legitimate system components may inject into other processes during normal operation.
+    not re.regex($inject.principal.process.file.full_path, `^C:\\Windows\\System32\\`) nocase
+
+    // Focus on injections originating from common user-writable or temporary locations,
+    // which is a common characteristic of malware droppers.
+    re.regex($inject.principal.process.file.full_path, `(?i)(C:\\Users\\|\\AppData\\|C:\\ProgramData\\|C:\\Temp\\|C:\\Windows\\\\Temp)`)
+
+  outcome:
+    // Set a risk score for the detection. Process injection is a high-confidence indicator.
+    $risk_score = 65
+
+    // Extract key information for analysis.
+    $principal_hostname = $inject.principal.hostname
+    $principal_user = $inject.principal.user.userid
+    $source_process_path = $inject.principal.process.file.full_path
+    $source_process_cmd = $inject.principal.process.command_line
+    $source_process_sha256 = $inject.principal.process.file.sha256
+    $source_process_pid = $inject.principal.process.pid
+    $target_process_path = $inject.target.process.file.full_path
+    $target_process_cmd = $inject.target.process.command_line
+    $target_process_pid = $inject.target.process.pid
+
+  condition:
+    $inject
+}

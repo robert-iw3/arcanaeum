@@ -1,0 +1,17 @@
+[
+  {
+    "name": "CCP Network Device Exploitation TTPs",
+    "search": "(index=cisco* OR index=pan* OR index=linux* OR index=firewall OR index=netflow) (\"service sshd_operns start\" OR \"access-list 10\" OR \"access-list 20\" OR \"access-list 50\" OR \"useradd cisco\" OR \"vi /etc/sudoers\" OR \"monitor capture\" OR \"mycap.pcap\" OR \"tac.pcap\" OR \"1.pcap\" OR \"span\" OR \"erspan\" OR dest_port=57722 OR match(dest_port, \"^\\d{3,5}22$\")) | eval rule_name=\"CCP Network Device Activity\" | eval reason=case(like(_raw, \"%service sshd_operns start%\"), \"Suspicious Service Started: sshd_operns\", like(_raw, \"%access-list 10%\") OR like(_raw, \"%access-list 20%\") OR like(_raw, \"%access-list 50%\"), \"Suspicious ACL Modification Detected\", like(_raw, \"%useradd cisco%\"), \"Suspicious User Creation: cisco\", like(_raw, \"%vi /etc/sudoers%\"), \"Sudoers File Edited\", like(_raw, \"%monitor capture%\") OR like(_raw, \"%span%\") OR like(_raw, \"%erspan%\"), \"Packet/Traffic Capture Command Detected\", like(_raw, \"%mycap.pcap%\") OR like(_raw, \"%tac.pcap%\") OR like(_raw, \"%1.pcap%\"), \"Suspicious PCAP Filename Detected\", dest_port=57722, \"Network Connection to IOS XR Backdoor Port 57722\", match(dest_port, \"^\\d{3,5}22$\"), \"Network Connection to High Port Ending in '22'\", 1=1, \"Unknown Match - Check Raw Event\") | table _time, rule_name, reason, user, src_ip, dest_ip, dest_port, process, command, _raw | `chinese_state-sponsored_network_device_activity_filter`",
+    "description": "Detects TTPs associated with CCP actors targeting network infrastructure, including enabling backdoors, modifying ACLs, creating users, and capturing traffic. This includes suspicious SSH activity on high ports, unauthorized ACL changes, user creation, and packet capture commands or files.",
+    "is_scheduled": 1,
+    "disabled": 0,
+    "cron_schedule": "*/30 * * * *",
+    "dispatch.earliest_time": "-24h",
+    "dispatch.latest_time": "now",
+    "sharing": "global",
+    "acl": {
+      "read": ["power", "admin"],
+      "write": ["admin"]
+    }
+  }
+]

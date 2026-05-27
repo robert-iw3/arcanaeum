@@ -1,0 +1,65 @@
+{
+  "data": {
+    "type": "signal_correlation",
+    "attributes": {
+      "name": "UNC6384 Mustang Panda Campaign IOCs and TTPs",
+      "enabled": true,
+      "cases": [
+        {
+          "name": "Malicious File Hash",
+          "status": "high",
+          "query": "source:sysmon @file.sha256:(65c42a7ea18162a92ee982eded91653a5358a7129c7672715ce8ddb6027ec124 OR 3299866538aff40ca85276f87dd0cefe4eafe167bd64732d67b06af4f3349916 OR e787f64af048b9cb8a153a0759555785c8fd3ee1e8efbca312a29f2acb1e4011 OR cc4db3d8049043fa62326d0b3341960f9a0cf9b54c2fbbdffdbd8761d99add79 OR d1626c35ff69e7e5bde5eea9f9a242713421e59197f4b6d77b914ed46976b933)"
+        },
+        {
+          "name": "Malicious Network Connection",
+          "status": "high",
+          "query": "source:sysmon @winlog.event_id:3 (@network.destination.ip:(103.79.120.72 OR 166.88.2.90) OR @network.destination.hostname:mediareleaseupdates.com)"
+        },
+        {
+          "name": "SOGU.SEC User Agent",
+          "status": "medium",
+          "query": "source:network @http.user_agent:\"Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 10.0; .NET4.0C; .NET4.0E; .NET CLR 2.0.50727; .NET CLR 3.0.30729; .NET CLR 3.5.30729)\""
+        },
+        {
+          "name": "CanonPrinter Persistence",
+          "status": "high",
+          "query": "source:sysmon @winlog.event_id:(12 OR 13 OR 14) @registry.target_object:*\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\\CanonPrinter @registry.details:*cnmpaui.exe*"
+        },
+        {
+          "name": "CANONSTAGER DLL Sideloading",
+          "status": "high",
+          "query": "source:sysmon @winlog.event_id:7 @process.image:*\\cnmpaui.exe @process.image_loaded:*\\cnmpaui.dll"
+        },
+        {
+          "name": "Suspicious File Path",
+          "status": "high",
+          "query": "source:sysmon @winlog.event_id:1 @process.image:(*\\DNVjzaXMFO\\* OR *C:\\Users\\Public\\Intelnet\\* OR *C:\\Users\\Public\\SecurityScan\\*)"
+        }
+      ],
+      "group_by_fields": ["@host", "@user.name"],
+      "distinct_fields": ["case_id"],
+      "correlation": {
+        "expression": "distinct_count >= 2",
+        "timeframe": "1h"
+      },
+      "message": "UNC6384 Mustang Panda Campaign: {distinct_count} distinct techniques on host {@host} by user {@user.name}. Techniques: {case_names}. Details: {@file.sha256 OR @network.destination.ip OR @network.destination.hostname OR @http.user_agent OR @registry.target_object OR @process.image_loaded OR @process.image}. Timeframe: {first_activity} to {last_activity}",
+      "severity": "high",
+      "tags": [
+        "security:attack",
+        "tactic:TA0001",
+        "tactic:TA0002",
+        "tactic:TA0003",
+        "tactic:TA0005",
+        "tactic:TA0011",
+        "technique:T1566",
+        "technique:T1574",
+        "technique:T1547.001",
+        "technique:T1071",
+        "technique:T1027"
+      ],
+      "options": {
+        "evaluation_window": "1h"
+      }
+    }
+  }
+}

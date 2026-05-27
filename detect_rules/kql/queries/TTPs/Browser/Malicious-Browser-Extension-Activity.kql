@@ -1,0 +1,139 @@
+// Name: Malicious Browser Extension Activity
+// Author: RW
+// Date: 2025-08-17
+// Description: This query unifies multiple detection strategies to identify high-risk browser extensions and their malicious activities.
+// It detects risky installations (based on permissions, installation method, or web store indicators), sensitive API access (like cookie theft),
+// and suspicious network connections (like C2 or data exfiltration).
+// False Positive Sensitivity: Medium. This is a broad query covering multiple detection types. Each detection type has its own potential for false positives.
+// It is critical to tune the various allowlists and thresholds below to suit your environment.
+// Tags: TTPs, Network Artifacts
+
+// --- Global Thresholds & Allowlisting ---
+// These settings apply across the different detection types in the query.
+
+// -- General Allowlisting --
+// Add extensions that are trusted in your environment to suppress alerts for them.
+let allowlist_extensions_by_id = dynamic([
+    "hdoktklabnbburlmcarimgfonrbfegle", // LastPass
+    "bgnkhhnnamicmpeenaelnjfhikgbkllg", // Okta Browser Plugin
+    "gighmmpiobklfepjocnamgkkbiglidom"  // Google Docs Offline
+]);
+let allowlist_extensions_by_name = dynamic([
+    "Grammarly", "Microsoft Editor", "AdBlock", "uBlock Origin", "Selenium IDE", "Loom", "Click&Clean"
+]);
+
+// -- Detection 1: Risky Installation - High-Risk Permissions --
+let high_risk_permissions = dynamic(["cookies", "<all_urls>", "webRequest", "debugger", "clipboard", "proxy", "history", "https://*/*", "tabCapture", "desktopCapture"]);
+
+// -- Detection 2: Risky Installation - Sideloading --
+let high_risk_install_types = dynamic(["Sideloaded", "DeveloperMode", "Unpacked"]);
+let allowlist_sideload_users = dynamic([ // List of users authorized to sideload extensions (e.g., developers)
+    // "developer_user@example.com"
+]);
+
+// -- Detection 3: Risky Installation - Suspicious Web Store Indicators --
+let UpdateAgeThresholdDays = 365; // Extensions not updated in over a year are considered outdated.
+let RatingThreshold = 2.5; // Ratings below this are considered low.
+let RatingCountThreshold = 100; // Rating counts below this may indicate a new or untrustworthy extension.
+
+// -- Detection 4: Sensitive Runtime Behavior - Cookie Access --
+let sensitive_cookie_apis = dynamic(["cookies.get", "cookies.getAll", "cookies.set"]);
+
+// -- Detection 5: Suspicious Network Activity --
+let allowlist_domains = dynamic([
+    "google.com", "googleapis.com", "gstatic.com", "lastpass.com", "logmein.com", "grammarly.com", "okta.com", "microsoft.com", "office.com", "sentry.io", "chrome.google.com", "addons.mozilla.org"
+]);
+
+// --- Query Body ---
+
+// Part 1: Detections based on Extension Installation events
+let InstallationDetections =
+    DeviceEvents
+    | where ActionType == "BrowserExtensionInstalled" and InitiatingProcessFileName in ("chrome.exe", "msedge.exe", "firefox.exe")
+    // Parse all relevant fields from the JSON blob. Field names are examples and may need adjustment.
+    | extend ParsedFields = todynamic(AdditionalFields)
+    | extend ExtensionName = tostring(ParsedFields.ExtensionName),
+             ExtensionId = tostring(ParsedFields.ExtensionId),
+             ExtensionPermissions = todynamic(ParsedFields.ExtensionPermissions),
+             InstallationType = tostring(ParsedFields.InstallationType),
+             LastUpdated = todatetime(ParsedFields.LastUpdated),
+             UserRating = todouble(ParsedFields.UserRating),
+             RatingCount = toint(ParsedFields.RatingCount),
+             HasPrivacyPolicy = tobool(ParsedFields.HasPrivacyPolicy)
+    // Calculate flags for each detection type
+    | extend FoundRiskyPermissions = array_filter(ExtensionPermissions, p -> tostring(p) in (high_risk_permissions)),
+             IsSideloaded = InstallationType in (high_risk_install_types),
+             HasSuspiciousIndicators = (iif(datetime_diff('day', now(), LastUpdated) > UpdateAgeThresholdDays, true, false) or
+                                        iif(UserRating < RatingThreshold and RatingCount > 0, true, false) or
+                                        iif(HasPrivacyPolicy == false, true, false))
+    // The core logic: filter for events that match at least one detection type, after applying allowlists.
+    | where (array_length(FoundRiskyPermissions) > 0 and ExtensionId !in (allowlist_extensions_by_id) and ExtensionName !in (allowlist_extensions_by_name)) or
+            (IsSideloaded and InitiatingProcessAccountName !in (allowlist_sideload_users) and ExtensionId !in (allowlist_extensions_by_id)) or
+            (HasSuspiciousIndicators and ExtensionId !in (allowlist_extensions_by_id))
+    // Build a detailed reason string for the alert.
+    | extend Reason = strcat_array(
+        dynamic([
+            iif(array_length(FoundRiskyPermissions) > 0 and ExtensionId !in (allowlist_extensions_by_id) and ExtensionName !in (allowlist_extensions_by_name), strcat("HighRiskPermissions:", tostring(FoundRiskyPermissions)), ""),
+            iif(IsSideloaded and InitiatingProcessAccountName !in (allowlist_sideload_users) and ExtensionId !in (allowlist_extensions_by_id), strcat("Sideloaded:", InstallationType), ""),
+            iif(HasSuspiciousIndicators and ExtensionId !in (allowlist_extensions_by_id), "SuspiciousWebStoreIndicators", "")
+        ]),
+        "; "
+      )
+    // Project a standardized set of columns for unioning.
+    | project
+        Timestamp = TimeGenerated,
+        DeviceName,
+        InitiatingProcessAccountName,
+        InitiatingProcessFileName,
+        ExtensionName,
+        ExtensionId,
+        DetectionType = "RiskyExtensionInstallation",
+        Reason = trim(" ", replace_string(trim(";", trim(" ", Reason)), "; ;", ";")),
+        Details = AdditionalFields;
+
+// Part 2: Detections based on Extension API calls
+let ApiDetections =
+    DeviceEvents
+    | where ActionType == "BrowserExtensionApiCalled" and InitiatingProcessFileName in ("chrome.exe", "msedge.exe", "firefox.exe")
+    | where ExtensionId !in (allowlist_extensions_by_id) and ExtensionName !in (allowlist_extensions_by_name)
+    | extend ParsedFields = todynamic(AdditionalFields)
+    | extend ApiName = tostring(ParsedFields.ApiName),
+             TargetDomain = tostring(ParsedFields.TargetDomain),
+             ExtensionName = tostring(ParsedFields.ExtensionName),
+             ExtensionId = tostring(ParsedFields.ExtensionId)
+    | where ApiName in (sensitive_cookie_apis)
+    | project
+        Timestamp = TimeGenerated,
+        DeviceName,
+        InitiatingProcessAccountName,
+        InitiatingProcessFileName,
+        ExtensionName,
+        ExtensionId,
+        DetectionType = "SensitiveRuntimeBehavior",
+        Reason = "SensitiveCookieAccess",
+        Details = strcat("API: ", ApiName, ", TargetDomain: ", TargetDomain);
+
+// Part 3: Detections based on Extension Network requests
+let NetworkDetections =
+    DeviceEvents
+    | where ActionType == "BrowserExtensionNetworkRequest" and InitiatingProcessFileName in ("chrome.exe", "msedge.exe", "firefox.exe")
+    | where ExtensionId !in (allowlist_extensions_by_id) and ExtensionName !in (allowlist_extensions_by_name)
+    | extend ParsedFields = todynamic(AdditionalFields)
+    | extend RemoteUrl = tostring(ParsedFields.RemoteUrl),
+             ExtensionName = tostring(ParsedFields.ExtensionName),
+             ExtensionId = tostring(ParsedFields.ExtensionId)
+    | extend TargetDomain = tostring(parse_url(RemoteUrl).Host)
+    | where isnotempty(TargetDomain) and TargetDomain !in (allowlist_domains)
+    | project
+        Timestamp = TimeGenerated,
+        DeviceName,
+        InitiatingProcessAccountName,
+        InitiatingProcessFileName,
+        ExtensionName,
+        ExtensionId,
+        DetectionType = "SuspiciousNetworkActivity",
+        Reason = "ConnectionToUnusualDomain",
+        Details = strcat("URL: ", RemoteUrl);
+
+// Union all detection types into a single result set.
+union InstallationDetections, ApiDetections, NetworkDetections

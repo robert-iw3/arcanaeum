@@ -1,0 +1,89 @@
+{
+  "rule_id": "aws_suspicious_ssm_sendcommand_activity",
+  "name": "AWS Suspicious SSM SendCommand Activity (Mass Execution)",
+  "description": "Detects the execution of SSM commands ('AWS-RunShellScript' or 'AWS-RunPowerShellScript') on a large number of instances from an unknown user or source IP. This may indicate an attacker using a compromised role for lateral movement or large-scale attack execution.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "from logs-aws.cloudtrail-* | where event.provider == 'ssm.amazonaws.com' and event.action == 'SendCommand' and error.code is null and aws.cloudtrail.request_parameters.documentName in ('AWS-RunShellScript', 'AWS-RunPowerShellScript') | keep aws.cloudtrail.user_identity.arn, source.ip, aws.cloudtrail.aws_region, aws.cloudtrail.request_parameters.documentName, aws.cloudtrail.request_parameters.instanceIds, aws.cloudtrail.request_parameters.parameters.commands | stats target_instance_count = COUNT(aws.cloudtrail.request_parameters.instanceIds), target_instance_ids = ARRAY_AGG(aws.cloudtrail.request_parameters.instanceIds), commands_executed = ARRAY_AGG(aws.cloudtrail.request_parameters.parameters.commands) BY @timestamp, aws.cloudtrail.user_identity.arn, source.ip, aws.cloudtrail.aws_region, aws.cloudtrail.request_parameters.documentName | where target_instance_count > 5",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0008",
+        "name": "Lateral Movement",
+        "reference": "https://attack.mitre.org/tactics/TA0008/"
+      },
+      "technique": [
+        {
+          "id": "T1021",
+          "name": "Remote Services",
+          "reference": "https://attack.mitre.org/techniques/T1021/"
+        },
+        {
+          "id": "T1021.006",
+          "name": "System Management",
+          "reference": "https://attack.mitre.org/techniques/T1021/006/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0002",
+        "name": "Execution",
+        "reference": "https://attack.mitre.org/tactics/TA0002/"
+      },
+      "technique": [
+        {
+          "id": "T1059",
+          "name": "Command and Scripting Interpreter",
+          "reference": "https://attack.mitre.org/techniques/T1059/"
+        }
+      ]
+    }
+  ],
+  "interval": "5m",
+  "from": "now-5m",
+  "max_signals": 100,
+  "risk_score": 95,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://docs.aws.amazon.com/systems-manager/latest/userguide/ssm-agent-command-execution.html"
+  ],
+  "tags": [
+    "AWS",
+    "CloudTrail",
+    "SSM",
+    "Lateral Movement",
+    "Execution"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "exemptions": [
+    {
+      "name": "known_ssm_users_exemption",
+      "description": "Exempts known administrative roles and trusted IPs from SSM command detection.",
+      "conditions": [
+        {
+          "field": "aws.cloudtrail.userIdentity.arn",
+          "operator": "included",
+          "type": "list",
+          "list_id": "known_ssm_users"
+        },
+        {
+          "field": "source.ip",
+          "operator": "included",
+          "type": "list",
+          "list_id": "known_ssm_users"
+        }
+      ],
+      "enabled": true
+    }
+  ],
+  "custom_query_fields": [],
+  "event_group": "aws.cloudtrail.user_identity.arn, source.ip"
+}

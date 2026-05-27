@@ -1,0 +1,34 @@
+// Name: ApolloShadow C2 IP Communication
+// Author: RW
+// Date: 2025-07-31
+// Description: Detects network communication to a known ApolloShadow C2 IP address, indicating a potential active compromise by the Secret Blizzard threat actor.
+// False Positives: Medium. The IP address is a known malicious indicator, but IP addresses can be reallocated or be part of shared infrastructure over time. If false positives occur, consider correlating with other indicators.
+// References: https://www.microsoft.com/en-us/security/blog/2025/07-31/frozen-in-transit-secret-blizzards-aitm-campaign-against-diplomats/
+// MITRE ATT&CK: T1071
+// Data Sources: Microsoft Defender for Endpoint (DeviceNetworkEvents)
+
+let timeframe = 1d;
+// IOC list for ApolloShadow C2 IPs.
+let ioc_ips = dynamic(["45.61.149.109"]);
+DeviceNetworkEvents
+| where Timestamp > ago(timeframe)
+// Filter for successful outbound connections to the specified C2 IPs.
+| where ActionType == "ConnectionSuccess" and RemoteIP in (ioc_ips)
+| summarize
+    startTime = min(Timestamp),
+    endTime = max(Timestamp),
+    count(),
+    // Collect distinct values for key fields to provide context.
+    RemotePort = make_set(RemotePort, 10),
+    InitiatingProcess = make_set(InitiatingProcessFileName, 10)
+    by
+    DeviceName,
+    DeviceId,
+    RemoteIP
+| project-rename
+    endpoint = DeviceName,
+    firstTime = startTime,
+    lastTime = endTime,
+    c2_ip = RemoteIP,
+    remote_port = RemotePort,
+    initiating_process = InitiatingProcess

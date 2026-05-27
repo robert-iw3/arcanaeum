@@ -1,0 +1,71 @@
+rule china_nexus_apt_activity_collection {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects a collection of Tactics, Techniques, and Procedures (TTPs) associated with Chinese state-sponsored threat actors like Volt Typhoon, APT41, and Mustang Panda targeting critical infrastructure. This rule identifies living-off-the-land behavior, web shell creation, DLL sideloading, suspicious execution from temporary locations, and the use of common C2 framework components."
+    tags = "CHINA, APT, VOLT TYPHOON, APT41, MUSTANG PANDA, WINNTI, CRITICAL INFRASTRUCTURE, ICS"
+    tactic = "TA0002, TA0003, TA0004, TA0005, TA0007, TA0011"
+    technique = "T1190, T1059.001, T1021, T1574.002, T1218, T1047"
+    false_positives = "Legitimate administrative scripts, software installers, or security testing tools may trigger parts of this rule. Tuning may be required to exclude legitimate software that loads unsigned DLLs or executes from temporary directories."
+
+  events:
+    // Detects web servers spawning command-line shells, a common indicator of a web shell.
+    (
+      $web_shell.metadata.event_type = "PROCESS_LAUNCH"
+      and re.regex($web_shell.principal.process.file.full_path, `(?i)(\\w3wp\.exe|\\httpd\.exe|\\nginx\.exe|\\tomcat\d{1,2}\.exe|\\php-cgi\.exe)$`)
+      and re.regex($web_shell.target.process.file.full_path, `(?i)(\\cmd\.exe|\\powershell\.exe|\\pwsh\.exe|\\bash\.exe|\\sh\.exe|\\wscript\.exe|\\cscript\.exe)$`)
+    ) or
+    // Detects common Living-off-the-Land (LoLBIN) techniques used for execution and lateral movement.
+    (
+      $lolbin.metadata.event_type = "PROCESS_LAUNCH"
+      and (
+        // WMIC used to spawn processes, a technique used by threat actors for stealth.
+        (
+          re.regex($lolbin.target.process.file.full_path, `(?i)\\wmic\.exe$`)
+          and re.regex($lolbin.target.process.command_line, `(?i)\s+process\s+call\s+create\s+`)
+        ) or
+        // PowerShell with encoded commands, often used to obfuscate malicious scripts.
+        (
+          re.regex($lolbin.target.process.file.full_path, `(?i)\\powershell\.exe$`)
+          and re.regex($lolbin.target.process.command_line, `(?i)\s+(-e|-en|-enc|-enco|encodedcommand)\s+`)
+        )
+      )
+    ) or
+    // Detects named pipes created by common offensive tools like Impacket or Cobalt Strike.
+    (
+      $impacket_cs_pipe.metadata.event_type = "NAMED_PIPE_CREATION"
+      and re.regex($impacket_cs_pipe.target.named_pipe.name, `(?i)^(psexec|paexec|remcom|mojo|msagent|postex|csexec)`)
+    ) or
+    // Detects potential DLL Sideloading by a signed process loading an unsigned DLL from a non-standard location.
+    (
+      $dll_sideload.metadata.event_type = "MODULE_LOAD"
+      and $dll_sideload.principal.process.file.signed = true
+      and $dll_sideload.target.file.signed = false
+      and re.regex($dll_sideload.target.file.path, `(?i)(C:\\ProgramData\\|C:\\Users\\Public\\|C:\\PerfLogs\\|\\AppData\\Local\\Temp)`)
+    ) or
+    // Detects unsigned processes executing from world-writable or temporary locations.
+    (
+      $suspicious_execution.metadata.event_type = "PROCESS_LAUNCH"
+      and not $suspicious_execution.target.process.file.signed
+      and re.regex($suspicious_execution.target.process.file.path, `(?i)(C:\\ProgramData\\|C:\\Users\\Public\\|C:\\PerfLogs\\|\\AppData\\Local\\Temp)`)
+    )
+
+  outcome:
+    // Risk score is elevated due to the high-confidence nature of these combined TTPs.
+    $risk_score = 75
+
+    // Consolidate fields from whichever event triggered the detection.
+    $principal_hostname = coalesce($web_shell.principal.hostname, $lolbin.principal.hostname, $impacket_cs_pipe.principal.hostname, $dll_sideload.principal.hostname, $suspicious_execution.principal.hostname)
+    $principal_process_path = coalesce($web_shell.principal.process.file.full_path, $lolbin.principal.process.file.full_path, $impacket_cs_pipe.principal.process.file.full_path, $dll_sideload.principal.process.file.full_path, $suspicious_execution.principal.process.file.full_path)
+    $principal_process_cmdline = coalesce($web_shell.principal.process.command_line, $lolbin.principal.process.command_line, $impacket_cs_pipe.principal.process.command_line, $dll_sideload.principal.process.command_line, $suspicious_execution.principal.process.command_line)
+    $target_process_path = coalesce($web_shell.target.process.file.full_path, $lolbin.target.process.file.full_path, $suspicious_execution.target.process.file.full_path)
+    $target_process_cmdline = coalesce($web_shell.target.process.command_line, $lolbin.target.process.command_line, $suspicious_execution.target.process.command_line)
+    $target_file_path = coalesce($dll_sideload.target.file.path, $suspicious_execution.target.process.file.path)
+    $target_named_pipe = $impacket_cs_pipe.target.named_pipe.name
+
+    // Identify which pattern triggered the rule for easier analysis.
+    $detection_pattern = if($web_shell, "Web Shell Process Spawn", if($lolbin, "Living-off-the-Land Execution", if($impacket_cs_pipe, "Offensive Tool Named Pipe", if($dll_sideload, "Potential DLL Sideloading", if($suspicious_execution, "Suspicious Unsigned Execution", "Unknown")))))
+
+  condition:
+    $web_shell or $lolbin or $impacket_cs_pipe or $dll_sideload or $suspicious_execution
+}

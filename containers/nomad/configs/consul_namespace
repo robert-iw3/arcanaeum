@@ -1,0 +1,19 @@
+agent_prefix "" {
+  policy = "read"
+}
+
+namespace "nomad-ns" {
+  acl = "write"
+
+  key_prefix "" {
+    policy = "read"
+  }
+
+  node_prefix "" {
+    policy = "read"
+  }
+
+  service_prefix "" {
+    policy = "write"
+  }
+}

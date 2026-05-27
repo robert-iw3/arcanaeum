@@ -1,0 +1,59 @@
+rule hacktivist_scada_manipulation_and_disruption {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects TTPs associated with hacktivist groups like Cyber Army of Russia Reborn (CARR) and KillNet targeting ICS/OT environments. This rule identifies anomalous administrative tool usage on critical OT assets (e.g., HMIs, EWS), which could indicate attempts to manipulate SCADA systems. It also flags network patterns symptomatic of DDoS attacks or data leaks, which can be used for disruption or as cover for more advanced operations."
+    reference = "https://attack.mitre.org/techniques/T1498/, https://attack.mitre.org/techniques/T1059/, https://attack.mitre.org/techniques/T1048/"
+    tags = "ICS, OT, HACKTIVIST, SCADA, DDOS, DATA_LEAK, WINDOWS, CARR, KILLNET"
+    tactic = "TA0040, TA0005, TA0010"
+    technique = "T1498, T1059, T1048"
+    false_positives = "Legitimate administrative activity on OT assets. The 'manipulation' pattern requires whitelisting of known tools and parent processes. The DDoS and data leak patterns are broad and rely heavily on SIEM-side aggregation, baselining, and thresholding to be effective. It is critical to scope this rule to specific OT assets (e.g., by hostname or subnet) to reduce noise."
+    severity = "HIGH"
+
+  events:
+    // Pattern 1: Anomalous tool usage on critical OT assets, indicating potential manipulation.
+    $manipulation.metadata.event_type = "PROCESS_LAUNCH"
+    $manipulation.principal.hostname = $hostname
+    // This detection should be scoped to run only on critical OT assets (e.g., HMIs, EWS, SCADA servers).
+    // This filtering should be done in the SIEM to avoid performance issues and false positives.
+    re.regex($manipulation.target.process.file.full_path, `\\(powershell|cmd|cscript|wscript|net|netsh|nmap|nc|netcat|plink|putty|mstsc)\.exe$`) nocase
+
+    // Pattern 2: Host-level symptoms of a DDoS or network flood attack.
+    $ddos_symptom.metadata.event_type = "NETWORK_CONNECTION"
+    $ddos_symptom.target.hostname = $hostname
+    // This event identifies inbound connections from the public internet.
+    // For this to be an effective DDoS detection, the SIEM must aggregate these events and alert when a host
+    // receives connections from a high number of distinct source IPs over a short time (e.g., >200 IPs in 5 mins).
+    not net.ip_in_range_cidr($ddos_symptom.principal.ip, "10.0.0.0/8") and
+    not net.ip_in_range_cidr($ddos_symptom.principal.ip, "172.16.0.0/12") and
+    not net.ip_in_range_cidr($ddos_symptom.principal.ip, "192.168.0.0/16") and
+    not net.ip_in_range_cidr($ddos_symptom.principal.ip, "127.0.0.0/8")
+
+    // Pattern 3: Large data transfers from critical OT assets, indicating a potential data leak.
+    $data_leak.metadata.event_type = "NETWORK_CONNECTION"
+    $data_leak.principal.hostname = $hostname
+    // This event identifies outbound connections to the public internet.
+    // For this to be an effective data leak detection, the SIEM must aggregate the total bytes out
+    // (e.g., using network.sent_bytes) and alert when it exceeds a baseline threshold (e.g., >50MB in 1 hour).
+    not net.ip_in_range_cidr($data_leak.target.ip, "10.0.0.0/8") and
+    not net.ip_in_range_cidr($data_leak.target.ip, "172.16.0.0/12") and
+    not net.ip_in_range_cidr($data_leak.target.ip, "192.168.0.0/16") and
+    not net.ip_in_range_cidr($data_leak.target.ip, "127.0.0.0/8")
+
+  match:
+    $hostname over 1h
+
+  outcome:
+    $risk_score = 70
+    $principal_hostname = $hostname
+    // Consolidate details from all potential event types for investigation
+    $manipulation_commands = array_distinct($manipulation.target.process.command_line)
+    $manipulation_tools = array_distinct($manipulation.target.process.file.full_path)
+    $ddos_source_ips = array_distinct($ddos_symptom.principal.ip)
+    $data_leak_destination_ips = array_distinct($data_leak.target.ip)
+    $event_count = count_distinct($manipulation.metadata.id) + count_distinct($ddos_symptom.metadata.id) + count_distinct($data_leak.metadata.id)
+
+  condition:
+    // Alert if any of the suspicious patterns are observed.
+    $manipulation or $ddos_symptom or $data_leak
+}

@@ -1,0 +1,69 @@
+// Name: DPRK IT Worker and Cybercriminal Activity Patterns
+// Author: RW
+// Date: 2025-08-21
+// Description: This detection identifies several patterns of activity associated with North Korean (DPRK) IT workers and cybercriminal groups,
+// as detailed in the DTEX "Exposing DPRK's Cyber Syndicate" report. It looks for the use of remote access tools, potential exfiltration of
+// source code to personal cloud storage, and suspicious webmail usage patterns that could indicate illicit side-gigs or information gathering.
+// False Positive Sensitivity: Medium
+// References: https://dtexsystems.com/resources/i3-threat-advisory-inside-the-dprk/
+
+let lookback = 1d;
+let correlation_window = 30m;
+// Define lists of indicators based on the report's findings.
+// These lists may need to be customized for your environment.
+let remote_access_tools = dynamic(["anydesk.exe", "teamviewer.exe", "vncviewer.exe", "logmein.exe", "mstsc.exe", "remotedesktop.google.com"]);
+let source_code_management_tools = dynamic(["git.exe", "svn.exe", "gh.exe"]);
+let personal_cloud_storage_domains = dynamic(["dropbox.com", "mega.nz", "drive.google.com", "onedrive.live.com"]);
+let personal_webmail_domains = dynamic(["mail.google.com", "outlook.live.com", "protonmail.com", "yahoo.com"]);
+// Part 1: Detects the use of common remote access tools, which DPRK operatives use to manage multiple identities and bypass controls.
+let remote_access_usage =
+    DeviceProcessEvents
+    | where TimeGenerated > ago(lookback)
+    // Filter for processes associated with remote access tools.
+    | where FileName has_any (remote_access_tools) or ProcessCommandLine has_any (remote_access_tools)
+    // FP Reduction: Exclude known IT administrator accounts or specific subnets if this is normal behavior.
+    // For example: | where not(InitiatingProcessAccountName has_any ("admin1", "admin2"))
+    | extend
+        DetectionMethod = "Remote Access Tool Execution",
+        Tactic = "Command and Control, Defense Evasion",
+        Technique = "T1219, T1071.001"
+    | project TimeGenerated, DeviceName, AccountName = InitiatingProcessAccountName, FileName, ProcessCommandLine, DetectionMethod, Tactic, Technique;
+// Part 2: Identifies potential source code exfiltration to personal cloud storage.
+let source_code_activity =
+    DeviceProcessEvents
+    | where TimeGenerated > ago(lookback)
+    | where FileName in (source_code_management_tools)
+    | project ScmTime = TimeGenerated, DeviceId, AccountName = InitiatingProcessAccountName, ScmProcess = FileName;
+let cloud_storage_uploads =
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(lookback)
+    | where RemoteUrl has_any (personal_cloud_storage_domains)
+    | summarize UploadTime = min(TimeGenerated), TotalBytesOut = sum(TotalBytesOut) by DeviceId, InitiatingProcessAccountName, RemoteUrl
+    // Filter for significant upload activity. Threshold may need tuning.
+    | where TotalBytesOut > 1000000; // 1MB
+source_code_activity
+| join kind=inner (cloud_storage_uploads) on DeviceId
+// Correlate source code activity with a cloud upload within a short time window.
+| where UploadTime between (ScmTime .. (ScmTime + correlation_window))
+| extend
+    DetectionMethod = "Potential Source Code Exfiltration to Cloud Storage",
+    Tactic = "Exfiltration",
+    Technique = "T1537, T1048.003"
+| project TimeGenerated = UploadTime, DeviceName, AccountName, ScmProcess, RemoteUrl, TotalBytesOut, DetectionMethod, Tactic, Technique;
+// Part 3: Detects access to multiple personal webmail services from a single host in a short period.
+// This can be indicative of managing multiple fraudulent personas or conducting "side-gigs".
+let suspicious_webmail_access =
+    DeviceNetworkEvents
+    | where TimeGenerated > ago(lookback)
+    | where RemoteUrl has_any (personal_webmail_domains)
+    | extend Domain = tostring(parse_url(RemoteUrl).Host)
+    | summarize StartTime = min(TimeGenerated), EndTime = max(TimeGenerated), DistinctWebmailProviders = make_set(Domain) by DeviceId, AccountName = InitiatingProcessAccountName, bin(TimeGenerated, 1h)
+    | where array_length(DistinctWebmailProviders) > 1
+    // FP Reduction: This might be normal for some roles. Consider excluding users who are authorized to access multiple platforms.
+    | extend
+        DetectionMethod = "Anomalous Webmail Access",
+        Tactic = "Defense Evasion, Collection",
+        Technique = "T1071.001"
+    | project TimeGenerated = StartTime, DeviceName, AccountName, DistinctWebmailProviders, DetectionMethod, Tactic, Technique;
+// Union all detection parts into a single result set.
+union remote_access_usage, suspicious_webmail_access

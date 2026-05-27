@@ -1,0 +1,29 @@
+title: CRYSTALRAY Reconnaissance with Nuclei
+id: b1b35610-c6df-49bd-aaf2-edda1c337695
+status: experimental
+description: Detects the use of the Nuclei vulnerability scanner with parameters indicating it is being used as part of an automated reconnaissance chain, often fed by tools like httpx. This TTP is used by the CRYSTALRAY threat actor.
+references:
+  - https://www.sysdig.com/blog/crystalray-rising-threat-actor-exploiting-oss-tools
+author: RW
+date: 2025-08-07
+tags:
+  - attack.reconnaissance
+  - attack.t1595
+  - threat_actor.crystalray
+  - tool.nuclei
+  - tool.httpx
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection_img:
+    Image|endswith: '/nuclei'  # Detects execution of the nuclei tool
+  selection_cli:
+    CommandLine|contains|all:
+      - '-stream'  # Indicates input from stdin, common in tool chaining with httpx
+      - '-tags'  # Specifies vulnerability templates (e.g., 'confluence', 'honeypot')
+      - '-s'  # Filters vulnerabilities by severity (e.g., 'critical')
+  condition: all of selection_*
+falsepositives:
+  - Legitimate vulnerability scanning by security teams. The combination of these flags, especially `-stream`, points towards automated scanning pipelines which might be less common for manual administrative tasks. Tuning may be required to exclude authorized scanning activity.
+level: high

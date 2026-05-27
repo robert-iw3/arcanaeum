@@ -1,0 +1,117 @@
+rule salt_typhoon_composite_detection {
+  meta:
+    author = "RW"
+    date = "2025-09-27"
+    description = "Composite rule to detect multiple Tactics, Techniques, and Procedures (TTPs) associated with the Salt Typhoon APT group. This rule combines network IOCs, vulnerability exploitation, persistence, and defense evasion techniques."
+    reference = "https://dti.domaintools.com/inside-salt-typhoon-chinas-state-corporate-advanced-persistent-threat/"
+    tags = "APT, Salt Typhoon, China"
+    tactic = "TA0001, TA0002, TA0003, TA0005, TA0007, TA0008, TA0009, TA0010, TA0011"
+    technique = "T1190, T1078, T1547, T1098, T1027, T1014, T1021, T1602, T1041, T1059, T1567"
+    false_positives = "This is a broad rule combining multiple detection methods. Some methods, like exfiltration to public services or Linux user management, may generate false positives from legitimate administrative activity. Tuning is recommended for production environments."
+
+  events:
+    // IOC lists for Salt Typhoon
+    $salt_typhoon_ips = "162.251.82.125, 162.251.82.252, 172.64.53.3"
+    $salt_typhoon_domains = "irdns.mars.orderbox-dns.com, ns4.1domainregistry.com, ns1.value-domain.com, earth.monovm.com, mars.monovm.com, aria-hidden.com, asparticrooftop.com, availabilitydesired.us, caret-right.com, chekoodver.com, clubworkmistake.com, col-lg.com, dateupdata.com, e-forwardviewupdata.com, fessionalwork.com, fitbookcatwer.com, fjtest-block.com, gandhibludtric.com, gesturefavour.com, getdbecausehub.com, hateupopred.com, incisivelyfut.com, lookpumrron.com, materialplies.com, onlineeylity.com, redbludfootvr.com, requiredvalue.com, ressicepro.com, shalaordereport.com, siderheycook.com, sinceretehope.com, solveblemten.com, togetheroffway.com, toodblackrun.com, troublendsef.com, verfiedoccurr.com, waystrkeprosh.com, xdmgwctese.com"
+    $salt_typhoon_cves = `(?i)CVE-2023-20198|CVE-2023-35082|CVE-2024-21887|CVE-2024-3400|CVE-2018-0171`
+    $salt_typhoon_malware = `(?i)Demodex|SigRouter|GhostSpider|SnappyBee|Masol RAT|China Chopper`
+    $c2_exfil_services = "github.com, gmail.com, anonfiles.com, file.io"
+
+    // Detection 1: IOC Matching for known Domains and IPs
+    (
+      $ioc.metadata.event_type = "NETWORK_CONNECTION" or
+      $ioc.metadata.event_type = "NETWORK_DNS"
+    ) and
+    (
+      $ioc.target.ip in $salt_typhoon_ips or
+      $ioc.target.domain.name in $salt_typhoon_domains
+    )
+
+    // Detection 2: Exploitation of Network Edge Devices
+    or (
+      $cve.metadata.event_type = "GENERIC_EVENT" and
+      re.regex($cve.security_result.threat_name, $salt_typhoon_cves)
+    )
+
+    // Detection 3: Linux User Creation/Modification for Persistence
+    or (
+      $linux.metadata.event_type = "PROCESS_LAUNCH" and
+      $linux.principal.os.type = "LINUX" and
+      (
+        $linux.target.process.file.full_path in ("/usr/sbin/useradd", "/usr/sbin/adduser", "/usr/sbin/usermod", "/usr/bin/passwd") or
+        (
+          strings.ends_with($linux.target.process.file.full_path, "/vi") and
+          re.regex($linux.target.process.command_line, `(?i)/etc/(passwd|shadow)`)
+        )
+      )
+    )
+
+    // Detection 4: Exfiltration of configuration files over unencrypted protocols
+    // This may be noisy. Consider filtering by source/destination or baselining normal admin activity.
+    or (
+      $exfil.metadata.event_type = "GENERIC_EVENT" and
+      $exfil.network.application_protocol in ("ftp", "tftp") and
+      re.regex($exfil.security_result.description, `(?i)(STOR|PUT).*\.(conf|cfg|config)`)
+    )
+
+    // Detection 5: Salt Typhoon Malware Families detected
+    or (
+      $malware.metadata.event_type = "GENERIC_EVENT" and
+      re.regex($malware.security_result.threat_name, $salt_typhoon_malware)
+    )
+
+    // Detection 6: PowerShell Downgrade Attacks
+    or (
+      $ps.metadata.event_type = "PROCESS_LAUNCH" and
+      (
+        re.regex($ps.target.process.command_line, `(?i)powershell.*-version\s+2.*(-enc|-command)`) or
+        re.regex($ps.target.process.command_line, `(?i)\[System\.Management\.Automation\.AMSIUtils\]|Set-MpPreference\s-DisableRealtimeMonitoring`)
+      )
+    )
+
+    // Detection 7: C2/Exfil via Public Cloud/Communication Services
+    // This is a broad search and may generate false positives. Tune by baselining normal traffic.
+    or (
+      $c2.metadata.event_type = "NETWORK_CONNECTION" and
+      $c2.target.domain.name in $c2_exfil_services and
+      (
+        $c2.network.sent_bytes > 1000000 or
+        $c2.principal.process.file.name in ("powershell.exe", "cmd.exe", "rundll32.exe")
+      )
+    )
+
+  condition:
+    $ioc or $cve or $linux or $exfil or $malware or $ps or $c2
+
+  outcome:
+    // Set a risk score for the detection
+    $risk_score = 75
+
+    // Consolidate event data using coalesce to pick the first non-null value from the triggered event
+    $principal_ip = array_distinct(coalesce($ioc.principal.ip, $cve.principal.ip, $linux.principal.ip, $exfil.principal.ip, $malware.principal.ip, $ps.principal.ip, $c2.principal.ip))
+    $principal_hostname = coalesce($ioc.principal.hostname, $cve.principal.hostname, $linux.principal.hostname, $exfil.principal.hostname, $malware.principal.hostname, $ps.principal.hostname, $c2.principal.hostname)
+    $target_ip = array_distinct(coalesce($ioc.target.ip, $cve.target.ip, $linux.target.ip, $exfil.target.ip, $malware.target.ip, $ps.target.ip, $c2.target.ip))
+    $target_hostname = coalesce($ioc.target.domain.name, $cve.target.hostname, $linux.target.hostname, $exfil.target.hostname, $malware.target.hostname, $ps.target.hostname, $c2.target.domain.name)
+    $user = coalesce($ioc.principal.user.userid, $cve.principal.user.userid, $linux.principal.user.userid, $exfil.principal.user.userid, $malware.principal.user.userid, $ps.principal.user.userid, $c2.principal.user.userid)
+    $process_command_line = coalesce($linux.target.process.command_line, $ps.target.process.command_line)
+    $threat_name = coalesce($cve.security_result.threat_name, $malware.security_result.threat_name)
+
+    // Dynamically set the detection method and reason based on which event triggered the rule
+    $detection_method =
+      if($ioc, "IOC Match",
+      if($cve, "CVE Exploit Attempt",
+      if($linux, "Persistence",
+      if($exfil, "Exfiltration",
+      if($malware, "Malware Detection",
+      if($ps, "Defense Evasion",
+      if($c2, "C2 / Exfiltration", "Unknown")))))))
+
+    $threat_reason =
+      if($ioc, "Network traffic to known Salt Typhoon C2/Infrastructure",
+      if($cve, "Potential exploitation of vulnerability linked to Salt Typhoon: " + $threat_name,
+      if($linux, "Suspicious user management on Linux host: " + $process_command_line,
+      if($exfil, "Potential exfiltration of configuration file via FTP/TFTP",
+      if($malware, "Malware associated with Salt Typhoon detected: " + $threat_name,
+      if($ps, "PowerShell downgrade or AMSI bypass detected: " + $process_command_line,
+      if($c2, "Potential C2/exfil to public service: " + $target_hostname, "Unknown")))))))
+}

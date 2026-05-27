@@ -1,0 +1,51 @@
+// title: Malicious Open-Source Package Installation
+// description: Detects the installation of suspicious open-source packages via command line. This activity is a known TTP of the Lazarus Group, which leverages typosquatting, brand-jacking, and combo-squatting to trick developers into installing malicious dependencies. This rule identifies known malicious packages from recent campaigns and also hunts for suspicious naming patterns, such as a popular package name combined with a generic suffix like 'helper' or 'config'.
+// author: RW
+// date: 2025-07-31
+// references:
+// mitre_attack_id: T1195.001
+// mitre_attack_technique: Compromise Software Dependencies and Development Tools
+// mitre_attack_phase: Initial Access
+// security_domain: endpoint
+// datamodel: Process
+// risk_score: 75
+// severity: High
+
+// Define detection parameters
+let known_malicious_packages = dynamic(["winston-compose", "nodemailer-helper", "servula", "velocky", "pycryptoconf", "pycryptoenv", "vite-postcss-helper", "jsontostr", "smart-request-buffers", "safe-array-push"]);
+let popular_packages = dynamic(["react", "express", "lodash", "moment", "axios", "webpack", "babel", "eslint", "prettier", "jest", "pino", "winston", "nodemailer", "vite", "requests", "pandas", "numpy", "matplotlib", "scipy", "tensorflow", "keras", "django", "flask", "pycrypto", "oscrypto", "pillow", "boto3"]);
+let suspicious_affixes = dynamic(["helper", "compose", "config", "conf", "env", "util", "core", "lib", "secure", "private", "writer", "stealer", "logger", "proxy", "crypto", "scanner"]);
+
+// Create regex patterns from the lists for efficient matching
+let popular_packages_regex = strcat("(",str_join(popular_packages, "|"), ")");
+let suspicious_affixes_regex = strcat("(",str_join(suspicious_affixes, "|"), ")");
+
+DeviceProcessEvents
+// Filter for package manager installation commands, executed from common shells or directly
+| where FileName in~ ("cmd.exe", "powershell.exe", "pwsh.exe", "bash", "sh", "zsh", "node.exe", "npm.exe", "pip.exe", "pip3.exe")
+    and ProcessCommandLine has_any ("npm install", "npm i", "pip install", "pip3 install")
+// Extract the primary package name, ignoring version specifiers and other flags
+| extend installed_package = tolower(extract("(?i)(?:install|i|add)\\s+([^\\s@]+)", 1, ProcessCommandLine))
+| where isnotempty(installed_package)
+// Apply detection logic
+| where
+    // Condition 1: High-fidelity match on known malicious package names from recent campaigns.
+    installed_package in~ (known_malicious_packages)
+    or
+    // Condition 2: TTP-based hunt for combo-squatting. This looks for packages that combine a popular, trusted package name with a suspicious affix.
+    (
+        installed_package matches regex popular_packages_regex
+        and installed_package matches regex suspicious_affixes_regex
+        // Exclude the legitimate popular package itself to reduce false positives.
+        and not(installed_package in~ (popular_packages))
+    )
+// comment: This rule does not check package download counts or age, as that metadata is not available in endpoint telemetry. The lists of popular packages and suspicious affixes may need to be tuned for your environment to manage false positives from unusually named but legitimate packages.
+| project
+    Timestamp,
+    DeviceName,
+    AccountName,
+    ProcessCommandLine,
+    InitiatingProcessCommandLine,
+    InitiatingProcessParentId,
+    InitiatingProcessFileName,
+    installed_package

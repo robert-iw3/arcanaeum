@@ -1,0 +1,114 @@
+rule coldriver_multi_ttp_september_2025 {
+  meta:
+    author = "RW"
+    date = "2025-09-27"
+    description = "This rule detects multiple Tactics, Techniques, and Procedures (TTPs) associated with a COLDRIVER campaign active in September 2025. The campaign utilizes a downloader named BAITSWITCH and a PowerShell backdoor named SIMPLEFIX. This rule combines several detection opportunities into a single query, including initial execution via rundll32, persistence through logon scripts, storing payloads in the registry, C2 communications, and PowerShell-based reconnaissance."
+    reference = "https://www.zscaler.com/blogs/security-research/coldriver-updates-arsenal-baitswitch-and-simplefix"
+    false_positives = "Legitimate administrative scripts may perform similar reconnaissance or registry modification actions. The rundll32 execution from a network share can be legitimate in some environments. Tuning may be required based on environment specifics."
+    tags = "COLDRIVER, BAITSWITCH, SIMPLEFIX, APT, RUSSIA"
+    tactic = "TA0002, TA0003, TA0004, TA0005, TA0007, TA0011"
+    technique = "T1218.011, T1037.001, T1112, T1027.011, T1071.001, T1059.001, T1082, T1083"
+
+  events:
+    // Tactic 1: ClickFix rundll32.exe execution from a network share.
+    $rundll_exec.metadata.event_type = "PROCESS_LAUNCH"
+    $rundll_exec.target.process.file.full_path = /rundll32\.exe$/ nocase
+    // comment: Detects rundll32 loading a DLL from a network share path like \\server\share\file.dll
+    re.regex($rundll_exec.target.process.command_line, `\\\\\\[^\\]+\\[^\\]+\.dll`)
+
+    // Tactic 2: Persistence via UserInitMprLogonScript registry key (Process Event).
+    $reg_persist_proc.metadata.event_type = "PROCESS_LAUNCH"
+    $reg_persist_proc.target.process.file.full_path = /reg\.exe$/ nocase
+    re.regex($reg_persist_proc.target.process.command_line, `add\s+"?HKCU\\Environment"?\s+/v\s+UserInitMprLogonScript`) nocase
+
+    // Tactic 2: Persistence via UserInitMprLogonScript registry key (Registry Event).
+    $reg_persist_mod.metadata.event_type = "REGISTRY_MODIFICATION"
+    re.regex($reg_persist_mod.target.registry.path, `\\Environment\\UserInitMprLogonScript$`)
+    re.regex($reg_persist_mod.target.registry.data.strings[0], `powershell`) nocase
+
+    // Tactic 3: Storing encrypted payloads in the registry (Process Event).
+    $store_payload_proc.metadata.event_type = "PROCESS_LAUNCH"
+    $store_payload_proc.target.process.file.full_path = /powershell\.exe$/ nocase
+    $store_payload_proc.target.process.command_line contains "{53121F47-8C52-44A7-89A5-5595BB2B32BE}"
+    and ($store_payload_proc.target.process.command_line contains "EnthusiastMode" or $store_payload_proc.target.process.command_line contains "QatItems")
+
+    // Tactic 3: Storing encrypted payloads in the registry (Registry Event).
+    $store_payload_reg.metadata.event_type = "REGISTRY_MODIFICATION"
+    $store_payload_reg.target.registry.path contains "{53121F47-8C52-44A7-89A5-5595BB2B32BE}"
+    and $store_payload_reg.target.registry.key in ("EnthusiastMode", "QatItems") nocase
+
+    // Tactic 4: C2 Communication with specific domains or User-Agent.
+    $c2_comm.metadata.event_type = "NETWORK_HTTP"
+    (
+      $c2_comm.network.http.url.host in ("captchanom.top", "southprovesolutions.com")
+      or $c2_comm.network.http.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edge/133.0.0.0"
+    )
+
+    // Tactic 5: Extensive PowerShell reconnaissance.
+    // comment: The PowerShell reconnaissance logic is broad. Consider adding exclusions for known admin scripts or user accounts.
+    $ps_recon.metadata.event_type = "PROCESS_LAUNCH"
+    $ps_recon.target.process.file.full_path = /powershell\.exe$/ nocase
+    (
+      (
+        $ps_recon.target.process.command_line contains "whoami" and $ps_recon.target.process.command_line contains "/all"
+        and $ps_recon.target.process.command_line contains "ipconfig"
+        and $ps_recon.target.process.command_line contains "systeminfo"
+      )
+      or
+      (
+        $ps_recon.target.process.command_line contains "EnumerateFiles" and $ps_recon.target.process.command_line contains "EnumerateDirectories"
+        and ($ps_recon.target.process.command_line contains ".pdf" or $ps_recon.target.process.command_line contains ".doc" or $ps_recon.target.process.command_line contains ".xls")
+      )
+    )
+
+  condition:
+    $rundll_exec or $reg_persist_proc or $reg_persist_mod or $store_payload_proc or $store_payload_reg or $c2_comm or $ps_recon
+
+  outcome:
+    // Risk score set to medium, reflecting the specific nature of most TTPs.
+    $risk_score = 45
+
+    // A description of the specific TTP that was detected.
+    $tactic_description = if(#rundll_exec > 0, "COLDRIVER - ClickFix Rundll32 Execution",
+      if(#reg_persist_proc > 0 or #reg_persist_mod > 0, "COLDRIVER - Persistence via UserInitMprLogonScript",
+      if(#store_payload_proc > 0 or #store_payload_reg > 0, "COLDRIVER - Registry Payload Storage",
+      if(#c2_comm > 0, "COLDRIVER - C2 Communication",
+      if(#ps_recon > 0, "COLDRIVER - PowerShell Reconnaissance", "Unknown COLDRIVER TTP")))))
+
+    // The principal hostname is extracted from whichever event triggered the detection.
+    $principal_hostname = if(#rundll_exec > 0, $rundll_exec.principal.hostname,
+      if(#reg_persist_proc > 0, $reg_persist_proc.principal.hostname,
+      if(#reg_persist_mod > 0, $reg_persist_mod.principal.hostname,
+      if(#store_payload_proc > 0, $store_payload_proc.principal.hostname,
+      if(#store_payload_reg > 0, $store_payload_reg.principal.hostname,
+      if(#c2_comm > 0, $c2_comm.principal.hostname,
+      if(#ps_recon > 0, $ps_recon.principal.hostname, "")))))))
+
+    // The user associated with the event.
+    $principal_user_userid = if(#rundll_exec > 0, $rundll_exec.principal.user.userid,
+      if(#reg_persist_proc > 0, $reg_persist_proc.principal.user.userid,
+      if(#reg_persist_mod > 0, $reg_persist_mod.principal.user.userid,
+      if(#store_payload_proc > 0, $store_payload_proc.principal.user.userid,
+      if(#store_payload_reg > 0, $store_payload_reg.principal.user.userid,
+      if(#c2_comm > 0, $c2_comm.principal.user.userid,
+      if(#ps_recon > 0, $ps_recon.principal.user.userid, "")))))))
+
+    // Relevant fields from process events.
+    $target_process_command_line = if(#rundll_exec > 0, $rundll_exec.target.process.command_line,
+      if(#reg_persist_proc > 0, $reg_persist_proc.target.process.command_line,
+      if(#store_payload_proc > 0, $store_payload_proc.target.process.command_line,
+      if(#ps_recon > 0, $ps_recon.target.process.command_line, ""))))
+
+    // Relevant fields from registry events.
+    $target_registry_path = if(#reg_persist_mod > 0, $reg_persist_mod.target.registry.path,
+      if(#store_payload_reg > 0, $store_payload_reg.target.registry.path, ""))
+    $target_registry_key = if(#store_payload_reg > 0, $store_payload_reg.target.registry.key, "")
+    $target_registry_data = if(#reg_persist_mod > 0, strings.concat($reg_persist_mod.target.registry.data.strings, ", "), "")
+
+    // Relevant fields from network events.
+    $network_http_url = if(#c2_comm > 0, $c2_comm.network.http.url, "")
+    $network_http_user_agent = if(#c2_comm > 0, $c2_comm.network.http.user_agent, "")
+
+  options:
+    suppression_window = 30m
+}

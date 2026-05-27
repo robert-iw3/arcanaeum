@@ -1,0 +1,62 @@
+rule comprehensive_ai_agent_process_threats {
+  meta:
+    author = "RW"
+    date = "2025-08-15"
+    description = "Detects a range of process-based threats related to AI Agents and Agentic IDEs. This includes suspicious tool usage by agents, OSS watering hole attack patterns, and unauthorized command execution by agentic IDEs."
+    references = "https://developer.nvidia.com/blog/tag/ai-red-team/, https://owasp.org/www-project-top-10-for-large-language-model-applications/"
+    version = "1.0"
+    false_positive_sensitivity = "Medium"
+    mitre_tactic = "Initial Access, Execution, Collection, Discovery"
+    mitre_technique = "T1195.001, T1059, T1005, T1082"
+
+  events:
+    $p.udm.metadata.event_type = "PROCESS_LAUNCH"
+
+  condition:
+    (
+      // Detection 1: AI Agent Tool Misuse
+      // An AI agent process (e.g., python) launches a shell or tool with suspicious arguments.
+      // FP Tuning: A legitimate agent might perform these actions. Exclude known-good parent/child process combinations or specific command lines.
+      (
+        re.regex($p.principal.process.file.full_path, `(?i)python(3)?\.exe$|ai_agent\.exe$`) or
+        re.regex($p.principal.process.command_line, `(?i)AIAgentPlatform`) // Placeholder for agent command line
+      )
+      and
+      (
+        // Discovery commands
+        (re.regex($p.target.process.file.full_path, `(?i)(bash|sh|zsh|powershell|pwsh|cmd)\.exe$`) and re.regex($p.target.process.command_line, `(?i)\b(whoami|hostname|id|uname|ipconfig|ifconfig|net user|net group|ps|tasklist|printenv|env)\b`)) or
+        // Sensitive file access
+        (re.regex($p.target.process.file.full_path, `(?i)(cat|type|head|tail|more|Get-Content)\.exe$`) and re.regex($p.target.process.command_line, `(?i)(\/etc\/(passwd|shadow)|\.ssh\/id_rsa|\.aws\/credentials|secrets\.txt|\.env|SAM)`)) or
+        // Potential exfiltration
+        (re.regex($p.target.process.file.full_path, `(?i)(curl|wget|iwr)\.exe$`) and re.regex($p.target.process.command_line, `(?i)(-d|--data|-F|--form|-X\s+POST|-Method\s+Post)`))
+      )
+    )
+    or
+    (
+      // Detection 2: OSS Watering Hole Attack
+      // Detects suspicious package installations or PowerShell download cradles.
+      // FP Tuning: Developers may install from git. Exclude known-good repositories or internal scripts.
+      (
+        // PowerShell download cradle
+        re.regex($p.target.process.file.full_path, `(?i)(powershell|pwsh)\.exe$`) and
+        re.regex($p.target.process.command_line, `(?i)(Invoke-Expression|IEX)`) and
+        re.regex($p.target.process.command_line, `(?i)(DownloadString|Net\.WebClient)`)
+      )
+      or
+      (
+        // Suspicious pip/uv install from a URL instead of a requirements file
+        re.regex($p.target.process.file.full_path, `(?i)(pip(3)?|uv)\.exe$`) and
+        re.regex($p.target.process.command_line, `install\s+(git\+|http)`) and
+        not re.regex($p.target.process.command_line, `(-r|--requirement)`)
+      )
+    )
+    or
+    (
+      // Detection 3: Agentic IDE Unauthorized Execution
+      // An agentic IDE process spawns a shell or tool with suspicious commands.
+      // FP Tuning: IDE extensions or build tasks can cause FPs. Exclude trusted parent processes or specific command lines.
+      re.regex($p.principal.process.file.full_path, `(?i)(cursor|Code)\.exe$`) and
+      re.regex($p.target.process.file.full_path, `(?i)(powershell|pwsh|cmd|bash|sh|curl|wget)\.exe$`) and
+      re.regex($p.target.process.command_line, `(?i)(Invoke-Expression|whoami|net user|\/etc\/passwd|DownloadString)`)
+    )
+}

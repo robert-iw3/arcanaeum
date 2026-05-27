@@ -1,0 +1,65 @@
+{
+  "rule_id": "static_tundra_activity_detection",
+  "name": "Static Tundra Activity Detection",
+  "description": "Detects activity associated with the Static Tundra threat group, including connections to known C2 IPs, network-based TTPs (inbound TFTP/GRE), and Cisco IOS command-line TTPs (config exfil, ACL/TACACS modification).",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "FROM logs-network.*,logs-cisco.* | WHERE (source.ip IN ('185.141.24.222', '185.82.202.34', '185.141.24.28', '185.82.200.181') OR destination.ip IN ('185.141.24.222', '185.82.202.34', '185.141.24.28', '185.82.200.181')) OR (network.transport == 'udp' AND destination.port == 69) OR (network.protocol == 'gre') OR (process.command_line LIKE '%tftp-server nvram:startup-config%' OR process.command_line LIKE '%redirect tftp://%' OR process.command_line LIKE '%copy running-config ftp://%' OR process.command_line LIKE '%access-list %' OR process.command_line LIKE '%tacacs-server %') | EVAL src = COALESCE(source.ip, 'N/A'), dest = COALESCE(destination.ip, host.name), command = CASE(process.command_line LIKE '%tftp-server%', 'tftp-server nvram:startup-config', process.command_line LIKE '%redirect tftp://%', process.command_line, process.command_line LIKE '%copy running-config ftp://%', process.command_line, process.command_line LIKE '%access-list %', process.command_line, process.command_line LIKE '%tacacs-server %', process.command_line, true, 'N/A'), detection_technique = CASE(source.ip IN ('185.141.24.222', '185.82.202.34', '185.141.24.28', '185.82.200.181') OR destination.ip IN ('185.141.24.222', '185.82.202.34', '185.141.24.28', '185.82.200.181'), 'Static Tundra C2 IP Detected', destination.port == 69, 'Potential Inbound TFTP for Config Exfil', network.protocol == 'gre', 'GRE Tunnel Established for Traffic Collection', process.command_line LIKE '%tftp-server%', 'Local TFTP Server Enabled for Config Exfil', process.command_line LIKE '%redirect tftp://%', 'Config Exfil via TFTP Redirect', process.command_line LIKE '%copy running-config ftp://%', 'Config Exfil via FTP', process.command_line LIKE '%access-list %', 'ACL Modification Detected', process.command_line LIKE '%tacacs-server %', 'TACACS+ Config Modification Detected', true, null) | STATS detection_techniques = CONCAT_ARRAY(detection_technique), commands = CONCAT_ARRAY(command) BY @timestamp, src, dest, user.name AS user | EVAL message = 'Potential Static Tundra activity detected. Techniques observed: ' + CONCAT(detection_techniques, ', ') + '. Source: ' + src + ', Destination: ' + dest + ', User: ' + user | keep @timestamp, src, dest, user, detection_techniques, commands, message",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0011",
+        "name": "Command and Control",
+        "reference": "https://attack.mitre.org/tactics/TA0011/"
+      },
+      "technique": [
+        {
+          "id": "T1090",
+          "name": "Proxy",
+          "reference": "https://attack.mitre.org/techniques/T1090/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0010",
+        "name": "Exfiltration",
+        "reference": "https://attack.mitre.org/tactics/TA0010/"
+      }
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0003",
+        "name": "Persistence",
+        "reference": "https://attack.mitre.org/tactics/TA0003/"
+      }
+    }
+  ],
+  "interval": "10m",
+  "from": "now-10m",
+  "max_signals": 100,
+  "risk_score": 95,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://www.elastic.co/blog/static-tundra-targets-defense-industrial-base",
+    "https://www.elastic.co/guide/en/security/current/static-tundra-activity-detection.html"
+  ],
+  "tags": [
+    "Static Tundra",
+    "Threat Group",
+    "Cisco IOS",
+    "Command and Control",
+    "Exfiltration"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "src, dest, user"
+}

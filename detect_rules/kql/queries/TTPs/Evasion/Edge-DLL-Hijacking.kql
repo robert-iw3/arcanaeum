@@ -1,0 +1,30 @@
+// Name: Microsoft Edge DLL Hijacking
+// Author: RW
+// Date: 2025-08-12
+// Description: Detects the loading of "well_known_domains.dll" by Microsoft Edge from a user-writable AppData path, which is
+//              indicative of a DLL search order hijacking attempt for persistence and defense evasion.
+// Tactic: Defense Evasion, Persistence, Privilege Escalation
+// Technique: T1574.001, T1574.002
+// False Positive Sensitivity: Medium
+
+DeviceImageLoadEvents
+// Look for Microsoft Edge as the process loading the DLL.
+| where InitiatingProcessFileName =~ "msedge.exe"
+// DLL used in this hijacking technique.
+| where FileName endswith "dll"
+// Focus on loads from the specific user-writable AppData path.
+| where FolderPath has_all (@"\AppData\Local\Microsoft\Edge\", @"\User Data\Well Known Domains\")
+// Exclude legitimate loads from the standard installation directory to prevent potential false positives.
+| where not(FolderPath has_any (@"C:\Program Files (x86)\Microsoft\Edge\", @"C:\Program Files\Microsoft\Edge\"))
+// FP Tuning: This activity is highly suspicious. However, to reduce potential false positives from legitimate but
+// unusually placed component updates, consider filtering for DLLs that are not signed by Microsoft.
+// This may require joining with other tables (e.g., DeviceFileCertificateInfo) to check certificate information against the DLL's hash (SHA1).
+| project
+    Timestamp,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessId,
+    FileName,
+    FolderPath,
+    SHA1

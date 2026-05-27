@@ -1,0 +1,59 @@
+- type: expert
+  name: Detect Suspicious Execution in IIS Web Root (Original Refined)
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "wget.exe" -v "curl.exe" -v "nc.exe" -v "bash.exe" -v "python.exe" -v "perl.exe" -v "php.exe" -v "sh.exe" }
+       }
+       Target {
+          Match FILE {
+             Include OBJECT_NAME { -v "C:\\inetpub\\wwwroot\\**" }
+             Include -access "EXECUTE"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects execution of common downloader/shell/script interpreters (wget/curl/nc/bash/python/perl/php/sh) targeting files in IIS web root (C:\\inetpub\\wwwroot\\**). Potential indicator of webshell activity or payload staging. High FP risk from legitimate web apps/scripts; tune with exclusions or combine with parent process w3wp.exe."
+- type: expert
+  name: Detect Webshell Command Execution from Web Server Process
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "w3wp.exe" -v "httpd.exe" -v "nginx.exe" -v "tomcat*.exe" -v "php-cgi.exe" }
+       }
+       Target {
+          Match PROCESS {
+             Include OBJECT_NAME { -v "cmd.exe" -v "powershell.exe" -v "pwsh.exe" -v "bash.exe" -v "sh.exe" -v "python.exe" -v "perl.exe" -v "php.exe" }
+             Include -access "CREATE"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects web server processes (IIS w3wp.exe, Apache httpd.exe, Nginx, Tomcat, PHP) spawning command interpreters — classic webshell behavior (China Chopper, Behinder, AntSword, etc.). Very high-fidelity indicator of post-exploitation webshell activity in 2025-2026 campaigns. Tune for legitimate monitoring tools or automation."
+- type: expert
+  name: Detect Suspicious File Creation in IIS Web Root (Potential Webshell Drop)
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "**" }
+          Exclude OBJECT_NAME { -v "w3wp.exe" -v "trusted_deploy_tool.exe" }
+       }
+       Target {
+          Match FILE {
+             Include OBJECT_NAME { -v "C:\\inetpub\\wwwroot\\**" }
+             Include -access "CREATE,WRITE"
+             Include OBJECT_NAME { -v "**.asp" -v "**.aspx" -v "**.php" -v "**.jsp" -v "**.ashx" -v "**.cfm" }
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects creation or write to suspicious web-script extensions (.asp/.aspx/.php/.jsp/.ashx/.cfm) in IIS wwwroot by non-web-server processes — common webshell drop pattern (e.g., China Chopper one-liners). Excludes w3wp.exe to reduce noise from legitimate uploads. Tune exclusions for known upload paths or admin tools."

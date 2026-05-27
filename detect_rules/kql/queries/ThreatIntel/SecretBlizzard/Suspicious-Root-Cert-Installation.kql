@@ -1,0 +1,38 @@
+// Name: Suspicious Root Cert Installation via Certutil
+// Author: RW
+// Date: 2025-07-31
+// Description: Detects the installation of root or CA certificates using the certutil.exe command-line utility. This technique is used by malware like ApolloShadow to install malicious root certificates for persistence and man-in-the-middle (MITM) attacks.
+// False Positives: Medium. Legitimate administrators may occasionally use certutil to install certificates. Tuning may be required based on normal administrative activity. Consider filtering by initiating process or certificate file path if noise occurs.
+// References: https://www.microsoft.com/en-us/security/blog/2025/07-31/frozen-in-transit-secret-blizzards-aitm-campaign-against-diplomats/
+// MITRE ATT&CK: T1553.004
+// Data Sources: Microsoft Defender for Endpoint (DeviceProcessEvents)
+
+let timeframe = 1d;
+DeviceProcessEvents
+| where Timestamp > ago(timeframe)
+// Filter for certutil.exe process execution.
+| where ProcessFileName =~ "certutil.exe"
+// Look for command-line arguments used to add a certificate to the 'root' or 'ca' (intermediate) certificate stores.
+// The '-f' (force) flag is often used by malware to overwrite existing certificates. The spaces around "root" and "ca" help avoid partial matches.
+| where ProcessCommandLine has_all ("-addstore", "-f") and (ProcessCommandLine has " root " or ProcessCommandLine has " ca ")
+// The '-Enterprise' flag was used by ApolloShadow. While specific, it can be included to narrow the scope.
+// We also look for certificates being installed from common temporary or download locations, which is suspicious.
+| where ProcessCommandLine has "-Enterprise" or ProcessCommandLine matches regex @'(?i)\\(users|temp|appdata|downloads)\\[^\s]+\.(crt|cer|tmp)'
+| summarize
+    startTime = min(Timestamp),
+    endTime = max(Timestamp),
+    count(),
+    // Collect context about the process and command line.
+    CommandLine = make_set(ProcessCommandLine, 10),
+    ParentProcess = make_set(InitiatingProcessFileName, 10),
+    User = make_set(AccountName, 10)
+    by
+    DeviceName,
+    DeviceId
+| project-rename
+    endpoint = DeviceName,
+    firstTime = startTime,
+    lastTime = endTime,
+    cmd = CommandLine,
+    parent_process = ParentProcess,
+    user = User

@@ -1,0 +1,46 @@
+// Name: Brute-Force Followed by Successful RDP or SMB Logon
+// Author: RW
+// Date: 2025-08-14
+// Description: Detects a brute-force pattern (many failed logons) followed by a successful logon via RDP or SMB from the same source IP address.
+// This pattern is a strong indicator of a successful password guessing attack and subsequent lateral movement.
+// Tactic: Credential Access, Lateral Movement
+// Technique: T1110.001 - Brute Force: Password Guessing
+// T1021.001 - Remote Services: Remote Desktop Protocol
+// T1021.002 - Remote Services: SMB/Windows Admin Shares
+// False Positive Sensitivity: Medium
+
+// FP Tuning: Adjust the timeframe and failure_threshold to fit your environment's baseline.
+let timeframe = 1h;
+let failure_threshold = 20;
+
+// Key Logic: Identify source IPs with a high number of failed RDP (LogonType 10) or SMB (LogonType 3) logons to a target device.
+let brute_force_attempts =
+    DeviceLogonEvents
+    | where TimeGenerated > ago(timeframe)
+    | where LogonResult == "Failure"
+    | where LogonType in (3, 10)
+    | summarize FailureCount = count(), StartTime = min(TimeGenerated), EndTime = max(TimeGenerated) by RemoteIP, DeviceName, LogonType
+    | where FailureCount > failure_threshold;
+
+// Key Logic: Correlate the brute-force activity with a successful logon from the same source IP to the same target device shortly after.
+brute_force_attempts
+| join kind=inner (
+    DeviceLogonEvents
+    | where TimeGenerated > ago(timeframe)
+    | where LogonResult == "Success"
+    | where LogonType in (3, 10)
+) on RemoteIP, DeviceName, LogonType
+// Ensure the success happened during or immediately after the brute-force window.
+| where TimeGenerated between (StartTime .. (EndTime + 5m))
+// FP Tuning: Exclude known vulnerability scanners or misconfigured servers if they cause noise.
+// For example: | where not(RemoteIP in ("192.168.1.10", "10.0.0.5"))
+| project
+    TimeGenerated,
+    DeviceName,
+    AccountName,
+    AccountDomain,
+    RemoteIP,
+    LogonType = iif(LogonType == 3, "SMB", "RDP"),
+    FailureCount,
+    BruteForceStartTime = StartTime,
+    BruteForceEndTime = EndTime

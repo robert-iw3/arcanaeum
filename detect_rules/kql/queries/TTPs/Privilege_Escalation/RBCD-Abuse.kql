@@ -1,0 +1,85 @@
+// Name: Resource-Based Constrained Delegation (RBCD) Abuse
+// Author: RW
+// Date: 2025-08-07
+// Tactic: Privilege Escalation, Lateral Movement
+// Technique: T1558.003, T1136.001
+// False Positive Sensitivity: Medium
+// - Legitimate administrative actions can trigger parts of this rule.
+// - S4U2Proxy is used by legitimate services like Exchange. Exclude known service accounts or source IPs from the 's4u_exclusions' list.
+// - Machine account creation is allowed by default for users. This part of the detection may be noisy without proper baselining of authorized accounts in 'authorized_creators_sids'.
+//
+// Detection Comment Level: Medium
+
+let timeframe = 1d;
+
+// This list should be populated with SIDs of accounts/groups that are authorized to create computer accounts.
+let authorized_creators_sids = dynamic([
+    "S-1-5-21-0-0-0-512", // Domain Admins SID placeholder
+    "S-1-5-21-0-0-0-519", // Enterprise Admins SID placeholder
+    "S-1-5-32-544",       // Built-in Administrators SID placeholder
+    "S-1-5-20"            // NT AUTHORITY\NETWORK SERVICE
+]);
+
+// Exclude legitimate S4U2Proxy usage, e.g., by Exchange servers.
+let s4u_exclusions = dynamic([
+    "MSOL_ADC_Account", // Azure AD Connect
+    "HealthMailbox"     // Exchange Health Mailboxes
+]);
+
+union
+(
+    // Part 1: Detect modification of the msDS-AllowedToActOnBehalfOfOtherIdentity attribute
+    SecurityEvent
+    | where TimeGenerated > ago(timeframe)
+    | where EventID == 5136 // A directory service object was modified.
+    | parse-kv EventData as (AttributeLDAPDisplayName:string, AttributeValue:string, ObjectClass:string, ObjectDN:string, OperationType:string, SubjectAccount:string, SubjectUserSid:string)
+    | where AttributeLDAPDisplayName == "msDS-AllowedToActOnBehalfOfOtherIdentity"
+    // Focus on when a value is added, which is the typical first step in setting up RBCD.
+    | where OperationType == "Value Added"
+    | project
+        timestamp = TimeGenerated,
+        Activity = "RBCD Attribute Modified",
+        SubjectAccount,
+        TargetObject = ObjectDN,
+        AttributeValue,
+        Description = strcat("RBCD was configured on '", TargetObject, "' for principal '", AttributeValue, "' by '", SubjectAccount, "'.")
+),
+(
+    // Part 2: Detect Kerberos ticket requests indicative of S4U2Proxy abuse
+    SecurityEvent
+    | where TimeGenerated > ago(timeframe)
+    | where EventID == 4769 // A Kerberos service ticket was requested.
+    | parse-kv EventData as (AccountName:string, AccountDomain:string, ServiceName:string, ServiceSid:string, TransitedServices:string, IpAddress:string, TicketOptions:string, Status:string)
+    // A successful ticket request where the TransitedServices field is populated indicates S4U2Proxy.
+    | where Status == "0x0"
+    | where isnotempty(TransitedServices) and TransitedServices !in ("-", "%%1793")
+    | where not(AccountName has_any (s4u_exclusions)) and not(ServiceName has_any (s4u_exclusions))
+    | project
+        timestamp = TimeGenerated,
+        Activity = "S4U2Proxy Kerberos Ticket Request",
+        SubjectAccount = strcat(AccountDomain, "\\", AccountName),
+        TargetObject = ServiceName,
+        AttributeValue = TransitedServices,
+        Description = strcat("Account '", SubjectAccount, "' from IP '", IpAddress, "' requested a Kerberos ticket for service '", TargetObject, "' using S4U2Proxy.")
+),
+(
+    // Part 3: Detect computer account creation by non-administrative users
+    SecurityEvent
+    | where TimeGenerated > ago(timeframe)
+    | where EventID == 4741 // A computer account was created.
+    | parse-kv EventData as (TargetUserName:string, TargetDomainName:string, TargetSid:string, SubjectAccountName:string, SubjectDomainName:string, SubjectUserSid:string)
+    // Filter out creations by authorized accounts/groups.
+    | where SubjectUserSid !in (authorized_creators_sids)
+    // Filter out machine accounts creating other accounts (e.g., AD FS device registration).
+    | where SubjectAccountName !endswith "$"
+    | project
+        timestamp = TimeGenerated,
+        Activity = "Computer Account Created by Non-Admin",
+        SubjectAccount = strcat(SubjectDomainName, "\\", SubjectAccountName),
+        TargetObject = TargetUserName,
+        AttributeValue = TargetSid,
+        Description = strcat("Computer account '", TargetObject, "' was created by non-admin user '", SubjectAccount, "'.")
+)
+| extend
+    AccountCustomEntity = SubjectAccount,
+    HostCustomEntity = TargetObject

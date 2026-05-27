@@ -1,0 +1,115 @@
+{
+  "rule_id": "unc6384_mustang_panda_campaign",
+  "name": "UNC6384 Mustang Panda Campaign IOCs and TTPs",
+  "description": "Detects multiple indicators of compromise (IOCs) and tactics, techniques, and procedures (TTPs) associated with a UNC6384 (Mustang Panda) campaign targeting diplomats, as reported by Google in August 2025. This rule covers file hashes, network indicators, persistence mechanisms, and behavioral patterns related to the STATICPLUGIN, CANONSTAGER, and SOGU.SEC malware families.",
+  "severity": "high",
+  "enabled": true,
+  "language": "esql",
+  "query": "FROM logs-endpoint.events.*, logs-network.* | WHERE file.hash.sha256 IN (\"65c42a7ea18162a92ee982eded91653a5358a7129c7672715ce8ddb6027ec124\", \"3299866538aff40ca85276f87dd0cefe4eafe167bd64732d67b06af4f3349916\", \"e787f64af048b9cb8a153a0759555785c8fd3ee1e8efbca312a29f2acb1e4011\", \"cc4db3d8049043fa62326d0b3341960f9a0cf9b54c2fbbdffdbd8761d99add79\", \"d1626c35ff69e7e5bde5eea9f9a242713421e59197f4b6d77b914ed46976b933\") OR destination.ip IN (\"103.79.120.72\", \"166.88.2.90\") OR destination.domain = \"mediareleaseupdates.com\" OR user_agent.original = \"Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 10.0; .NET4.0C; .NET4.0E; .NET CLR 2.0.50727; .NET CLR 3.0.30729; .NET CLR 3.5.30729)\" OR (registry.key LIKE \"*\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run\\\\CanonPrinter\" AND registry.value LIKE \"*cnmpaui.exe*\") OR (process.executable LIKE \"*\\\\cnmpaui.exe\" AND dll.path LIKE \"*\\\\cnmpaui.dll\") OR process.executable LIKE \"*\\\\DNVjzaXMFO\\\\*\" OR process.executable LIKE \"*C:\\\\Users\\\\Public\\\\Intelnet\\\\*\" OR process.executable LIKE \"*C:\\\\Users\\\\Public\\\\SecurityScan\\\\*\" | EVAL timestamp = TO_STRING(@timestamp, \"yyyy-MM-dd HH:mm:ss\") | EVAL detection_name = CASE(file.hash.sha256 IS NOT NULL, \"UNC6384 - Malicious File Hash\", destination.ip IS NOT NULL OR destination.domain IS NOT NULL, \"UNC6384 - Malicious Network Connection\", user_agent.original LIKE \"*MSIE 9.0*\", \"UNC6384 - SOGU.SEC User Agent\", registry.key IS NOT NULL, \"UNC6384 - CanonPrinter Persistence\", dll.path IS NOT NULL, \"UNC6384 - CANONSTAGER DLL Sideloading\", process.executable LIKE \"*\\\\DNVjzaXMFO\\\\*\" OR process.executable LIKE \"*C:\\\\Users\\\\Public\\\\Intelnet\\\\*\" OR process.executable LIKE \"*C:\\\\Users\\\\Public\\\\SecurityScan\\\\*\", \"UNC6384 - Suspicious File Path\", TRUE, \"UNC6384 - Fallback Match\") | EVAL victim_host = COALESCE(host.name, host.hostname), src_process = COALESCE(process.name, process.executable, file.name), user = COALESCE(user.name), ioc_indicator = COALESCE(file.hash.sha256, destination.ip, destination.domain, user_agent.original, registry.key, dll.path, process.executable) | STATS count = COUNT(), event_times = VALUES(timestamp), detections = VALUES(detection_name), matched_iocs = VALUES(ioc_indicator), processes = VALUES(src_process), users = VALUES(user) BY victim_host | RENAME victim_host AS \"Victim Host\", event_times AS \"Event Times\", detections AS \"Detections\", matched_iocs AS \"Matched IOCs\", processes AS \"Associated Processes\", users AS \"Associated Users\"",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0001",
+        "name": "Initial Access",
+        "reference": "https://attack.mitre.org/tactics/TA0001/"
+      },
+      "technique": [
+        {
+          "id": "T1566",
+          "name": "Phishing",
+          "reference": "https://attack.mitre.org/techniques/T1566/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0002",
+        "name": "Execution",
+        "reference": "https://attack.mitre.org/tactics/TA0002/"
+      },
+      "technique": [
+        {
+          "id": "T1574",
+          "name": "Hijack Execution Flow",
+          "reference": "https://attack.mitre.org/techniques/T1574/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0003",
+        "name": "Persistence",
+        "reference": "https://attack.mitre.org/tactics/TA0003/"
+      },
+      "technique": [
+        {
+          "id": "T1547.001",
+          "name": "Boot or Logon Autostart Execution: Registry Run Keys / Startup Folder",
+          "reference": "https://attack.mitre.org/techniques/T1547/001/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0005",
+        "name": "Defense Evasion",
+        "reference": "https://attack.mitre.org/tactics/TA0005/"
+      },
+      "technique": [
+        {
+          "id": "T1027",
+          "name": "Obfuscated Files or Information",
+          "reference": "https://attack.mitre.org/techniques/T1027/"
+        }
+      ]
+    },
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0011",
+        "name": "Command and Control",
+        "reference": "https://attack.mitre.org/tactics/TA0011/"
+      },
+      "technique": [
+        {
+          "id": "T1071",
+          "name": "Application Layer Protocol",
+          "reference": "https://attack.mitre.org/techniques/T1071/"
+        }
+      ]
+    }
+  ],
+  "interval": "10m",
+  "from": "now-10m",
+  "max_signals": 100,
+  "risk_score": 90,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {
+    "author": "RW",
+    "date": "2025-08-26",
+    "note": "The persistence rule may trigger on legitimate Canon software. Investigate the process command line and file properties."
+  },
+  "version": 1,
+  "references": [
+    "https://www.google.com/about/security/unc6384-mustang-panda-report-august-2025"
+  ],
+  "tags": [
+    "UNC6384",
+    "Mustang Panda",
+    "STATICPLUGIN",
+    "CANONSTAGER",
+    "SOGU.SEC",
+    "Malware",
+    "Persistence",
+    "Command and Control"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "host.name, user.name, detection_name, ioc_indicator"
+}

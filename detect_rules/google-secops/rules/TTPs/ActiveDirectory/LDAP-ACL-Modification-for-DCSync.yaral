@@ -1,0 +1,48 @@
+rule Directory_Service_Changes_or_Privileged_Group_Additions {
+  meta:
+    author = "RW"
+    description = "Detects modifications to Active Directory objects (DCSync ACLs) or additions to high-value security groups (Enterprise Admins, Domain Admins, Administrators, Schema Admins)."
+    severity = "HIGH"
+
+  events:
+    $e.metadata.event_type = "LDAP_MODIFICATION" or $e.metadata.event_type = "GROUP_MEMBERSHIP_CHANGE" // UDM event types
+
+    // Filter for Directory Service Changes (5136) or additions to high-value security groups (4728, 4732, 4756)
+    (
+        $e.metadata.event_code = 5136 and // Windows Event Code 5136: A directory service object was modified
+        $e.target.resource.attribute.ldap_display_name = "nTSecurityDescriptor" and // UDM field for AttributeLDAPDisplayName
+        (
+            $e.target.resource.attribute.value = "*1131f6ad-9c07-11d1-f79f-00c04fc2dcd2*" or // DCSync Replication ACLs
+            $e.target.resource.attribute.value = "*1131f6aa-9c07-11d1-f79f-00c04fc2dcd2*" or
+            $e.target.resource.attribute.value = "*9923a32a-3607-11d2-b9be-0000f87a36b2*"
+        )
+    )
+    or
+    (
+        $e.metadata.event_code in (4728, 4732, 4756) and // Event codes for adding members to security groups
+        $e.target.group.name in ("Enterprise Admins", "Domain Admins", "Administrators", "Schema Admins") // UDM field for the target group name
+    )
+
+    // Exclude changes made by known administrative accounts or domain controllers to reduce false positives.
+    // Use a reference list for more robust filtering (recommended).
+    // You would create a reference list named "privileged_account_exceptions" and add the usernames to it.
+    not $e.principal.user.userid in %privileged_account_exceptions // Use a Chronicle reference list
+    not $e.principal.user.userid = /.*DWM-1/ nocase // Example regex exclusion
+    not $e.principal.user.userid = /.*UMFD-1/ nocase // Example regex exclusion
+    not $e.principal.user.userid = /MSOL_.*/ nocase // Example regex exclusion
+
+  outcome:
+    $event_time = $e.metadata.event_timestamp.epoch_seconds // UDM field for event timestamp
+    $domain_controller = $e.principal.hostname // UDM field for hostname
+    $actor = $e.principal.user.userid // UDM field for the user performing the action
+
+    // Normalize the target of the action
+    $target_principal = if($e.metadata.event_code = 5136, $e.target.resource.name, $e.target.user.userid) // UDM fields for object and user names
+    $privileged_group = if($e.metadata.event_code in (4728, 4732, 4756), $e.target.group.name, "N/A")
+
+    // Create a human-readable reason for the alert
+    $reason = if($e.metadata.event_code = 5136, "DCSync Replication Rights Granted to Domain Object", "Account Added to Privileged Group")
+
+  condition:
+    $e
+}

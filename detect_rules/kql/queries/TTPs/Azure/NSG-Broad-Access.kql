@@ -1,0 +1,49 @@
+// Name: Azure NSG Rule Allowing Broad Access to Sensitive Ports
+// Author: RW
+// Date: 2025-08-31
+// Description: This rule detects the creation or modification of an Azure Network Security Group (NSG) rule that allows inbound traffic
+// from any source to sensitive ports like RDP (3389) or SSH (22). Such rules can be created by attackers for initial access or persistence.
+// MITRE ATT&CK: T1562.007 (Impair Defenses: Disable or Modify Cloud Firewall), T1190 (Exploit Public-Facing Application)
+// False Positive Sensitivity: Medium
+
+let sensitivePorts = dynamic(["22", "3389", "*"]); // Define sensitive ports (SSH, RDP, All)
+let broadSources = dynamic(["*", "Any", "Internet", "0.0.0.0/0"]); // Define broad source prefixes that represent any source IP
+
+AzureActivity
+| where OperationNameValue == "MICROSOFT.NETWORK/NETWORKSECURITYGROUPS/SECURITYRULES/WRITE" // Identifies creation or update of an NSG security rule
+| where ActivityStatusValue == "Success"
+| extend properties = todynamic(Properties)
+| extend requestBody = todynamic(tostring(properties.requestbody))
+| extend ruleProperties = requestBody.properties
+| where isnotempty(ruleProperties)
+| where tostring(ruleProperties.direction) == "Inbound" and tostring(ruleProperties.access) == "Allow" // Filter for inbound 'Allow' rules
+// Potential for false positives: Legitimate administrators may open these ports for maintenance or for public-facing services.
+// Consider tuning by filtering for specific resource groups or excluding known administrator accounts from 'Caller'.
+| extend
+    sourcePrefixes = ruleProperties.sourceAddressPrefixes,
+    sourcePrefix = ruleProperties.sourceAddressPrefix,
+    destPorts = ruleProperties.destinationPortRanges,
+    destPort = ruleProperties.destinationPortRange
+| where
+    (
+        tostring(sourcePrefix) in (broadSources) or
+        (isnotempty(sourcePrefixes) and (tostring(sourcePrefixes) has_any (broadSources)))
+    ) // Check if the source address is overly broad
+    and
+    (
+        tostring(destPort) in (sensitivePorts) or
+        (isnotempty(destPorts) and (tostring(destPorts) has_any (sensitivePorts)))
+    ) // Check if the destination port is sensitive
+| project
+    TimeGenerated,
+    Caller,
+    CallerIpAddress,
+    OperationName,
+    SubscriptionId,
+    ResourceGroup,
+    RuleName = tostring(requestBody.name),
+    Source = coalesce(tostring(sourcePrefix), tostring(sourcePrefixes)),
+    DestinationPort = coalesce(tostring(destPort), tostring(destPorts)),
+    Protocol = tostring(ruleProperties.protocol),
+    Description = tostring(ruleProperties.description),
+    ResourceId

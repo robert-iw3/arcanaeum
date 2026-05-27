@@ -1,0 +1,17 @@
+[
+  {
+    "name": "Suspicious HTTPS Connections to Login Pages",
+    "description": "Detects suspicious SSL certificate issuers (like Let's Encrypt or Unknown) for login and authentication-related web pages, which can indicate a potential phishing proxy or MitM attack. Requires Web datamodel and SSL Issuer fields.",
+    "search": "| tstats count from datamodel=Web.Web where Web.http_method IN (\"GET\", \"POST\") Web.url=\"*.php\" OR Web.url=\"*login*\" OR Web.url=\"*auth*\" by Web.src, Web.dest, Web.url, Web.http_user_agent, Web.http_status, Web.ssl_issuer | where Web.http_status IN (200, 301, 302) AND (Web.url=\"*.php\" OR Web.url=\"*login*\" OR Web.url=\"*auth*\") | eval is_suspicious_ssl=if(Web.ssl_issuer LIKE \"%Let’s Encrypt%\" OR Web.ssl_issuer=\"unknown\" OR isnull(Web.ssl_issuer), 1, 0) | search is_suspicious_ssl=1 | stats count min(_time) as firstTime max(_time) as lastTime values(Web.url) as urls values(Web.http_user_agent) as user_agents values(Web.ssl_issuer) as ssl_issuers by Web.src, Web.dest | where count > 5 | `security_content_ctime(firstTime)` | `security_content_ctime(lastTime)` | rename Web.src as src_ip, Web.dest as dest_host | eval potential_mitm=if(match(dest_host, \"(microsoftonline|office365|login|outlook|okta|github|linkedin|amazon)\\S*\\.(com|org|eu|shop)\"), \"Possible phishing proxy\", \"Other suspicious proxy\") | table firstTime, lastTime, src_ip, dest_host, urls, user_agents, ssl_issuers, potential_mitm, count",
+    "is_scheduled": 1,
+    "disabled": 0,
+    "cron_schedule": "*/30 * * * *",
+    "dispatch.earliest_time": "-24h",
+    "dispatch.latest_time": "now",
+    "sharing": "global",
+    "acl": {
+      "read": ["power", "admin"],
+      "write": ["admin"]
+    }
+  }
+]

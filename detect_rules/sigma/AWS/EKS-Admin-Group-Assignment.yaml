@@ -1,0 +1,29 @@
+title: AWS EKS Administrative Group Assigned to a Principal
+id: 8d84ee41-aff6-4157-90bd-987532b804ca
+status: experimental
+description: Identifies when an AWS principal is granted administrative access to an EKS cluster through Kubernetes groups. This could signify unauthorized privilege escalation or an attacker granting themselves administrative access to the cluster.
+references:
+  - https://securitylabs.datadoghq.com/articles/eks-cluster-access-management-deep-dive/
+author: RW
+date: 2025-08-19
+tags:
+  - attack.privilege_escalation
+  - attack.t1078
+  - cloud
+  - aws
+  - eks
+logsource:
+  product: aws
+  service: cloudtrail
+detection:
+  selection:
+        # Detects when an access entry is created or updated for an EKS cluster
+    eventName:
+      - 'CreateAccessEntry'
+      - 'UpdateAccessEntry'
+        # Filters for the assignment of the highly privileged 'cluster-admin' Kubernetes group
+    requestParameters.kubernetesGroups: 'cluster-admin'
+  condition: selection
+falsepositives:
+  - Legitimate administrative actions by authorized personnel to grant EKS cluster administrative access. It's recommended to baseline the principals that are expected to perform this action and exclude them.
+level: medium

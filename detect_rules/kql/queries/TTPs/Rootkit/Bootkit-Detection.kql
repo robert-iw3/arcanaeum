@@ -1,0 +1,43 @@
+// Name: Bootkit Persistence via BCDEDIT
+// Author: RW
+// Date: 2025-08-10
+// Description: Detects attempts to modify the Boot Configuration Data (BCD) using bcdedit.exe.
+//              Bootkits often manipulate BCD to load malicious code at startup, disable security
+//              features like driver signature enforcement, or enable test signing mode. This aligns
+//              with the TTP of creating anomalies in the boot process.
+// Tactic: Persistence, Defense Evasion
+// Technique: T1542.003, T1542.001
+// False Positive Sensitivity: Medium
+
+// Define suspicious command-line arguments associated with boot configuration manipulation for persistence or defense evasion.
+let suspicious_bcdedit_flags = dynamic([
+    "testsigning on",
+    "nointegritychecks on",
+    "integrityservices disable",
+    "recoveryenabled no",
+    "bootstatuspolicy ignoreallfailures"
+]);
+
+DeviceProcessEvents
+// Look for executions of the bcdedit.exe utility, used to manage boot configuration.
+| where ProcessFileName =~ "bcdedit.exe"
+// Filter for command lines that contain modification commands and suspicious flags.
+| where ProcessCommandLine has_any ("/set", "/deletevalue") and ProcessCommandLine has_any (suspicious_bcdedit_flags)
+// FP Reduction: Legitimate software (e.g., some backup/recovery tools, virtualization software, or enterprise management tools) may modify BCD.
+// Exclude known legitimate parent processes or command lines specific to your environment to reduce noise.
+// For example: | where InitiatingProcessFileName !in~ ("legit_installer.exe", "legit_updater.exe")
+| summarize
+    count(),
+    make_set(ProcessCommandLine, 5),
+    StartTime = min(Timestamp),
+    EndTime = max(Timestamp)
+    by DeviceName, AccountName, InitiatingProcessFileName, InitiatingProcessCommandLine
+| project
+    StartTime,
+    EndTime,
+    DeviceName,
+    AccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    SuspiciousBcdeditCommands = set_ProcessCommandLine,
+    EventCount = count_

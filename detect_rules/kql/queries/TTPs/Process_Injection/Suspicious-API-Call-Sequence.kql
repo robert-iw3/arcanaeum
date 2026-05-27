@@ -1,0 +1,41 @@
+// Name: Suspicious API Call Sequence for Process Injection
+// Author: RW
+// Date: 2025-08-07
+// Description: This rule detects a sequence of API calls (VirtualAllocEx, WriteProcessMemory, CreateRemoteThread)
+//              commonly used for process injection. This technique allows an adversary to execute malicious code
+//              in the context of another process, evading defenses and potentially escalating privileges.
+// Tactics: Defense Evasion, Privilege Escalation
+// Techniques: T1055
+
+let timeframe = 5m;
+// FP Mitigation: Add legitimate processes that are known to perform injection-like behavior, such as debuggers or security tools.
+let allowlist = dynamic([
+    "msmpeng.exe",
+    "procexp.exe",
+    "procmon.exe",
+    "windbg.exe"
+]);
+DeviceEvents
+| where Timestamp > ago(timeframe)
+// Pre-filter for relevant API calls to improve performance.
+| where ActionType in ("RemoteVirtualAlloc", "RemoteWriteProcessMemory", "CreateRemoteThread")
+| where InitiatingProcessFileName !in (allowlist)
+// Sequence the events by the initiating and target process pair on a single device.
+// The OpenProcess call is an implicit prerequisite for these actions and is often too noisy to include directly in the sequence.
+| sequence by InitiatingProcessId, TargetProcessId, DeviceId
+    // Step 1: Memory is allocated in the target process.
+    step1 = (ActionType == "RemoteVirtualAlloc")
+    // Step 2: Data is written to the allocated memory.
+    step2 = (ActionType == "RemoteWriteProcessMemory")
+    // Step 3: A remote thread is created in the target process, likely to execute the written code.
+    step3 = (ActionType == "CreateRemoteThread")
+| project
+    Timestamp,
+    SequenceSource,
+    DeviceName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessId,
+    TargetProcessFileName,
+    TargetProcessCommandLine,
+    TargetProcessId

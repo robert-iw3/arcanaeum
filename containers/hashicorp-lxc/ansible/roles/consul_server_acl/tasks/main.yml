@@ -1,0 +1,92 @@
+---
+- name: Wait for consul to fully initialize
+  ansible.builtin.wait_for:
+    timeout: 30
+
+- name: Bootstrap consul acl
+  run_once: true
+  ansible.builtin.command:
+    consul acl bootstrap -format=json
+  register: consul_acl_bootstrap
+  changed_when: '"SecretID" in consul_acl_bootstrap.stdout'
+  failed_when:
+    - consul_acl_bootstrap.rc != 0
+    - '"ACL bootstrap no longer allowed" not in consul_acl_bootstrap.stderr'
+  retries: 3
+  delay: 10
+  until: consul_acl_bootstrap is not failed
+  notify: Save Consul root token
+
+- name: Register Consul root token
+  when: consul_acl_bootstrap.rc == 0
+  ansible.builtin.set_fact:
+    consul_management_token: '{{ "SecretID" | extract(consul_acl_bootstrap.stdout | from_json) }}'
+
+- name: Read Consul root token
+  when: consul_acl_bootstrap.rc != 0
+  ansible.builtin.set_fact:
+    consul_management_token: '{{ lookup("file", ".tmp/root_token_consul.txt") }}'
+
+- name: Define agent token
+  ansible.builtin.set_fact:
+    consul_agent_token: '{{ (inventory_hostname + ".agent.consul") | to_uuid(namespace="6ba7b810-9dad-11d1-80b4-00c04fd430c8") }}'
+
+- name: Create consul agent token
+  ansible.builtin.command:
+    consul acl token create
+      -token "{{ consul_management_token }}"
+      -description "{{ ansible_hostname }} agent token"
+      -node-identity "{{ ansible_hostname }}:dc1"
+      -secret "{{ consul_agent_token }}"
+  register: create_agent_token
+  changed_when: create_agent_token.rc == 0
+  failed_when:
+    - create_agent_token.rc != 0
+    - '"SecretID is already in use" not in create_agent_token.stderr'
+
+- name: Check Consul annonymous policy
+  run_once: true
+  ansible.builtin.command:
+    consul acl policy read
+      -token {{ consul_management_token }}
+      -name annonymous-dns
+      -format json
+  register: check_consul_policy
+  changed_when: false
+  failed_when:
+    - check_consul_policy.rc != 0
+    - '"policy not found" not in check_consul_policy.stderr'
+
+- name: Create Consul anonymous policy
+  when: '"policy not found" in check_consul_policy.stderr'
+  run_once: true
+  ansible.builtin.command:
+    stdin: |
+      # allow access to metrics
+      agent_prefix "consul-server-" {
+        policy = "read"
+      }
+
+      # allow dns queries
+      node_prefix "" {
+        policy = "read"
+      }
+
+      service_prefix "" {
+        policy = "read"
+      }
+    cmd:
+      consul acl policy create
+        -token {{ consul_management_token }}
+        -name annonymous-dns
+        -format json
+        -rules -
+
+- name: Associate annonymous policy with annonymous token
+  run_once: true
+  ansible.builtin.command:
+    consul acl token update
+      -token {{ consul_management_token }}
+      -policy-name annonymous-dns
+      -accessor-id 00000000-0000-0000-0000-000000000002
+      -format json

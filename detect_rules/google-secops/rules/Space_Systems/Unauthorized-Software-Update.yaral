@@ -1,0 +1,52 @@
+rule unauthorized_software_update_siuu {
+
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects the execution of unsigned software, particularly from temporary or user-writable locations, or with names suggesting an installer or update. This behavior is aligned with the SPARTA SIUU (Software Integrity and Unauthorized Updates) threat pattern, which can indicate the introduction of backdoors or malicious code."
+    reference = "https://medium.com/the-aerospace-corporation/indicators-of-behavior-iobs-in-sparta-v3-0-c42ab0683100, https://sparta.aerospace.org/related-work/iob"
+    tags = "attack.persistence, attack.privilege_escalation, attack.defense_evasion"
+    tactic = "TA0003, TA0004, TA0005"
+    technique = "T1553.002"
+    false_positives = "Legitimate but unsigned applications (e.g., some open-source tools, older utilities)., Custom in-house tools or developer-compiled binaries., Scripts or installers that are known to be unsigned in your environment."
+
+  events:
+    $process.metadata.event_type = "PROCESS_LAUNCH"
+    $process.principal.hostname = $hostname
+
+    // Core condition: The executed file is not signed.
+    $process.target.process.file.signature.signed = false
+
+    // Selection: The unsigned executable is suspicious due to its location or name.
+    and (
+      // Running from common temporary or user-writable directories.
+      re.regex($process.target.process.file.full_path, `(?i)(\\Windows\\Temp\\|\\PerfLogs\\|\\AppData\\Local\\Temp|\\Users\\Public\\|\\Downloads\\)`) or
+
+      // File name suggests it's an installer or update.
+      re.regex($process.target.process.file.full_path, `(?i)(install|setup|update|patch|hotfix)\.exe$`)
+    )
+
+    // Filter: Exclude known legitimate unsigned applications or parent processes.
+    // This list is a placeholder and should be customized for your environment to reduce false positives.
+    and not (
+        re.regex($process.target.process.file.full_path, `\\(putty|7z)\.exe$`) nocase or
+        re.regex($process.principal.process.file.full_path, `\\(sccm|Choco|TaniumClient)\.exe$`) nocase
+    )
+
+  match:
+    $hostname over 10m
+
+  outcome:
+    $risk_score = 45
+    $principal_hostname = array_distinct($process.principal.hostname)
+    $principal_user_userid = array_distinct($process.principal.user.userid)
+    $principal_process_command_line = array_distinct($process.principal.process.command_line)
+    $principal_process_file_full_path = array_distinct($process.principal.process.file.full_path)
+    $target_process_command_line = array_distinct($process.target.process.command_line)
+    $target_process_file_full_path = array_distinct($process.target.process.file.full_path)
+    $target_process_file_sha256 = array_distinct($process.target.process.file.sha256)
+    $event_count = count_distinct($process.metadata.id)
+
+  condition:
+    $process
+}

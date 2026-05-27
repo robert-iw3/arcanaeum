@@ -1,0 +1,87 @@
+rule apt28_notdoor_backdoor_activity {
+  meta:
+    author = "RW"
+    date = "2025-09-03"
+    description = "Detects various activities associated with the NotDoor backdoor, used by APT28. It looks for specific file creation events, process command lines, registry modifications, and network communications."
+    tactic = "TA0002, TA0003, TA0005, TA0009, TA0010, TA0011"
+    technique = "T1574.001, T1059.001, T1112, T1547.001, T1137.006, T1071, T1041, T1074.001"
+    tags = "APT28, NotDoor, Backdoor, Outlook, Persistence, Execution, Defense Evasion, Exfiltration, Command and Control"
+    false_positives = "Legitimate use of webhook.site or dnshook.site for development or testing. Administrative changes to Outlook macro security settings. The staging file detection is based on a path and file naming convention which could overlap with legitimate application behavior."
+
+  events:
+    // File events: Malicious hashes, initial backdoor drop, and staging files
+    ($f.metadata.event_type = "FILE_CREATION" or $f.metadata.event_type = "FILE_MODIFICATION") and
+    (
+      $f.target.file.sha256 in (
+        "5a88a15a1d764e635462f78a0cd958b17e6d22c716740febc114a408eef66705", // SSPICLI.dll
+        "8f4bca3c62268fff0458322d111a511e0bcfba255d5ab78c45973bd293379901"  // testtemp.ini
+      )
+      or $f.target.file.full_path = "c:\\programdata\\testtemp.ini" nocase
+      // Staging file creation in %TEMP%\\Test
+      or (
+        re.regex($f.target.file.full_path, `\\AppData\\Local\\Temp\\Test\\`) nocase and
+        re.regex($f.target.file.full_path, `(report|invoice|contract|photo|scheme|document)_[^\\]+\.(jpg|jpeg|gif|bmp|ico|png|pdf|doc|docx|xls|xlsx|ppt|pptx|mp3|mp4|xml)$`) nocase
+      )
+    )
+
+    // Process creation: PowerShell installation and C2 verification
+    $p.metadata.event_type = "PROCESS_LAUNCH" and
+    (
+      // Copies the backdoor macro file
+      (
+        $p.target.process.command_line contains "copy" and
+        $p.target.process.command_line contains "c:\\programdata\\testtemp.ini" and
+        $p.target.process.command_line contains "\\Microsoft\\Outlook\\VbaProject.OTM"
+      ) or
+      // C2 verification via nslookup
+      (
+        $p.target.process.command_line contains "nslookup" and
+        $p.target.process.command_line contains ".dnshook.site"
+      ) or
+      // C2 verification via curl
+      (
+        $p.target.process.command_line contains "curl" and
+        $p.target.process.command_line contains "webhook.site"
+      )
+    )
+
+    // Registry modification: Outlook persistence and warning suppression
+    $r.metadata.event_type = "REGISTRY_MODIFICATION" and
+    (
+      // Enables macro loading on Outlook boot for persistence
+      (
+        re.regex($r.target.registry.key, `\\Software\\Microsoft\\Office\\[0-9\.]+\\Outlook\\LoadMacroProviderOnBoot$`) nocase and
+        $r.target.registry.value.data = "1"
+      ) or
+      // FP Note: Setting macro security to 'Enable all' is suspicious but may be legitimate.
+      (
+        re.regex($r.target.registry.key, `\\Software\\Microsoft\\Office\\[0-9\.]+\\Outlook\\Security\\Level$`) nocase and
+        $r.target.registry.value.data = "1"
+      ) or
+      // Disables macro warning dialogs
+      (
+        re.regex($r.target.registry.key, `\\Software\\Microsoft\\Office\\[0-9\.]+\\Outlook\\Options\\General$`) nocase and
+        $r.target.registry.value.name = "PONT_STRING" and
+        $r.target.registry.value.data = ";"
+      )
+    )
+
+    // Network events: C2 communication
+    // FP Note: Legitimate use of webhook.site or dnshook.site may occur.
+    (
+      $n.metadata.event_type = "NETWORK_DNS" and
+      re.regex($n.network.dns.question.name, `(webhook|dnshook)\.site$`) nocase
+    ) or
+    (
+      $n.metadata.event_type = "NETWORK_HTTP" and
+      re.regex($n.network.http.hostname, `(webhook|dnshook)\.site$`) nocase
+    )
+
+    // Email events: Exfiltration
+    $e.metadata.event_type = "EMAIL_SENT" and
+    $e.network.email.to = "a.matti444@proton.me" and
+    $e.network.email.subject contains "Re: 0"
+
+  condition:
+    $f or $p or $r or $n or $e
+}

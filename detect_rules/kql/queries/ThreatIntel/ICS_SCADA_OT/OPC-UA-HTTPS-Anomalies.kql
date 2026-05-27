@@ -1,0 +1,46 @@
+// Name: OPC UA Excessive Session Requests over HTTPS
+// Author: RW
+// Date: 2025-08-14
+// Description: Detects an anomalously high number of OPC UA CreateSession or ActivateSession requests from a single source IP
+// to a destination over HTTPS. This could indicate an attempt to exploit a signing oracle vulnerability
+// (CVE-2024-42512, CVE-2024-42513) to achieve authentication bypass.
+// References: https://www.cisa.gov/news-events/ics-advisories/icsa-25-072-09
+// MITRE TTPs: T1566.001
+
+// Define the threshold for excessive session creation attempts. This is a key tuning point.
+let threshold = 15;
+// Define the time window for analysis.
+let lookback = 30m;
+
+// Use the ASIM Network Session parser for broad compatibility.
+// This assumes network traffic logs (e.g., from Firewalls, Proxies, Zeek) are normalized.
+_Im_NetworkSession
+| where TimeGenerated > ago(lookback)
+// The attack described uses the HTTPS transport. Look for traffic on common HTTPS/TLS ports.
+| where DstPort in (443, 4843)
+// The vulnerability is exploited via CreateSession and ActivateSession requests.
+// This may be found in different fields depending on the log source and parsing.
+// The 'Url' field is a common place for this in web traffic. Adjust if needed for your specific logs.
+| where isnotempty(Url) and (Url has "CreateSession" or Url has "ActivateSession")
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    RequestCount = count(),
+    DestinationPorts = make_set(DstPort)
+    by SrcIp, DstIp, DstHostname, bin(TimeGenerated, 5m)
+| where RequestCount > threshold
+// FP Tuning: To reduce false positives, consider filtering for external sources or adding known-good scanners/clients to an exclusion list.
+// For example, if your OPC UA clients are all on internal networks, you could uncomment the following line:
+// | where ipv4_is_private(SrcIp) == false
+| project
+    StartTime,
+    EndTime,
+    SrcIp,
+    DstIp,
+    DstHostname,
+    DestinationPorts,
+    RequestCount
+| extend
+    timestamp = StartTime,
+    HostName = DstHostname,
+    IPAddress = DstIp

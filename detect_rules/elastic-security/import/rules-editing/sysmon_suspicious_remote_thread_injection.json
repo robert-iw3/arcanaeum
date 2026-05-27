@@ -1,0 +1,47 @@
+{
+  "rule_id": "sysmon_suspicious_remote_thread_injection",
+  "name": "Sysmon Suspicious Remote Thread Injection",
+  "description": "Detects suspicious remote thread creation (Sysmon Event ID 8) from living-off-the-land binaries into other processes. The presence of a NULL or UNKNOWN starting module is a strong indicator of a malicious process injection attempt.",
+  "severity": "critical",
+  "enabled": true,
+  "language": "esql",
+  "query": "from logs-endpoint.events-* | where event.module = 'sysmon' and event.code = '8' and (winlog.event_data.StartModule IS NULL OR winlog.event_data.StartModule rlike '.*UNKNOWN.*') and ((process.executable rlike '.*\\\\(rundll32\\.exe|svchost\\.exe|regsvr32\\.exe|powershell\\.exe)$') and (winlog.event_data.TargetImage rlike '.*\\\\(explorer\\.exe|svchost\\.exe|notepad\\.exe|msiexec\\.exe|aspnet_compiler\\.exe)$')) | stats count = COUNT(*) by host.name, process.executable, winlog.event_data.TargetImage, winlog.event_data.SourceProcessGuid, winlog.event_data.TargetProcessGuid, winlog.event_data.StartAddress, winlog.event_data.StartModule, user.name | keep host.name, process.executable, winlog.event_data.TargetImage, winlog.event_data.SourceProcessGuid, winlog.event_data.TargetProcessGuid, winlog.event_data.StartAddress, winlog.event_data.StartModule, user.name, count",
+  "type": "esql",
+  "threat": [
+    {
+      "framework": "MITRE ATT&CK",
+      "tactic": {
+        "id": "TA0005",
+        "name": "Defense Evasion",
+        "reference": "https://attack.mitre.org/tactics/TA0005/"
+      },
+      "technique": [
+        {
+          "id": "T1055",
+          "name": "Process Injection",
+          "reference": "https://attack.mitre.org/techniques/T1055/"
+        }
+      ]
+    }
+  ],
+  "interval": "5m",
+  "from": "now-5m",
+  "max_signals": 100,
+  "risk_score": 90,
+  "output_index": ".alerts-security.alerts-default",
+  "meta": {},
+  "version": 1,
+  "references": [
+    "https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon",
+    "https://www.elastic.co/guide/en/security/current/process-injection-detected.html"
+  ],
+  "tags": [
+    "Sysmon",
+    "Process Injection",
+    "Defense Evasion"
+  ],
+  "actions": [],
+  "throttle": "no_throttle",
+  "custom_query_fields": [],
+  "event_group": "host.name, process.executable, winlog.event_data.TargetImage"
+}

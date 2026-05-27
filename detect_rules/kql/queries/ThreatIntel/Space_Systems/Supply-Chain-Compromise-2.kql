@@ -1,0 +1,79 @@
+// Name: Suspicious Outbound Connection from Software Development Tool
+// Author: RW
+// Date: 2025-08-19
+// Description: Detects when a software development or build tool (like a compiler or build engine) on a sensitive system makes
+// an outbound network connection to an external IP address. This could indicate a compromised supply chain, where malicious code
+// injected into a dependency or tool establishes a C2 channel. This is a potential indicator of the TTPs regarding supply chain compromises.
+// Tactic: Command and Control (TA0011), Persistence (TA0003)
+// Technique: T1071 (Application Layer Protocol), T1554 (Compromise Client Software Binary)
+// False Positive Sensitivity: Medium
+// Data Source: DeviceNetworkEvents
+
+// Define a list of sensitive hosts like build servers or key developer workstations.
+// Tuning: This list is critical. Populate it with the hostnames of your CI/CD servers, code repositories, and lead developer machines for satellite software.
+let sensitive_build_systems = dynamic([
+    "BUILD-SERVER-01",
+    "CICD-AGENT-PROD",
+    "dev-lead-ws01.example.com"
+]);
+// Define a list of common software development and build processes.
+// Tuning: Add or remove processes specific to your development environment (e.g., Java, Go, Rust compilers).
+let build_and_dev_processes = dynamic([
+    "MSBuild.exe",
+    "csc.exe",
+    "vbc.exe",
+    "devenv.exe",
+    "cc1.exe",
+    "gcc.exe",
+    "make.exe",
+    "cmake.exe",
+    "git.exe",
+    "go.exe",
+    "rustc.exe"
+]);
+// Define a list of known-good destinations to reduce false positives.
+// Tuning: This is the most important list for reducing noise. Add your corporate domains, known package managers (nuget, npm, maven), and source control provider domains (github.com, dev.azure.com).
+let known_good_destinations = dynamic([
+    "github.com",
+    "api.nuget.org",
+    "npmjs.org",
+    "dev.azure.com",
+    "files.pythonhosted.org",
+    "pypi.org"
+]);
+DeviceNetworkEvents
+| where TimeGenerated > ago(1d)
+// Filter for events on sensitive systems.
+| where DeviceName in~ (sensitive_build_systems)
+// Filter for connections initiated by a development/build tool.
+| where InitiatingProcessFileName in~ (build_and_dev_processes)
+// Focus on external connections.
+| where RemoteIPType == "Public"
+// Exclude connections to known good destinations.
+| where not(RemoteUrl has_any (known_good_destinations))
+// Exclude connections to private/reserved IP ranges, which might be misclassified as Public.
+| where not(ipv4_is_private(RemoteIP))
+// Summarize the activity to reduce alert volume.
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    EventCount = count(),
+    RemoteIPs = make_set(RemoteIP),
+    RemotePorts = make_set(RemotePort),
+    RemoteUrls = make_set(RemoteUrl)
+    by DeviceName, InitiatingProcessFileName, InitiatingProcessCommandLine, InitiatingProcessId, AccountName
+| project
+    StartTime,
+    EndTime,
+    DeviceName,
+    AccountName,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    EventCount,
+    RemoteIPs,
+    RemotePorts,
+    RemoteUrls
+| extend
+    timestamp = StartTime,
+    HostCustomEntity = DeviceName,
+    AccountCustomEntity = AccountName

@@ -1,0 +1,77 @@
+- type: expert
+  name: Detect APT28 Malicious Document Dropping Files
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "winword.exe" }
+       }
+       Target {
+          Match FILE {
+             Include OBJECT_NAME { -v "C:\\Users\\**\\AppData\\Roaming\\Microsoft\\Protect\\ctec.dll" -v "C:\\Users\\**\\AppData\\Local\\windows.png" }
+             Include -access "CREATE,WRITE"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects winword.exe creating ctec.dll (decryption loader) or windows.png (stego shellcode) in user AppData paths. Part of 2025 APT28 spear-phishing via Signal delivering Covenant/BeardShell. Tune for any legitimate file creation in these locations."
+- type: expert
+  name: Detect APT28 COM Hijacking via Registry
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "reg.exe" -v "powershell.exe" }
+       }
+       Target {
+          Match REGISTRY {
+             Include OBJECT_NAME { -v "HKEY_CURRENT_USER\\Software\\Classes\\CLSID\\{2227A280-3AEA-1069-A2DE-08002B30309D}\\InprocServer32" }
+             Include -access "WRITE,CREATE"
+             Include -value_data "*C:\\Users\\**\\AppData\\Local\\Microsoft\\Windows\\BeardShell.dll*"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects writes to the Printers COM key redirecting to malicious BeardShell.dll — persistence mechanism of APT28 Covenant payloads (2025 samples). High-fidelity; tune for custom COM registrations."
+- type: expert
+  name: Detect APT28 SLIMAGENT Encrypted Screenshots in Temp
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "**" }
+       }
+       Target {
+          Match FILE {
+             Include OBJECT_NAME { -v "C:\\Users\\**\\AppData\\Local\\Temp\\Desktop_*.svc" }
+             Include -access "CREATE,WRITE"
+          }
+       }
+    }
+  action: Report
+  severity: Medium
+  enabled: true
+  description: "Detects creation/write of Desktop_<date_time>.svc files in %TEMP% — encrypted screenshot/keylog/clipboard artifacts from SLIMAGENT (APT28 spyware observed 2024-2025). Specific pattern; tune if legitimate .svc files exist in TEMP."
+- type: expert
+  name: Detect BEARDSHELL and COVENANT Malware Files
+  content: |-
+    Rule {
+       Reaction SCAN ACTOR_PROCESS ScanAction REPORT
+       Process {
+          Include OBJECT_NAME { -v "**" }
+       }
+       Target {
+          Match FILE {
+             Include OBJECT_NAME { -v "C:\\**\\ksmqsyck.dx4.exe" -v "C:\\**\\PlaySndSrv.dll" -v "C:\\**\\sample-03.wav" -v "C:\\**\\BeardShell.dll" }
+             Include -access "CREATE,EXECUTE"
+          }
+       }
+    }
+  action: Report
+  severity: High
+  enabled: true
+  description: "Detects creation/execution of known APT28 2025 malware artifacts: Covenant Grunt (ksmqsyck.dx4.exe), PlaySndSrv.dll loader, sample-03.wav (shellcode container), BeardShell.dll. Path-based IOC; complement with EDR hash detection for higher fidelity."

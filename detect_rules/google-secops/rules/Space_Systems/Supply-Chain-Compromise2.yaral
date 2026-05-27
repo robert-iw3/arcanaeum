@@ -1,0 +1,53 @@
+rule suspicious_outbound_from_dev_tool_on_sensitive_host {
+  meta:
+    author = "RW"
+    date = "2025-08-19"
+    description = "Detects when a software development or build tool (like a compiler or build engine) on a sensitive system makes an outbound network connection to an unknown external IP address. This could indicate a compromised supply chain, where malicious code injected into a dependency or tool establishes a C2 channel. This is a potential indicator of the TTPs regarding supply chain compromises."
+    tags = "SATELLITE, AEROSPACE, SUPPLY_CHAIN, COMMAND_AND_CONTROL"
+    tactic = "TA0011, TA0003"
+    technique = "T1071, T1554"
+    false_positives = "Legitimate developer activity, such as fetching dependencies from a new or uncategorized repository. Ad-hoc scripts or tools making legitimate network calls. Tuning the allowlists for sensitive hosts, processes, and known destinations is critical to reduce noise."
+
+  events:
+    // Filter for network connection events.
+    $conn.metadata.event_type = "NETWORK_CONNECTION"
+
+    // Filter for events on sensitive systems like build servers or key developer workstations.
+    // Tuning: The %sensitive_build_systems reference list must be populated with hostnames of CI/CD servers, code repositories, etc.
+    $conn.principal.hostname in %sensitive_build_systems
+
+    // Filter for connections initiated by a development/build tool.
+    // Tuning: The %build_and_dev_processes reference list should be customized for your specific development environment.
+    $conn.principal.process.file.name in %build_and_dev_processes
+
+    // Focus on external connections by excluding private IP ranges.
+    net.is_private_ip($conn.target.ip) = false
+
+    // Exclude connections to known good destinations to reduce false positives.
+    // Tuning: The %known_good_destinations reference list is critical for reducing noise. Add corporate domains, package managers, and source control providers.
+    not $conn.target.hostname in %known_good_destinations
+
+    // Placeholders for grouping and outcome.
+    $hostname = $conn.principal.hostname
+    $process_name = $conn.principal.process.file.name
+
+  match:
+    // Group related activity by host and process over a 1-hour window to reduce alert volume.
+    $hostname, $process_name over 1h
+
+  outcome:
+    // Set a risk score for the detection.
+    $risk_score = 60
+    // Consolidate principal and target information for the detection.
+    $principal_hostname = array_distinct($conn.principal.hostname)
+    $principal_process_name = array_distinct($conn.principal.process.file.name)
+    $principal_process_command_line = array_distinct($conn.principal.process.command_line)
+    $principal_user = array_distinct($conn.principal.user.userid)
+    $target_ips = array_distinct($conn.target.ip)
+    $target_hostnames = array_distinct($conn.target.hostname)
+    $target_ports = array_distinct($conn.target.port)
+    $event_count = count_distinct($conn.metadata.id)
+
+  condition:
+    $conn
+}

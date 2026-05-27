@@ -1,0 +1,6 @@
+deploy_type: docker  # docker, podman, kubernetes
+pcap_dir: /path/to/pcaps
+whitelist: whitelist.yaml
+image_tag: latest
+k8s_namespace: pcapan-ns
+jwt_secret: secret

@@ -1,0 +1,9 @@
+aws_logsource_products:
+  - windows
+  - cloudtrail
+  - dns
+  - vpcflow
+  - s3
+valid_tag_prefixes:
+  - attack.
+  - threat_

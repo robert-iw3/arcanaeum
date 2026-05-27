@@ -1,0 +1,41 @@
+rule xss_csrf_on_mission_control_software {
+  meta:
+    author = "RW"
+    date = "2025-08-18"
+    description = "Detects potential Cross-Site Scripting (XSS) or Cross-Site Request Forgery (CSRF) attacks targeting Mission Control Software (MCS) like YAMCS and OpenC3. This rule identifies common XSS payloads in URLs directed at known MCS web interface paths."
+    false_positive_sensitivity = "Medium"
+    references = "https://visionspace.com/yamcs-v5-8-6-vulnerability-assessment/, https://visionspace.com/openc3-cosmos-a-security-assessment-of-an-open-source-mission-framework/, https://www.blackhat.com/us-25/briefings/schedule/#burning-trashing-spacecraft-crashing-a-collection-of-vulnerabilities-that-will-end-your-space-mission-41536"
+    tactic = "TA0001"
+    technique = "T1190"
+
+  events:
+    // Filter for HTTP network events.
+    $e.metadata.event_type = "NETWORK_HTTP"
+
+    // FP Tuning: Update the regex to match your specific MCS URL paths.
+    // These patterns are based on known open-source MCS like YAMCS and OpenC3/COSMOS.
+    (
+      re.regex($e.target.url, `.*/yamcs/.*`) or
+      re.regex($e.target.url, `.*/openc3/.*`) or
+      re.endswith($e.target.url, "yamcs.html") or
+      re.endswith($e.target.url, "cosmos.html")
+    )
+
+    // FP Tuning: Refine the XSS patterns to reduce noise from legitimate but unusual URL parameters.
+    // This regex looks for common XSS payloads in the URL.
+    re.regex($e.target.url, `(?i)(<script|javascript:|onerror=|onload=|alert\(|<img>|<iframe>|document\.cookie|xss\.rocks|burpcollaborator)`)
+
+  outcome:
+    $risk_score = 65
+    $detection_name = "XSS/CSRF on Mission Control Software"
+    $description_out = "Potential XSS/CSRF attack targeting Mission Control Software. Malicious payload found in URL."
+    $src_ip = $e.principal.ip
+    $dest_ip = $e.target.ip
+    $user_id = $e.principal.user.userid
+    $url = $e.target.url
+    $http_method = $e.network.http.method
+    $user_agent = $e.network.http.user_agent
+
+  condition:
+    $e
+}

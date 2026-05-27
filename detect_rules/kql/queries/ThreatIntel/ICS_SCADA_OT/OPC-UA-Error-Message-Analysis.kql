@@ -1,0 +1,55 @@
+// Name: Potential OPC UA Padding Oracle Probing Attempt
+// Author: RW
+// Date: 2025-08-14
+// Description: Detects a high volume of error messages from a single OPC UA client. This pattern is indicative of
+// probing for a padding oracle vulnerability (e.g., Bleichenbacher's attack, CVE-2024-42513), which can be exploited
+// for authentication bypass or traffic decryption. The attack relies on sending numerous malformed requests to analyze
+// error responses or timing differences.
+// References:
+// - https://www.cisa.gov/news-events/ics-advisories/icsa-25-072-09
+// MITRE TTPs: T1566.001
+
+// Define the time window and error threshold.
+let lookback = 30m;
+let error_threshold = 50; // An attacker needs to send many messages. Tune based on environment specifics.
+
+// This rule assumes logs from an OPC UA-aware source (e.g., Zeek, specific vendor logs) are available.
+// The table and field names may need to be adjusted for your environment.
+union isfuzzy=true OpcUa*, Zeek*, CommonSecurityLog, DeviceNetworkEvents
+| where TimeGenerated > ago(lookback)
+// Filter for events that indicate an OPC UA error. This is the most critical part for customization.
+| where (EventData has "error" or Message has "error" or EventResult =~ "Failure")
+    and (
+        // Look for generic OPC UA error indicators
+        EventData has_any ("Bad", "fail", "incorrect") or
+        Message has_any ("Bad", "fail", "incorrect") or
+        // Look for specific strings from research on padding oracles in OPC UA
+        Message has "block incorrect" or
+        Message has "BadUnexpectedError" or
+        Message has "Bad_InternalError"
+    )
+// FP Tuning: Exclude known misconfigured clients or legitimate testing activities.
+// For example: | where SrcIp !in ('10.1.1.1', '192.168.5.20')
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    ErrorCount = count(),
+    // Counting distinct error messages can be a stronger signal of probing for an error-based oracle.
+    // Adjust 'Message' to the field containing the detailed error string in your logs.
+    DistinctErrorMessages = dcountif(Message, isnotempty(Message))
+    by SrcIp, DstIp, DstHostname, bin(TimeGenerated, 5m)
+| where ErrorCount > error_threshold
+| extend
+    timestamp = StartTime,
+    HostName = DstHostname,
+    IPAddress = DstIp
+| project
+    timestamp,
+    StartTime,
+    EndTime,
+    IPAddress,
+    HostName,
+    SrcIp,
+    ErrorCount,
+    DistinctErrorMessages,
+    Description = "A high volume of OPC UA errors was detected from a single source, possibly indicating a padding oracle attack."

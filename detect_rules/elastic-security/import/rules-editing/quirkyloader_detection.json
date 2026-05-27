@@ -1,0 +1,21 @@
+{
+  "type": "detection-engine.rule",
+  "id": "quirkyloader-ioc-ttp-detection",
+  "attributes": {
+    "risk_score": 90,
+    "enabled": true,
+    "name": "QuirkyLoader IOC/TTP Detection",
+    "description": "Detects known QuirkyLoader indicators of compromise (IOCs) and tactics, techniques, and procedures (TTPs).",
+    "rule_id": "quirkyloader_ioc_ttp_detection",
+    "index": [
+      "logs-endpoint.events.*",
+      "logs-network.*"
+    ],
+    "language": "kuery",
+    "query": "(process.name:(\"AddInProcess32.exe\" OR \"InstallUtil.exe\" OR \"aspnet_wp.exe\") OR file.hash.sha256:(\"011257eb766f253982b717b390fc36eb570473ed7805c18b101367c68af5\" OR \"0ea3a55141405ee0e2dfbf333de01fe93c12cf34555550e4f7bb3fdec2a7673b\") OR dns.question.name:(\"catherinereynolds.info\" OR \"mail.catherinereynolds.info\") OR destination.ip:(\"157.66.22.11\" OR \"103.75.77.90\" OR \"161.248.178.212\"))",
+    "interval": "15m",
+    "severity": "critical",
+    "type": "query",
+    "version": "1"
+  }
+}

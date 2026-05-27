@@ -1,0 +1,55 @@
+// This rule detects attempts to request certificates from templates that are not published by the Certificate Authority (CA).
+// This behavior is common with tools like Certify during the enumeration phase, where an attacker probes for abusable but unpublished templates.
+// It correlates the denial event (4888) with the submission event (4886) to identify the specific template requested.
+// Find denied certificate requests where the template is not supported by the CA.
+
+let timeframe = 1h;
+
+let DeniedRequests =
+    SecurityEvent
+    | where TimeGenerated > ago(timeframe)
+    | where EventID == 4888 // Certificate Services denied a certificate request.
+    // This disposition message is a strong indicator of enumeration for unpublished templates.
+    | where EventData has 'CERTSRV_E_UNSUPPORTED_CERT_TYPE' or EventData has 'The requested certificate template is not supported by this CA'
+    | extend EventDataXml = parse_xml(EventData)
+    | extend
+        Requester = tostring(EventDataXml.EventData.Data[0]),
+        RequestId = tostring(EventDataXml.EventData.Data[2]),
+        DispositionMessage = tostring(EventDataXml.EventData.Data[3])
+    | project TimeGenerated, Computer, EventID, Requester, RequestId, DispositionMessage;
+// Find the corresponding submission events to get the template name.
+let SubmittedRequests =
+    SecurityEvent
+    | where TimeGenerated > ago(timeframe)
+    | where EventID == 4886 // A certificate request was submitted.
+    | extend EventDataXml = parse_xml(EventData)
+    | extend
+        RequestId = tostring(EventDataXml.EventData.Data[4]),
+        Attributes = tostring(EventDataXml.EventData.Data[2])
+    | extend TemplateName = extract("CertificateTemplate:([^\n]+)", 1, Attributes)
+    | where isnotempty(TemplateName)
+    | project RequestId, TemplateName;
+// Join the denied requests with the submitted requests on the RequestId.
+DeniedRequests
+| join kind=inner (SubmittedRequests) on RequestId
+| summarize
+    StartTime = min(TimeGenerated),
+    EndTime = max(TimeGenerated),
+    AttemptedUnpublishedTemplates = make_set(TemplateName),
+    AttemptCount = count()
+    by Requester, CertificateAuthority = Computer
+// Potential for False Positives: Legitimate misconfigurations or users accidentally attempting to request a template they believe is available.
+// A threshold can help reduce noise from single, accidental attempts. Consider adjusting the threshold based on your environment's baseline.
+| where AttemptCount > 2
+| extend
+    AccountName = tostring(split(Requester, '\\')[1]),
+    AccountDomain = tostring(split(Requester, '\\')[0])
+| project-reorder
+    StartTime,
+    EndTime,
+    AccountName,
+    AccountDomain,
+    Requester,
+    CertificateAuthority,
+    AttemptedUnpublishedTemplates,
+    AttemptCount

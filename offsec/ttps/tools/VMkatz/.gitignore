@@ -1,0 +1,7 @@
+/target
+vmkatz
+*.py
+CLAUDE.md
+TASKS.md
+scripts/
+examples/

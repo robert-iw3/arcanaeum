@@ -1,0 +1,62 @@
+// Name: Multiple Persistence Mechanisms
+// Author: RW
+// Date: 2025-08-14
+// Description: Detects various persistence techniques including the creation of new accounts, services, and scheduled tasks.
+// Tactic: Persistence, Privilege Escalation
+// Technique: T1136.002 - Create Account: Domain Account
+// T1098 - Account Manipulation
+// T1543.003 - Create or Modify System Process: Windows Service
+// T1053.005 - Scheduled Task/Job: Scheduled Task
+// False Positive Sensitivity: Medium
+
+(
+    // Part 1: Detects account creation and modification via command line
+    DeviceProcessEvents
+    | where FileName in~ ("net.exe", "net1.exe")
+    // Key Logic: Looks for command lines used to add users or add members to privileged groups.
+    | where ProcessCommandLine has_any ("user /add", "group /add", "localgroup /add")
+        and (ProcessCommandLine contains "/domain" or ProcessCommandLine has_any ("Administrators", "Domain Admins", "Enterprise Admins", "Remote Desktop Users"))
+    // FP Tuning: Legitimate administrative activity will trigger this. Filter by known admin accounts or look for execution from unexpected parent processes if noisy.
+    | project
+        TimeGenerated,
+        DeviceName,
+        DetectionType = "Account Manipulation via CLI",
+        ActionType = "ProcessCreated",
+        PersistenceDetails = ProcessCommandLine,
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        AccountName = tostring(AccountUpn)
+)
+| union (
+    // Part 2: Detects suspicious service creation
+    DeviceEvents
+    | where ActionType == "ServiceCreated"
+    // Key Logic: Identifies services whose executable path is in a suspicious, user-writable location.
+    | where RegistryValueData has_any (@"C:\Users\", @"C:\ProgramData\", @"C:\Temp\", @"C:\Windows\Temp\", @"\AppData\")
+    // FP Tuning: Some legitimate installers may write services to these locations. Exclude known good software by InitiatingProcessFileName or service executable path (RegistryValueData).
+    | project
+        TimeGenerated,
+        DeviceName,
+        DetectionType = "Suspicious Service Creation",
+        ActionType,
+        PersistenceDetails = strcat("Service Name: ", RegistryKey, ", Image Path: ", RegistryValueData),
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        AccountName
+), (
+    // Part 3: Detects suspicious scheduled task creation
+    DeviceEvents
+    | where ActionType == "ScheduledTaskCreated"
+    // Key Logic: Identifies scheduled tasks executing from suspicious, user-writable locations.
+    | where ProcessCommandLine has_any (@"C:\Users\", @"C:\ProgramData\", @"C:\Temp\", @"C:\Windows\Temp\", @"\AppData\")
+    // FP Tuning: Legitimate software (e.g., updaters) may create tasks that run from these locations. Exclude known good software by InitiatingProcessFileName or task command line.
+    | project
+        TimeGenerated,
+        DeviceName,
+        DetectionType = "Suspicious Scheduled Task",
+        ActionType,
+        PersistenceDetails = ProcessCommandLine,
+        InitiatingProcessFileName,
+        InitiatingProcessCommandLine,
+        AccountName
+)

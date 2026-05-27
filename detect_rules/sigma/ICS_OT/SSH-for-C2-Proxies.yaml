@@ -1,0 +1,70 @@
+title: Outbound SSH from ICS/OT Asset to Public Internet
+status: experimental
+description: >-
+  Detects outbound SSH connections from critical ICS/OT assets to the public internet.
+  This could indicate an adversary leveraging insecure remote access configurations for
+  command and control, proxying, or data exfiltration, as highlighted by intelligence
+  indicating that 45% of OT environments have SSH communicating to publicly routable addresses.
+  The rule detects both explicit SSH tunneling commands and general SSH connections to non-private IP space.
+references:
+  - https://attack.mitre.org/techniques/T1090/
+  - https://attack.mitre.org/techniques/T1572/
+author: RW
+date: 2025-08-18
+tags:
+  - attack.command_and_control
+  - attack.t1090
+  - attack.t1572
+  - os.windows
+  - ot.command_and_control
+logsource:
+  category:
+    - process_creation
+    - network_connection
+  product: windows
+detection:
+  # High-fidelity detection of SSH tunneling commands
+  ssh_tunneling:
+    category: process_creation
+    Image|endswith:
+      - '\ssh.exe'
+      - '\plink.exe'
+      - '\putty.exe'
+    CommandLine|contains:
+      - ' -D ' # SOCKS proxy
+      - ' -L ' # Local port forwarding
+      - ' -R ' # Remote port forwarding
+  # Broader detection for any SSH connection
+  ssh_connection:
+    category: network_connection
+    DestinationPort: 22
+  # Filter for connections to private/internal IP addresses
+  filter_private_dest:
+    DestinationIp|startswith:
+      - '10.'
+      - '172.16.'
+      - '172.17.'
+      - '172.18.'
+      - '172.19.'
+      - '172.20.'
+      - '172.21.'
+      - '172.22.'
+      - '172.23.'
+      - '172.24.'
+      - '172.25.'
+      - '172.26.'
+      - '172.27.'
+      - '172.28.'
+      - '172.29.'
+      - '172.30.'
+      - '172.31.'
+      - '192.168.'
+      - '127.'
+      - '::1'
+      - 'fe80:'
+  condition: ssh_tunneling or (ssh_connection and not filter_private_dest)
+falsepositives:
+  - Legitimate use of SSH by administrators for remote management of cloud services or external devices.
+  - Automated processes or tools that use SSH for data transfer to partner networks.
+  - The network connection part of this rule is broad. It is critical to scope this rule to OT assets (e.g., HMIs, EWS, SCADA servers) where external SSH is not expected and to whitelist known legitimate destinations and corporate IP ranges.
+level: medium

@@ -1,0 +1,59 @@
+//
+// Name: Registry Modification to Disable Kernel Shadow Stack
+//
+// Description:
+// Detects attempts to disable or alter kernel shadow stack protection by modifying specific registry keys.
+// An attacker may perform this action to bypass security features like Kernel Shadow Stack or
+// Hypervisor-Enforced Code Integrity (HVCI) before loading a malicious driver or executing code.
+//
+// Author: RW
+// Date: 2025-08-04
+//
+// False Positives:
+// Legitimate system administrators or configuration management tools (e.g., Intune, SCCM) may modify these
+// settings for system configuration or troubleshooting. Scrutinize the initiating process and command
+// line to determine legitimacy.
+//
+// Tactic: Defense Evasion
+// Technique: T1562.001, Impair Defenses: Disable or Modify Tools
+//
+
+// Define the target registry keys in a list for easier management.
+let targetRegKeys = dynamic([
+    @"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\KernelShadowStacks",
+    @"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity"
+]);
+DeviceRegistryEvents
+// Filter for registry value set events, which indicate a modification.
+| where ActionType == "RegistryValueSet"
+// Filter for the specific keys related to Kernel Shadow Stack and HVCI.
+| where RegistryKey in (targetRegKeys)
+// Filter for the 'Enabled' value, which controls these features.
+| where RegistryValueName == "Enabled"
+// Summarize the event to create a concise alert.
+| summarize
+    count(),
+    FirstSeen = min(Timestamp),
+    LastSeen = max(Timestamp),
+    ValuesSet = make_set(RegistryValueData)
+    by
+    DeviceName,
+    DeviceId,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    RegistryKey,
+    RegistryValueName,
+    ReportId
+// Project and rename fields for a clear and actionable alert.
+| project
+    FirstSeen,
+    LastSeen,
+    Endpoint = DeviceName,
+    DeviceId,
+    Process = InitiatingProcessFileName,
+    CommandLine = InitiatingProcessCommandLine,
+    RegistryKey,
+    RegistryValueName,
+    ValuesSet,
+    AlertCount = count_,
+    ReportId

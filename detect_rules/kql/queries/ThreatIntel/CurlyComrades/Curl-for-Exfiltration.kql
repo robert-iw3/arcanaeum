@@ -1,0 +1,29 @@
+// Name: Curly COMrades Data Exfiltration with cURL
+// Author: RW
+// Date: 2025-08-13
+// Description: Detects the use of curl.exe with command-line arguments associated with data upload/exfiltration, originating
+//              from directories commonly used for staging by the Curly COMrades group.
+// False Positives: Medium. Legitimate applications or scripts might use curl.exe to upload data from these locations.
+// It's important to verify the destination URL and the context of the execution.
+// Exclusions for known good processes or destinations may be necessary.
+// MITRE ATT&CK: T1041, T1048
+
+let suspiciousFolders = dynamic([
+    @"c:\programdata\",
+    @"c:\users\public\documents\"
+]);
+DeviceProcessEvents
+// Look for curl.exe process executions
+| where ProcessVersionInfoOriginalFileName =~ "curl.exe" or FileName =~ "curl.exe"
+// Filter for command line flags indicative of data upload/exfiltration
+| where ProcessCommandLine has "--upload-file"
+    or ProcessCommandLine has " -T " // Shorthand for --upload-file
+    or (ProcessCommandLine has "-X" and ProcessCommandLine contains "POST")
+    or (ProcessCommandLine has "-d" and ProcessCommandLine contains "@") // POSTing data from a file
+// The actor was observed staging data in and exfiltrating from these folders.
+// This checks the working directory of the curl process.
+| where InitiatingProcessFolderPath has_any (suspiciousFolders)
+// FP Note: Legitimate tools may upload logs or data from these locations.
+// Consider adding exclusions for known parent processes or destination URLs if noise occurs.
+| extend Tactic = "Exfiltration", Technique = "T1048", Activity = "Data Exfiltration with cURL", SuspiciousEntity = InitiatingProcessFolderPath
+| project-reorder TimeGenerated, DeviceName, Tactic, Technique, Activity, SuspiciousEntity, ProcessCommandLine, InitiatingProcessCommandLine

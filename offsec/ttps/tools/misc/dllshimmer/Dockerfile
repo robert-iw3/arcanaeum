@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1
+ARG repo="docker.io" \
+    base_image="alpine:3.23" \
+    image_hash="1882fa4569e0c591ea092d3766c4893e19b8901a8e649de7067188aba3cc0679"
+
+FROM ${repo}/${base_image}@sha256:${image_hash} AS go-builder
+
+RUN \
+    apk add --no-cache -U \
+        build-base \
+        ca-certificates \
+        go \
+        mingw-w64-gcc \
+        mingw-w64-binutils
+
+COPY . .
+
+RUN \
+    go build -o dllshimmer; \
+    rm -rf /var/cache/apk/*
+
+FROM ${repo}/${base_image}@sha256:${image_hash}
+
+RUN apk add --no-cache -U \
+    bash \
+    mingw-w64-gcc \
+    mingw-w64-binutils
+
+COPY --from=go-builder /dllshimmer /usr/local/bin/
+
+CMD [ "bash" ]
+# dllshimmer -h

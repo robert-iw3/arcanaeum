@@ -1,0 +1,83 @@
+[
+  {
+    "type": "firewall",
+    "name": "Detect Exposed Docker API Exploitation Attempts",
+    "application": "**",
+    "direction": "out",
+    "protocol": "TCP",
+    "port": "2375",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects outbound connections to TCP port 2375 (unsecured Docker Engine API). Strong indicator of exploitation attempts against exposed Docker daemons (common in 2025-2026 malware campaigns exploiting misconfigurations or CVE-2025-9074). Note: Cannot filter specific API paths (/containers/create*, /images/create*); use Web Control for URI filtering if available. Baseline known-good source IPs to reduce FPs."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Suspicious Package Installation and Downloader in Containers",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"sh\" -v \"bash\" -v \"apk\" -v \"apt\" -v \"yum\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*curl*\"\n         Include -command_line \"*wget*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects shell processes (sh/bash) spawning package managers (apk/apt/yum) combined with downloaders (curl/wget) — classic TTP for malware deployment in compromised containers (e.g., cryptominers, backdoors in 2025 campaigns). Note: Container ID not trackable in ENS; applies to Linux endpoints. Tune for legitimate build scripts."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Persistence via SSH Keys or Cron Modifications",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"**\" }\n   }\n   Target {\n      Match FILE {\n         Include OBJECT_NAME { -v \"/root/.ssh/authorized_keys\" -v \"/etc/crontab\" -v \"/etc/cron.d/**\" -v \"/var/spool/cron/**\" }\n         Include -access \"WRITE,CREATE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects writes to SSH authorized_keys or cron files — primary persistence methods in Docker malware (e.g., appending attacker keys + cron jobs to block port 2375, as seen in 2025 exposed-API campaigns). Focuses on file ops; firewall changes (iptables/firewall-cmd) require process monitoring. Tune for admin activity."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Firewall Rule Modifications for Defense Evasion",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"firewall-cmd\" -v \"iptables\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n         Include -command_line \"*--add-rich-rule*\"\n         Include -command_line \"*--reload*\"\n         Include -command_line \"*-A INPUT*\"\n         Include -command_line \"*-p tcp*\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects firewall-cmd/iptables commands adding rules or reloading configs — used by Docker malware (2025 variants) to block port 2375 and deny access to other attackers. Limited to command-line monitoring on Linux. Tune for legitimate firewall management scripts."
+  },
+  {
+    "type": "firewall",
+    "name": "Detect Network Scanning to Suspicious Ports",
+    "application": "**",
+    "direction": "out",
+    "protocol": "TCP",
+    "port": "23,9222,2375",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects outbound connections to Telnet (23), Chrome Debug (9222), or Docker API (2375) ports — used by malware (e.g., 2025 Docker cryptojackers) for propagation/scanning exposed services. Baseline legitimate traffic to reduce FPs."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Masscan Execution for Network Scanning",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"masscan\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects masscan execution — commonly installed and used by Docker malware (2025 campaigns) for rapid internet-wide scanning of exposed ports (e.g., 2375). Very high-fidelity indicator of propagation activity."
+  },
+  {
+    "type": "firewall",
+    "name": "Detect Tor-Related C2 Communication",
+    "application": "**",
+    "direction": "out",
+    "protocol": "UDP",
+    "port": "53",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects outbound DNS queries (UDP 53) potentially resolving .onion domains for Tor-based C2 (widely used in 2025 Docker malware for miner/backdoor delivery). Specific .onion filtering not supported in ENS; use external DNS enrichment or proxy logs for precision."
+  },
+  {
+    "type": "expert",
+    "name": "Detect Torsocks Execution for C2",
+    "content": "Rule {\n   Reaction SCAN ACTOR_PROCESS ScanAction REPORT\n   Process {\n      Include OBJECT_NAME { -v \"torsocks\" }\n   }\n   Target {\n      Match PROCESS {\n         Include OBJECT_NAME { -v \"**\" }\n         Include -access \"CREATE\"\n      }\n   }\n}",
+    "action": "Report",
+    "severity": "High",
+    "enabled": true,
+    "description": "Detects torsocks execution — frequently installed by Docker malware (2025 variants) to proxy C2/mining traffic over Tor for anonymity. High-fidelity indicator of Tor-enabled persistence or exfiltration."
+  }
+]

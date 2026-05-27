@@ -1,0 +1,46 @@
+rule gcp_cloud_build_privilege_escalation {
+  meta:
+    author = "RW"
+    date = "2025-08-20"
+    description = "Detects a Google Cloud Build creation containing suspicious commands within its build steps. An attacker with the 'cloudbuild.builds.create' permission can submit a build with malicious code to execute commands on the build server, often to exfiltrate the credentials of the high-privileged Cloud Build Service Account."
+    false_positives = "Legitimate build steps that use tools like 'curl' or 'wget' to download dependencies or interact with external services. These may require filtering based on trusted domains or known script patterns."
+    tags = "attack.privilege_escalation, attack.execution, attack.t1059, attack.t1552.004, cloud, gcp"
+    tactic = "TA0004, TA0002"
+    technique = "T1059, T1552.004"
+
+  events:
+    $e.metadata.event_type = "GCP_AUDIT_LOG"
+    $e.security_result.action = "ALLOW"
+    // Event for Cloud Build creation, the entry point for this attack.
+    $e.metadata.product_name = "cloudbuild.googleapis.com"
+    $e.metadata.product_event_type = "google.devtools.cloudbuild.v1.CloudBuild.CreateBuild"
+
+    // Check for suspicious commands within any of the build steps' arguments.
+    // This looks for reverse shells, common exfil tools, or direct access to the token cache.
+    any step in $e.target.resource.attribute.build.steps: (
+      any arg in step.args: (
+        re.regex(arg, `(?i)(curl|wget|nc\s|\/bin\/(bash|sh|zsh)\s+-i|socket\.connect|\/root\/tokencache\/gsutil_token_cache)`)
+      )
+    )
+
+  outcome:
+    $risk_score = 75
+    $principal_ip = array_distinct($e.principal.ip)
+    $principal_user_id = array_distinct($e.principal.user.userid)
+    $target_project_id = array_distinct($e.target.resource.attribute.project_id)
+    $build_id = array_distinct($e.target.resource.attribute.id)
+    $method_name = array_distinct($e.metadata.product_event_type)
+
+    // Extract the specific arguments that matched the suspicious pattern for easier analysis.
+    $suspicious_args = array_distinct(
+      for $step in $e.target.resource.attribute.build.steps:
+        for $arg in $step.args:
+          if(re.regex($arg, `(?i)(curl|wget|nc\s|\/bin\/(bash|sh|zsh)\s+-i|socket\.connect|\/root\/tokencache\/gsutil_token_cache)`), $arg, "")
+    )
+
+    // Extract the full build steps for broader context.
+    $build_steps = array_distinct($e.target.resource.attribute.build.steps)
+
+  condition:
+    $e
+}
