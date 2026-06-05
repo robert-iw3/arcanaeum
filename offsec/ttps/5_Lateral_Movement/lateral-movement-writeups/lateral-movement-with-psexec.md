@@ -16,7 +16,7 @@ Let's connect from workstation `ws01` to the domain controller `dc01` with domai
 
 ## Observations
 
-The technique is noisy for at least a couple of reasons. Upon code execution, these are some well known artefacts that are left behind which will most likely get you flagged in an environment where SOC is present.
+The technique is noisy for at least a couple of reasons. Upon code execution, these are some well known artifacts that are left behind which will most likely get you flagged in an environment where SOC is present.
 
 A `psexesvc` service gets created on the remote system and below shows the process ancestry of your command shell:
 

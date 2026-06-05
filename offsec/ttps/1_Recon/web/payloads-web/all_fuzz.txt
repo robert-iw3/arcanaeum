@@ -44542,7 +44542,7 @@ bookmark/bookmarkdemo/bookmarkdemo/views/user/home.aspx
 source/dtcms.web/admin/settings/plugin_list.aspx
 class/system.web/test/mainsoft/nunitwebresources/servercontrolinclientsidecomment.aspx
 class/system.web/test/mainsoft/nunitwebresources/checkboxfield_bug595568_6.aspx
-solutions/business.o365starterintranet/provisioning/artefacts/page layouts/homepagelayout.aspx
+solutions/business.o365starterintranet/provisioning/artifacts/page layouts/homepagelayout.aspx
 class/system.web/test/mainsoft/nunitwebresources/tagwithexpressionwithinattribute.aspx
 source/dtcms.web/admin/settings/templet_file_edit.aspx
 packages/umbracocms.7.1.4/umbracofiles/umbraco/dialogs/notifications.aspx
@@ -44704,7 +44704,7 @@ class/system.web/test/mainsoft/nunitwebresources/xmldatasourcetest3.aspx
 class/system.web/test/standalone/md5passwordauth_bug601727/login.aspx
 src/senparc.weixin.mp.sample/senparc.weixin.mp.sample/wx/pay/index.aspx
 referencewebsite/umbraco/translation/default.aspx
-solutions/business.o365starterintranet/provisioning/artefacts/pages/home.aspx
+solutions/business.o365starterintranet/provisioning/artifacts/pages/home.aspx
 packages/umbracocms.7.1.4/umbracofiles/umbraco/logout.aspx
 u2/demos/u2-toolkit/webservice_odata_rest/how to create odata (rest) web service/u2_odata_webapplication/account/changepasswordsuccess.aspx
 tools/sandcastle 2.6.1062.1/presentation/vs2005/website/default.aspx
@@ -45130,7 +45130,7 @@ class/system.web/test/standalone/enableformsauthentication/test_05/default.aspx
 class/system.web/test/standalone/imagebutton/imagebutton-postback.aspx
 module/asc.api/asc.api.web.help/views/partners/getcurrentpartner.aspx
 source/dtcms.web/aspx/main/goods_show.aspx
-solutions/business.o365starterintranet/provisioning/artefacts/pages/recherche.aspx
+solutions/business.o365starterintranet/provisioning/artifacts/pages/recherche.aspx
 source/dtcms.web/admin/users/mail_template_edit.aspx
 aarhuswebdevcoop/umbraco/dialogs/viewaudittrail.aspx
 srp/controlroom/modules/setup/offeraddedit.aspx
@@ -45572,7 +45572,7 @@ source/dtcms.web/aspx/main/useramount.aspx
 2010/mvcappoffline/mvcappoffline/views/account/changepassword.aspx
 source/teacommerce.umbraco.application/views/giftcards/editgiftcard.aspx
 source/dtcms.web/api/oauth/renren/return_url.aspx
-solutions/business.o365starterintranet/provisioning/artefacts/page layouts/newspagelayout.aspx
+solutions/business.o365starterintranet/provisioning/artifacts/page layouts/newspagelayout.aspx
 class/system.web/test/standalone/htmlinputfile/htmlinputfile.aspx
 demo/umbraco/dialogs/insertmacro.aspx
 aarhuswebdevcoop/umbraco/settings/dictionaryitemlist.aspx
@@ -45744,7 +45744,7 @@ crm/sys_log_err.aspx
 srp/controlroom/modules/setup/eventaddwizard.aspx
 srp/controlroom/modules/reports/patronactivityreport.aspx
 2010/mvcrequestvalidation/mvcrequestvalidation/views/shared/error.aspx
-solutions/business.o365starterintranet/provisioning/artefacts/page layouts/searchpagelayout.aspx
+solutions/business.o365starterintranet/provisioning/artifacts/page layouts/searchpagelayout.aspx
 crm/reportform/compared/customer_type.aspx
 ui/web/images.aspx
 class/system.web/test/mainsoft/nunitwebresources/crosspageposting1.aspx
@@ -45956,7 +45956,7 @@ demo/umbraco/dialogs/exportdocumenttype.aspx
 ajaxcontroltoolkit.jasmine/suites/reorderlisttests/reorderlisttests.aspx
 source/siteserver.web/siteserver/cms/pageservicestl.aspx
 source/dtcms.web/api/oauth/qq/return_url.aspx
-solutions/business.o365starterintranet/provisioning/artefacts/pages/search.aspx
+solutions/business.o365starterintranet/provisioning/artifacts/pages/search.aspx
 aarhuswebdevcoop/umbraco/translation/preview.aspx
 chapter 01/1-2/apress.recipes.webapi/apress.recipes.webapi/account/resetpassword.aspx
 aarhuswebdevcoop/umbraco/publishstatus.aspx
@@ -46328,7 +46328,7 @@ crm/system/sys_role_authorized.aspx
 2009/mvcnestedmasterpagesdynamiccontent/mvcnestedmasterpagesdynamiccontent/views/account/changepassword.aspx
 aarhuswebdevcoop/umbraco/dialogs/inserttable.aspx
 source/siteserver.web/siteserver/cms/pagetablestylecontent.aspx
-solutions/business.o365starterintranet/provisioning/artefacts/pages/accueil.aspx
+solutions/business.o365starterintranet/provisioning/artifacts/pages/accueil.aspx
 source/siteserver.web/siteserver/cms/modalcontentattributes.aspx
 class/system.web/test/mainsoft/nunitwebresources/mastertypetest2.aspx
 module/asc.thrdparty/asc.thrdparty.web/google/googleoauthconnect.aspx
@@ -46337,7 +46337,7 @@ crm/personal/message/news_add.aspx
 code/examples/sitecore.ecommerce.website/layouts/system/visitoridentification.aspx
 source/siteserver.web/siteserver/weixin/pagestoreitem.aspx
 2009/mvcelmah/mvcelmah/views/account/register.aspx
-solutions/business.o365starterintranet/provisioning/artefacts/pages/searchdocuments.aspx
+solutions/business.o365starterintranet/provisioning/artifacts/pages/searchdocuments.aspx
 2009/mvcrenderwithparameters/mvcrenderwithparameters/views/account/changepassword.aspx
 source/siteserver.web/siteserver/cms/pageconfigurationcreatetrigger.aspx
 class/system.web/test/standalone/masterpages/title/page.aspx
@@ -46614,7 +46614,7 @@ class/system.web/test/standalone/exception/exception.aspx
 2010/mvccontrollerinjection/mvccontrollerinjection/views/account/changepasswordsuccess.aspx
 crm/crm/customer/customer_contact.aspx
 srp/controlroom/modules/setup/mgcodebreakerkeysetup.aspx
-solutions/business.o365starterintranet/provisioning/artefacts/page layouts/staticpagelayout.aspx
+solutions/business.o365starterintranet/provisioning/artifacts/page layouts/staticpagelayout.aspx
 packages/umbracocms.7.1.4/umbracofiles/umbraco/dialogs/viewaudittrail.aspx
 referencewebsite/umbraco/dashboard/feedproxy.aspx
 2010/mvccontrollerinjection/mvccontrollerinjection/views/shared/error.aspx
@@ -46911,7 +46911,7 @@ ajaxcontroltoolkit.samplesite/alwaysvisiblecontrol/alwaysvisiblecontrol.aspx
 code/examples/sitecore.ecommerce.website/layouts/ecommerce/examples/check out process/pagemain.aspx
 source/siteserver.web/siteserver/weixin/pageservice.aspx
 demo/umbraco/dialogs/insertmasterpagecontent.aspx
-solutions/business.o365starterintranet/provisioning/artefacts/pages/recherchedocuments.aspx
+solutions/business.o365starterintranet/provisioning/artifacts/pages/recherchedocuments.aspx
 class/system.web/test/standalone/applicationprestartmethods/test_07/applicationprestartmethods/default.aspx
 2010/globalajaxerrorhandling/globalajaxerrorhandling/views/account/changepasswordsuccess.aspx
 2009/mvclocal/views/account/changepasswordsuccess.aspx
@@ -47765,7 +47765,7 @@ dueÃ±o.aspx
 web/umbraco/dialogs/create.aspx
 demo/pageddatalist.aspx
 src/subtext.web/aspx/admin/errorlog.aspx
-solutions/business.starterintranet/provisioning/artefacts/pages/home.aspx
+solutions/business.starterintranet/provisioning/artifacts/pages/home.aspx
 binsrc/tutorial/hosting/ho_s_6/web_radiobutton.aspx
 class/system.web.extensions/test/aut/system.web.ui.updatepanel.updatemode/updatepanelupdatemodecs.aspx
 referencewebsiteumbraco7/umbraco/clientredirect.aspx
@@ -47919,7 +47919,7 @@ app/webroot/js/vendors/fckeditor/editor/filemanager/connectors/aspx/upload.aspx
 cwsstart.web/cwsstart.web/umbraco/developer/packages/editpackage.aspx
 nicbell.ucreate.test/umbraco/dashboard/usercontrolproxy.aspx
 src/mvccontrib/ui/inputbuilder/views/inputbuilders/radiobuttons.aspx
-solutions/business.starterintranet/provisioning/artefacts/page layouts/homepagelayout.aspx
+solutions/business.starterintranet/provisioning/artifacts/page layouts/homepagelayout.aspx
 source/dtcms.web/admin/business/store_allot_order.aspx
 branches/2010.11.001/mvc/projecttrackermvc/projecttrackermvc/views/account/changepassword.aspx
 website/asp.net code/customer/customerhome.aspx
@@ -49369,7 +49369,7 @@ aarhusweb/aarhusweb/umbraco/developer/python/editpython.aspx
 samples/adventureworks/generated/nettiers.adventureworks.website/admin/employee.aspx
 ext.net.examples/examples/toolbar/statusbar/advanced/default.aspx
 site/umbraco/dialogs/inserttable.aspx
-solutions/business.starterintranet/provisioning/artefacts/pages/searchdocuments.aspx
+solutions/business.starterintranet/provisioning/artifacts/pages/searchdocuments.aspx
 examples.gridweb/csharp/worksheets/renameworksheets.aspx
 dp2libraryxe/opac_app/chat.aspx
 extrememotionsdk/win32/samples/unity/visualskeletonsample/bin/visualskeletonsample_data/mono/etc/mono/1.0/defaultwsdlhelpgenerator.aspx
@@ -49898,7 +49898,7 @@ swfupload/swfupload v2.2.0.1 samples/demos/applicationdemo.net/default.aspx
 site/modules/subsystems/svo/default.aspx
 aarhusweb/packages/umbracocms.7.2.8/umbracofiles/umbraco/treeinit.aspx
 webformstest.web/default.aspx
-solutions/business.starterintranet/provisioning/artefacts/page layouts/searchpagelayout.aspx
+solutions/business.starterintranet/provisioning/artifacts/page layouts/searchpagelayout.aspx
 bulletinreader/admin/articlesedit.aspx
 crm/crm/consexam/cestage_category_add.aspx
 02. asp.net-web-forms-intro/demos/viewstatedemo/viewstatedemo.aspx
@@ -50189,7 +50189,7 @@ class/system.web/test/mainsoft/mainsoftwebapp/system_web_ui_webcontrols/webcontr
 dnn 7/options.aspx
 auditoriaparlamentar/revisaogrid.aspx
 admin/profile.aspx
-solutions/business.starterintranet/provisioning/artefacts/pages/accueil.aspx
+solutions/business.starterintranet/provisioning/artifacts/pages/accueil.aspx
 precompiledweb/gsa-simulator/cookiecracker.aspx
 06. asp.net-datasource-controls/demo/efdatasourceeditablelistview/productseditor.aspx
 sp.sitecreatorweb/pages/default.aspx
@@ -50874,7 +50874,7 @@ beginnerangularo365/example 1/index.aspx
 pages/ordercomplete.aspx
 source/extant/extant.web/views/account/changepassword.aspx
 referencewebsiteumbraco7/umbraco/umbraco.aspx
-solutions/business.starterintranet/provisioning/artefacts/pages/recherche.aspx
+solutions/business.starterintranet/provisioning/artifacts/pages/recherche.aspx
 grapefruitstore/views/store/deletedepartment.aspx
 site/umbraco/dialogs/about.aspx
 hri/umbraco/translation/preview.aspx
@@ -50898,7 +50898,7 @@ src/uifs/ajax.aspx
 asp.net web forms/exam/webformsexam16/playlists/account/twofactorauthenticationsignin.aspx
 webpreview/website/default.aspx
 dp2libraryxe/opac_app/getsummary.aspx
-solutions/business.starterintranet/provisioning/artefacts/pages/search.aspx
+solutions/business.starterintranet/provisioning/artifacts/pages/search.aspx
 class/system.web/test/mainsoft/mainsoftwebapp/system_web_ui/control/control_viewstate.aspx
 source/dtcms.web/admin/dialog/dialog_check_cost_invoiced.aspx
 socialcde_v0.23/it.uniba.di.cdg.socialtfs.proxyserver/adminpanel/default.aspx
@@ -50974,7 +50974,7 @@ ext.net.examples/examples/layout/borderlayout/complex_in_markup/default.aspx
 source/siteserver.web/siteserver/settings/pageloguser.aspx
 src/our.umbraco.ditflo.web/umbraco/settings/views/editview.aspx
 webblocks/webblocks.sandboxv6/umbraco/dialogs/exportdocumenttype.aspx
-solutions/business.starterintranet/provisioning/artefacts/page layouts/staticpagelayout.aspx
+solutions/business.starterintranet/provisioning/artifacts/page layouts/staticpagelayout.aspx
 class/system.web.extensions/test/aut/system.web.ui.comparevalidator/updatepanelwizardvalidatorscs.aspx
 ext.net.examples/examples/treepanel/basic/refresh_static_tree/default.aspx
 commercemanager/apps/metadatabase/pages/admin/identifieredit.aspx
@@ -51147,7 +51147,7 @@ examples.gridweb/csharp/miscellaneous/format/applynumberformats.aspx
 connect-web/src/main/webapp/components/jquery-xheditor/demos/upload.aspx
 samples/adventureworks/generated/nettiers.adventureworks.website/admin/salesperson.aspx
 new/demos/linq2twitterdemos_webforms/account/manage.aspx
-solutions/business.starterintranet/provisioning/artefacts/page layouts/newspagelayout.aspx
+solutions/business.starterintranet/provisioning/artifacts/page layouts/newspagelayout.aspx
 source/extant/extant.web/views/study/bydiseasearea.aspx
 referencewebsiteumbraco7/umbraco/actions/delete.aspx
 crm/crm/building/building.aspx
@@ -51490,7 +51490,7 @@ examples/demowebsite/gdal.aspx
 larais.nugetserver/src/nuget.server/default.aspx
 src/db-4.8.30.nc/docs/csharp/loadindexkeywords.aspx
 source/siteserver.web/siteserver/cms/modaltagstylegovinteractqueryadd.aspx
-solutions/business.starterintranet/provisioning/artefacts/pages/recherchedocuments.aspx
+solutions/business.starterintranet/provisioning/artifacts/pages/recherchedocuments.aspx
 dp2installer/opac_app/reservationinfo.aspx
 ui.web/account/register.aspx
 umbraco.examine.linq.sandbox/umbraco/tree.aspx
@@ -54491,7 +54491,7 @@ global/reports/historicoaluno.aspx
 trunk/src/web.ui/views/categoryinfo/editcategoryinfo.aspx
 cmsweb/contributionreports/totalsbyfundagerange.aspx
 surveydesign/kcsjsgt/appmain/appinfoprj.aspx
-source/gsoft.dynamite.publishing.sp/artefacts/pagelayouts/onecolumnwithheader.aspx
+source/gsoft.dynamite.publishing.sp/artifacts/pagelayouts/onecolumnwithheader.aspx
 project_files/frmprofileprocsall.aspx
 trunk/tools/asp.net mvc 2/trunk/test/mvcresttest/views/edmmovies/create.aspx
 kendoui/trial/wrappers/aspnetmvc/examples/areas/aspx/views/web/editor/styles.aspx
@@ -56814,7 +56814,7 @@ libmediainfo_0.7.83/mediainfolib/project/mscs2008/asp_net_web_application/defaul
 webforms/exam/youtubeplaylist/private/profilepage.aspx
 src/notely/notely.web.ui.client/umbraco/dashboard/feedproxy.aspx
 librarymanager/librarymanager/account/registerexternallogin.aspx
-source/gsoft.dynamite.publishing.sp/artefacts/pagelayouts/bootstrapthreecolumns.aspx
+source/gsoft.dynamite.publishing.sp/artifacts/pagelayouts/bootstrapthreecolumns.aspx
 openlawoffice.webclient/views/billingrates/create.aspx
 source/sensenet/website/root/sites/default_site/(apps)/forumtopic/browse.aspx
 myorun/boxonstick_data/mono/etc/mono/1.0/defaultwsdlhelpgenerator.aspx
@@ -62884,7 +62884,7 @@ cms/cmsmodules/groups/tools/medialibrary/library_edit_general.aspx
 entcms.web/manage/logout.aspx
 web blocks/webblocks.sandbox/umbraco/actions/delete.aspx
 umbracolatest/umbraco/js/language.aspx
-source/gsoft.dynamite.publishing.sp/artefacts/pagelayouts/bootstraponecolumn.aspx
+source/gsoft.dynamite.publishing.sp/artifacts/pagelayouts/bootstraponecolumn.aspx
 hydrodatainfo/db_update/default.aspx
 sharingserviceweb/tileservicesampleold.aspx
 code/4/storagesearch/storagesearch/account/register.aspx
@@ -63798,7 +63798,7 @@ src/umbraco/umbraco/users/editusertype.aspx
 hsoft.clientmanager.web/pages/unbouncereceiver.aspx
 webforms/webcontrols/webformscontrols/webformscontrols.webformsclient/account/addphonenumber.aspx
 invertwebcloud/articles.aspx
-source/gsoft.dynamite.publishing.sp/artefacts/pagelayouts/catalogitempagelayout.aspx
+source/gsoft.dynamite.publishing.sp/artifacts/pagelayouts/catalogitempagelayout.aspx
 asp .net web forms/1.introduction to asp.net/2.sumnumbers/sumnumbers/account/register.aspx
 agent lead spanish/akmii.dmra.web/mdpages/agentpotential.aspx
 trunk/src/web.ui/obj/debug/package/packagetmp/views/countryadvice/edit.aspx
@@ -64661,7 +64661,7 @@ macapp.app/contents/data/managed/etc/mono/1.0/defaultwsdlhelpgenerator.aspx
 src/journeywithumbraco1/journeywithumbraco1/umbraco/developer/xslt/xsltchooseextension.aspx
 __testprojects/hashtab.membership.client.web/contact.aspx
 shareboot-mul.aspx
-source/gsoft.dynamite.publishing.sp/artefacts/pagelayouts/rightsidebar.aspx
+source/gsoft.dynamite.publishing.sp/artifacts/pagelayouts/rightsidebar.aspx
 usta.webapplication/student/experimentsandschoolworksmanage.aspx
 hri/packages/umbracocms.7.1.4/umbracofiles/config/splashes/nonodes.aspx
 solution/chiro.gap.webapp/views/categorieen/index.aspx
@@ -69641,7 +69641,7 @@ surveydesign/jsdw/applyjgys/projectfile/zlaqjdbaform.aspx
 scatterjam2015/sky_scraper.app/contents/data/managed/etc/mono/1.0/defaultwsdlhelpgenerator.aspx
 caisis/caisis.ui/core/eforms/patienteformlist.aspx
 hcmute-dashboard/public/assets/global/plugins/rateit/example/rateit.aspx
-source/gsoft.dynamite.publishing.sp/artefacts/pagelayouts/bootstraprightsidebar.aspx
+source/gsoft.dynamite.publishing.sp/artifacts/pagelayouts/bootstraprightsidebar.aspx
 src/umbraco/umbraco/plugins/tinymce3/tinymce3tinymcecompress.aspx
 openlawoffice.webclient/views/expenses/create.aspx
 kooboo.cms/kooboo.cms.modulearea/areas/sites/views/label/edit.aspx
@@ -71455,7 +71455,7 @@ homeworks/asp.net web forms/03.asp.netwebcontrolsandhtmlcontrols/escaping/index.
 commencement.mvc/views/retroactive/details.aspx
 uppercash.net/obj/release/package/packagetmp/template.aspx
 2d-platformer/temp/stagingarea/blockymac.app/contents/data/managed/etc/mono/1.0/defaultwsdlhelpgenerator.aspx
-source/gsoft.dynamite.publishing.sp/artefacts/pagelayouts/onecolumnwiththreetabs.aspx
+source/gsoft.dynamite.publishing.sp/artifacts/pagelayouts/onecolumnwiththreetabs.aspx
 source/packages/umbracocms.7.4.0/umbracofiles/umbraco/settings/stylesheet/editstylesheet.aspx
 portfolio/portfolio/account/addphonenumber.aspx
 cranealert/cranealert/role/roleradd.aspx
@@ -74288,7 +74288,7 @@ src/umbracotestsite/umbraco/dialogs/republish.aspx
 promotiongrouplist.aspx
 projects/abastecimientos/crystal reports backup files/frmcreaplantillacontratoslg.aspx
 structuremappingyourwaytobettersoftware/trycatchfail.learnstructuremap/trycatchfail.learnstructuremap.lesson3.webforms/account/changepassword.aspx
-source/gsoft.dynamite.publishing.sp/artefacts/pagelayouts/targetitempagelayout.aspx
+source/gsoft.dynamite.publishing.sp/artifacts/pagelayouts/targetitempagelayout.aspx
 public/js/fusioncharts/code/vb_net/export/automated.aspx
 samples/samplewebsite/test/driverpage.aspx
 asp.net-web-forms/exam/2014-newssite/exam-2014-newssite/viewarticle.aspx
@@ -74565,7 +74565,7 @@ s_dw_continuous_deployment_test/admin/public/newsletterv3/task.aspx
 membersinfo.aspx
 new unity project 1/lol_data/mono/etc/mono/1.0/defaultwsdlhelpgenerator.aspx
 project_files/_vti_cnf/frmmainorglocind.aspx
-source/gsoft.dynamite.publishing.sp/artefacts/pagelayouts/twocolumnsonecolumn.aspx
+source/gsoft.dynamite.publishing.sp/artifacts/pagelayouts/twocolumnsonecolumn.aspx
 daffodil_pos 08.04.07/backup/client/purchase/openingbalance.aspx
 moviecatalog/obj/debug/package/packagetmp/default.aspx
 austfeed/modules/baohiem/biendongbaohiem/quanlybiendongbaohiem.aspx
@@ -83027,7 +83027,7 @@ venice/venice-web/src/main/webapp/fusionchartsfree/code/vbnet/db_drilldown/detai
 webnoteaop/webnoteaop/views/home/index.aspx
 web development/asp.net web forms/02. intro to web forms/02. introtowebforms/02. assemblylocation/about.aspx
 modules/csom/demo/serversidecsom/serversidecsomweb/pages/default.aspx
-source/gsoft.dynamite.publishing.sp/artefacts/pagelayouts/bootstrapleftsidebar.aspx
+source/gsoft.dynamite.publishing.sp/artifacts/pagelayouts/bootstrapleftsidebar.aspx
 source/differencemaker.adminui/printview.aspx
 crm/data/system/sys_menu_add.aspx
 workflow/systems/sys_flowdisplay.aspx
@@ -83081,7 +83081,7 @@ project_files/frmstartasp.aspx
 executable/pong.app/contents/data/managed/etc/mono/2.0/defaultwsdlhelpgenerator.aspx
 ufluentexample/umbraco/users/editusertype.aspx
 questions/007.aspx
-solutions/business.starterintranet/provisioning/artefacts/page layouts/eventpagelayout.aspx
+solutions/business.starterintranet/provisioning/artifacts/page layouts/eventpagelayout.aspx
 admin/_paymentslist.aspx
 web/rssfeed.aspx
 src/examples/treepanel/basic/custom_drop_logic/default.aspx
@@ -89042,7 +89042,7 @@ nfficiency/nfficiency_plagiarism_checker/final project/rdimagegallery_webrole/ob
 v1/inventory/issuereturnprint.aspx
 classlistphotos/photofromid.aspx
 wingtiptoys/about.aspx
-source/gsoft.dynamite.publishing.sp/artefacts/pagelayouts/catalogcategorypagetemplate.aspx
+source/gsoft.dynamite.publishing.sp/artifacts/pagelayouts/catalogcategorypagetemplate.aspx
 src/backup/subtext.web/aspx/hostadmin/changepassword.aspx
 09.asp.net-state-management/05.visitscounterappobject/default.aspx
 src/testsite76/umbraco/plugins/tinymce3/insertmacro.aspx
@@ -103806,7 +103806,7 @@ old-201310/examples/net/2.0/tutorials/webapp/vb/src/webform1.aspx
 code/2/appsforazure/appsforazure/obj/release/package/packagetmp/default.aspx
 s_dw_continuous_deployment_test/admin/module/omc/experiments/setup.aspx
 project_files/frmsarev.aspx
-source/gsoft.dynamite.publishing.sp/artefacts/pagelayouts/bootstrapleftslimsidebar.aspx
+source/gsoft.dynamite.publishing.sp/artifacts/pagelayouts/bootstrapleftslimsidebar.aspx
 bll/obj/debug/tempbuilddir/productdetails.aspx
 aspintrohomework/account/resetpassword.aspx
 blog/xs.blog.webui/xsblog/album/photoview.aspx
@@ -104736,7 +104736,7 @@ old/security/default.aspx
 demo/controls.aspx
 hrm/hr-managment/employee/jobdetails.aspx
 modul-ii/01.high-quality-code/04.design-patterns/dii.net_sourcecode/complexcommerce/commerceweb/default.aspx
-source/gsoft.dynamite.publishing.sp/artefacts/pagelayouts/bootstraptwocolumns.aspx
+source/gsoft.dynamite.publishing.sp/artifacts/pagelayouts/bootstraptwocolumns.aspx
 src/sandbox.umbraco.index/umbraco/create.aspx
 src/sandbox.umbraco.index/umbraco/users/editusertype.aspx
 src/journeywithumbraco1/journeywithumbraco1/umbraco/members/viewmembers.aspx
@@ -105271,7 +105271,7 @@ usta.webapplication/administrator/editnormvalue.aspx
 playttt_data/mono/etc/mono/1.0/defaultwsdlhelpgenerator.aspx
 websites/abastecimientos/establecimientos/frmseleccionproductos.aspx
 cms/cmsmodules/content/attachments/directfileuploader/fileuploader.aspx
-solutions/business.starterintranet/provisioning/artefacts/pages/recherchepersonnes.aspx
+solutions/business.starterintranet/provisioning/artifacts/pages/recherchepersonnes.aspx
 src/merchello.implementation.ui/umbraco/dialogs/mediapicker.aspx
 builds/multiplayer demo_data/mono/etc/mono/1.0/defaultwsdlhelpgenerator.aspx
 bvmodules/themes/foundation4 responsive/pages/myaccount_addressbook_new.aspx
@@ -111179,7 +111179,7 @@ konstantinov denis/labs/Ð°ÑÑƒ_ÑÐºÐ»Ð°Ð´/ÑÐºÐ»Ð°Ð´/a
 rarticulos_tprecios.aspx
 src/backup/subtext.web/aspx/hostadmin/errorlog.aspx
 ext.net.community/ext.net.examples/examples/tabpanel/basic/ajax_load/default.aspx
-source/gsoft.dynamite.publishing.sp/artefacts/pagelayouts/bootstrapfourcolumns.aspx
+source/gsoft.dynamite.publishing.sp/artifacts/pagelayouts/bootstrapfourcolumns.aspx
 managementweb/default.aspx
 cms/cmsmodules/settings/pages/getsettings.aspx
 rxjs.website/account/changepasswordsuccess.aspx
@@ -115425,7 +115425,7 @@ src/testwebsite/webforms/modelbinding/edit.aspx
 surveydesign/government/appjgys/aindex.aspx
 source/packages/umbracocms.7.3.0/umbracofiles/umbraco/plugins/tinymce3/insertanchor.aspx
 src/boilerplate/umbraco/settings/stylesheet/editstylesheet.aspx
-solutions/business.starterintranet/provisioning/artefacts/pages/searchpeople.aspx
+solutions/business.starterintranet/provisioning/artifacts/pages/searchpeople.aspx
 src/static/assets/global/plugins/rateit/example/rateit.aspx
 source/packages/umbracocms.7.4.0/umbracofiles/umbraco/plugins/tinymce3/insertchar.aspx
 c1/composite/content/views/relationshipgraph/default.aspx
@@ -117478,7 +117478,7 @@ bsap_ui_webforms/bsap_ui_webforms/session_details.aspx
 sitio-viejo/septiembre/03_septiembre/views/avisodeprivacidad/index.aspx
 coopreportingapp/student/profile.aspx
 gringlobal.web/feedback/admin/formeditor.aspx
-source/gsoft.dynamite.publishing.sp/artefacts/pagelayouts/bootstraprightslimsidebar.aspx
+source/gsoft.dynamite.publishing.sp/artifacts/pagelayouts/bootstraprightslimsidebar.aspx
 ext.net.community/ext.net.examples/examples/miscellaneous/progressbar/client_side_update/default.aspx
 src/boilerplate/umbraco/dashboard.aspx
 asp.net-web-forms/01. introduction-to-asp.net/asp.net web forms application/account/resetpassword.aspx

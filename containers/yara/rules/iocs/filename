@@ -3930,7 +3930,7 @@ Potato\.exe;65
 # Programs or scripts in C:\ProgramData folder (no sub folder)
 \\[Pp]rogram[Dd]ata\\[^\\"/:]{1,40}\.(EXE|DLL|exe|dll|bat|BAT|vbs|vbe|VBS|ps1|psm1)([^._\\\]A-Za-z]|$);70;(\[Discord\.exe\]|UserProfileMigrationService\.exe|\.exe\.textpad|\\\$WINDOWS\.~BT\\|Found legacy CopyFiles operation)
 
-# PostDump artefacts https://github.com/post-cyberlabs/Offensive_tools/tree/main/PostDump
+# PostDump artifacts https://github.com/post-cyberlabs/Offensive_tools/tree/main/PostDump
 :\\Temp\\yolo\.log;75
 \\PostDump\.exe;65
 

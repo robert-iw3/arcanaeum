@@ -3901,7 +3901,7 @@ arsphenamine
 art
 artal
 artefact
-artefacts
+artifacts
 artel
 artels
 artemisia

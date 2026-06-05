@@ -2,7 +2,7 @@
 
 It's possible to load in to memory and execute C# compiled binaries from within javascript and vbscript by using a technique called [DotNetToJscript](https://github.com/tyranid/DotNetToJScript) by James Forshaw.
 
-Since [SharpShooter](https://github.com/mdsecactivebreach/SharpShooter), [CactusTorch](https://github.com/mdsecactivebreach/CACTUSTORCH) and a couple of other offensive security tools are leveraging DotNetToJscript to execute the payloads in memory using C#, in this quick lab I wanted to simply use the DotNetToJscipt framework just to get a feel of the process and see if there are any easy to spot artefacts this technique leaves behind on the target system that could help defenders catch the attackers.
+Since [SharpShooter](https://github.com/mdsecactivebreach/SharpShooter), [CactusTorch](https://github.com/mdsecactivebreach/CACTUSTORCH) and a couple of other offensive security tools are leveraging DotNetToJscript to execute the payloads in memory using C#, in this quick lab I wanted to simply use the DotNetToJscipt framework just to get a feel of the process and see if there are any easy to spot artifacts this technique leaves behind on the target system that could help defenders catch the attackers.
 
 ## Compilation
 
@@ -61,7 +61,7 @@ Looking from the defensive point of view, it may be worth checking the environme
 
 Since .js or .vbs may be one of the payload delivery methods used in phishing using [file smuggling](file-smuggling-with-html-and-javascript.md) through browsers, you may also want to check your environment for wscript (or cscript or jscript) launching files scripts from the user's download folder which is the default browser download location.
 
-Know of any other hlepful artefacts? Let me know.
+Know of any other hlepful artifacts? Let me know.
 
 ## References
 

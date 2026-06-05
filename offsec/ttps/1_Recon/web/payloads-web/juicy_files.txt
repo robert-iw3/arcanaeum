@@ -27568,7 +27568,7 @@ arte
 arte-cultura
 artebox.js
 arteelazer
-artefacts.js
+artifacts.js
 arteixo
 artem2k.html
 artes

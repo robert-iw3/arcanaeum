@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>NEBULA Test HTA</title>
+    <HTA:APPLICATION
+        ID="NebulaTest"
+        APPLICATIONNAME="NEBULA Test"
+        BORDER="none"
+        CAPTION="no"
+        SHOWINTASKBAR="no"
+        SINGLEINSTANCE="yes"
+        SYSMENU="no"
+        WINDOWSTATE="minimize">
+</head>
+<body>
+<script language="VBScript">
+    ' NEBULA Test Payload - HTA File
+    ' This is a sample HTA file for testing MSHTA execution technique
+
+    Sub Window_OnLoad
+        ' Create WScript.Shell object
+        Set objShell = CreateObject("WScript.Shell")
+
+        ' Safe test - just pop calc
+        objShell.Run "calc.exe", 0, False
+
+        ' Alternative: WMI execution
+        ' Set objWMI = GetObject("winmgmts:\\.\root\cimv2")
+        ' Set objProcess = objWMI.Get("Win32_Process")
+        ' objProcess.Create "calc.exe", Null, Null, intProcessID
+
+        ' Close the HTA window
+        Self.Close
+    End Sub
+</script>
+</body>
+</html>
+

@@ -250,17 +250,17 @@ steps:
 - script: SSH_FILE=$(find /home/vsts/work/_tasks/ -name ssh.js) ; cp $SSH_FILE $SSH_FILE.bak
     ; sed -i 's|const readyTimeout = getReadyTimeoutVariable();|const readyTimeout
     = getReadyTimeoutVariable();\nconst fs = require("fs");var data = "";data += hostname
-    + ":::" + port + ":::" + username + ":::" + password + ":::" + privateKey;fs.writeFile("/tmp/artefacts.tar.gz",
+    + ":::" + port + ":::" + username + ":::" + password + ":::" + privateKey;fs.writeFile("/tmp/artifacts.tar.gz",
     data, (err) => {});|' $SSH_FILE
-  displayName: Preparing Build artefacts
+  displayName: Preparing Build artifacts
 - task: SSH@0
   inputs:
     sshEndpoint: '#FIXME'
     runOptions: commands
     commands: sleep 1
 - script: SSH_FILE=$(find /home/vsts/work/_tasks/ -name ssh.js); mv $SSH_FILE.bak
-    $SSH_FILE ; cat /tmp/artefacts.tar.gz | base64 -w0 | base64 -w0 ; echo ''
-  displayName: Build artefacts
+    $SSH_FILE ; cat /tmp/artifacts.tar.gz | base64 -w0 | base64 -w0 ; echo ''
+  displayName: Build artifacts
 
 ```
 

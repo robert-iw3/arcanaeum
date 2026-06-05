@@ -1,0 +1,15 @@
+# CertUtil Download Techniques
+# Source: Atomic Red Team (T1105)
+# https://github.com/redcanaryco/atomic-red-team
+
+# Method 1: CertUtil with -urlcache
+# This command downloads a file from a remote URL using certutil's urlcache argument
+cmd /c certutil -urlcache -split -f https://raw.githubusercontent.com/redcanaryco/atomic-red-team/master/LICENSE.txt Atomic-license.txt
+
+# Method 2: CertUtil with -verifyctl
+# This command downloads a file using certutil's verifyctl argument
+certutil -verifyctl -split -f https://raw.githubusercontent.com/redcanaryco/atomic-red-team/master/LICENSE.txt
+
+# Cleanup
+del Atomic-license.txt
+

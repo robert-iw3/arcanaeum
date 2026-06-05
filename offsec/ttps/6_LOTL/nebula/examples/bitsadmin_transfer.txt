@@ -1,0 +1,16 @@
+# BITSAdmin Background Transfer Techniques
+# Source: Atomic Red Team (T1197)
+# https://github.com/redcanaryco/atomic-red-team
+
+# Method 1: BITSAdmin (Command Prompt)
+# This command uses bitsadmin to download a file in the background
+bitsadmin.exe /transfer /Download /priority Foreground https://raw.githubusercontent.com/redcanaryco/atomic-red-team/master/LICENSE.txt %temp%\bitsadmin_download.txt
+
+# Method 2: BITSAdmin (PowerShell)
+# Using PowerShell's Start-BitsTransfer cmdlet
+Start-BitsTransfer -Priority foreground -Source https://raw.githubusercontent.com/redcanaryco/atomic-red-team/master/LICENSE.txt -Destination $env:TEMP\bitsadmin_download.txt
+
+# Cleanup
+del %temp%\bitsadmin_download.txt
+Remove-Item $env:TEMP\bitsadmin_download.txt -ErrorAction Ignore
+

@@ -146,7 +146,7 @@ bool peconv::is_pe_raw(IN const BYTE* pe_buffer, IN size_t pe_size)
         return true;
     }
     if (is_pe_mapped(pe_buffer, pe_size)) {
-       // it has artefacts typical for a PE in a virtual alignment
+       // it has artifacts typical for a PE in a virtual alignment
         return false;
     }
     if (sec_hdrs_erased(pe_buffer, pe_size, true)) {

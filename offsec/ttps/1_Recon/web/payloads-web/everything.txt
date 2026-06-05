@@ -182080,7 +182080,7 @@
 /artefact
 /artefacto
 /artefactory
-/artefacts
+/artifacts
 /artefakt
 /artefatto
 /artefaur
