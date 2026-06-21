@@ -8,7 +8,7 @@ MODE=http
 TARGET=rest.vulnweb.com
 TOKEN=
 RESULT_DIR=./
-IMAGE=alpine:3.23
+IMAGE=alpine:3.24
 
 mkdir -p ${RESULT_DIR}nuclei
 

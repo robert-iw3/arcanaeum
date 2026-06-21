@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1
 # nuclei: Fast and customizable vulnerability scanner based on simple YAML based DSL.
 ARG repo="docker.io" \
-    base_image="alpine:3.23" \
-    image_hash="1882fa4569e0c591ea092d3766c4893e19b8901a8e649de7067188aba3cc0679"
+    base_image="alpine:3.24" \
+    image_hash="79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f"
 
 FROM ${repo}/${base_image}@sha256:${image_hash} AS go-builder
 
 ENV GOPATH=/usr/local/bin/go \
-    VER=3.4.5 \
+    VER=3.9.0 \
     SNYK_API=
 
 RUN \

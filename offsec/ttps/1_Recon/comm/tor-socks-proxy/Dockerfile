@@ -1,4 +1,4 @@
-FROM docker.io/alpine:3.23
+FROM docker.io/alpine:3.24
 
 RUN echo '@edge https://dl-cdn.alpinelinux.org/alpine/edge/community' >> /etc/apk/repositories ; \
     echo '@edge https://dl-cdn.alpinelinux.org/alpine/edge/testing'   >> /etc/apk/repositories ; \
