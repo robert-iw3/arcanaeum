@@ -194,6 +194,7 @@ class TestRenderTfvars:
             "ssl_certificate_arn",
             "vault_enabled",
             "consul_enabled",
+            "admin_cidr_blocks",
         }
         assert set(tfvars.keys()) == expected_keys
 

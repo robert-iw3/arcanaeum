@@ -7,8 +7,18 @@ resource "aws_security_group" "nomad_sg" {
     from_port   = 4646
     to_port     = 4646
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Nomad HTTP API/UI"
+    self        = true
+    description = "Nomad HTTP API (intra-cluster)"
+  }
+  dynamic "ingress" {
+    for_each = length(var.admin_cidr_blocks) > 0 ? [1] : []
+    content {
+      from_port   = 4646
+      to_port     = 4646
+      protocol    = "tcp"
+      cidr_blocks = var.admin_cidr_blocks
+      description = "Nomad HTTP API/UI (operators)"
+    }
   }
   ingress {
     from_port   = 4647
@@ -25,25 +35,31 @@ resource "aws_security_group" "nomad_sg" {
     description = "Nomad Serf"
   }
   ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "SSH access"
+    from_port   = 4648
+    to_port     = 4648
+    protocol    = "udp"
+    self        = true
+    description = "Nomad Serf (UDP)"
   }
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Podman CNI networking"
+  dynamic "ingress" {
+    for_each = length(var.admin_cidr_blocks) > 0 ? [1] : []
+    content {
+      from_port   = 22
+      to_port     = 22
+      protocol    = "tcp"
+      cidr_blocks = var.admin_cidr_blocks
+      description = "SSH (operators)"
+    }
   }
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Podman CNI networking"
+  dynamic "ingress" {
+    for_each = length(var.workload_ingress_cidr_blocks) > 0 ? [80, 443] : []
+    content {
+      from_port   = ingress.value
+      to_port     = ingress.value
+      protocol    = "tcp"
+      cidr_blocks = var.workload_ingress_cidr_blocks
+      description = "Workload ingress"
+    }
   }
   egress {
     from_port   = 0
@@ -75,7 +91,7 @@ resource "aws_iam_role_policy" "nomad_policy" {
   role = aws_iam_role.nomad_role.id
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
+    Statement = concat([
       {
         Effect = "Allow"
         Action = [
@@ -92,10 +108,46 @@ resource "aws_iam_role_policy" "nomad_policy" {
       },
       {
         Effect   = "Allow"
-        Action   = "kms:Decrypt"
+        Action   = ["kms:Decrypt", "kms:GenerateDataKey"]
         Resource = "*"
       }
-    ]
+      ], var.snapshot_s3_bucket != "" ? [
+      {
+        Effect   = "Allow"
+        Action   = "s3:PutObject"
+        Resource = "arn:aws:s3:::${var.snapshot_s3_bucket}/*"
+      }
+      ] : [], var.csi_enabled ? [
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateVolume",
+          "ec2:DeleteVolume",
+          "ec2:AttachVolume",
+          "ec2:DetachVolume",
+          "ec2:DescribeVolumes",
+          "ec2:DescribeVolumesModifications",
+          "ec2:ModifyVolume",
+          "ec2:CreateSnapshot",
+          "ec2:DeleteSnapshot",
+          "ec2:DescribeSnapshots",
+          "ec2:CreateTags",
+          "ec2:DescribeAvailabilityZones"
+        ]
+        Resource = "*"
+      }
+      ] : [], var.autoscaler_enabled ? [
+      {
+        Effect = "Allow"
+        Action = [
+          "autoscaling:UpdateAutoScalingGroup",
+          "autoscaling:TerminateInstanceInAutoScalingGroup",
+          "autoscaling:CreateOrUpdateTags",
+          "autoscaling:DescribeScalingActivities"
+        ]
+        Resource = "*"
+      }
+    ] : [])
   })
 }
 
@@ -114,13 +166,15 @@ resource "aws_launch_template" "nomad_lt" {
   vpc_security_group_ids = [aws_security_group.nomad_sg.id]
   key_name               = var.ssh_key_name
   user_data = base64encode(templatefile("${path.module}/user-data-${var.client_enabled ? "client" : "server"}.sh", {
-    cluster_name     = var.cluster_name
-    nomad_version    = var.nomad_version
-    secrets_arn      = var.secrets_arn
-    aws_region       = var.aws_region
-    desired_capacity = var.desired_capacity
-    podman_enabled   = var.podman_enabled
-    client_enabled   = var.client_enabled
+    cluster_name       = var.cluster_name
+    nomad_version      = var.nomad_version
+    secrets_arn        = var.secrets_arn
+    aws_region         = var.aws_region
+    desired_capacity   = var.desired_capacity
+    podman_enabled     = var.podman_enabled
+    client_enabled     = var.client_enabled
+    vault_address      = var.vault_address
+    snapshot_s3_bucket = var.snapshot_s3_bucket
   }))
   block_device_mappings {
     device_name = "/dev/sda1"

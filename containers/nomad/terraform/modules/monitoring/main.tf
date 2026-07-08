@@ -64,20 +64,23 @@ resource "aws_security_group" "monitoring_sg" {
   name_prefix = "${var.cluster_name}-monitoring-"
   vpc_id      = var.vpc_id
 
-  ingress {
-    from_port   = 9090
-    to_port     = 9090
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Prometheus access"
+  dynamic "ingress" {
+    for_each = length(var.admin_cidr_blocks) > 0 ? [9090, 3000, 443] : []
+    content {
+      from_port   = ingress.value
+      to_port     = ingress.value
+      protocol    = "tcp"
+      cidr_blocks = var.admin_cidr_blocks
+      description = "Prometheus/Grafana/ALB (operators)"
+    }
   }
 
   ingress {
     from_port   = 3000
     to_port     = 3000
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Grafana access"
+    self        = true
+    description = "ALB to Grafana target"
   }
 
   egress {

@@ -3,17 +3,19 @@
   include_tasks: prepare_host.yml
   tags: [prepare, install]
 
-- name: Generate TLS certificates for Nomad
-  include_tasks: certificates.yml
-  when: nomad_tls_enabled and nomad_tls_generate
-  tags: [configure, tls]
+- name: Apply host hardening baseline
+  include_tasks: hardening.yml
+  when: nomad_host_hardening_enabled
+  tags: [prepare, hardening]
 
-- name: Install and configure Vault client
-  include_tasks: vault.yml
-  when: nomad_vault_enabled
-  tags: [configure, vault]
+- name: Create Nomad group
+  group:
+    name: "{{ nomad_group }}"
+    system: yes
+  become: yes
+  tags: [prepare, configure]
 
-- name: Create Nomad user and group
+- name: Create Nomad user
   user:
     name: "{{ nomad_user }}"
     group: "{{ nomad_group }}"
@@ -21,7 +23,7 @@
     create_home: no
     shell: /sbin/nologin
   become: yes
-  tags: [configure]
+  tags: [prepare, configure]
 
 - name: Create Nomad directories
   file:
@@ -35,7 +37,17 @@
     - { path: "{{ nomad_data_dir }}", mode: "0700" }
     - { path: "{{ nomad_log_dir }}", mode: "0750" }
   become: yes
-  tags: [configure]
+  tags: [prepare, configure]
+
+- name: Generate TLS certificates for Nomad
+  include_tasks: certificates.yml
+  when: nomad_tls_enabled and nomad_tls_generate
+  tags: [configure, tls]
+
+- name: Install and configure Vault client
+  include_tasks: vault.yml
+  when: nomad_vault_enabled
+  tags: [configure, vault]
 
 - name: Look up the amd64/arm64 SHA256 checksum for this Nomad release
   set_fact:
@@ -80,30 +92,6 @@
   notify: Restart Nomad
   tags: [configure]
 
-- name: Deploy Nomad ACL configuration
-  template:
-    src: nomad-acl.hcl.j2
-    dest: "{{ nomad_config_dir }}/nomad-acl.hcl"
-    owner: "{{ nomad_user }}"
-    group: "{{ nomad_group }}"
-    mode: "0600"
-  become: yes
-  notify: Restart Nomad
-  when: nomad_acl_enabled
-  tags: [configure, acl]
-
-- name: Deploy Nomad Sentinel policy
-  template:
-    src: nomad-sentinel.hcl.j2
-    dest: "{{ nomad_config_dir }}/nomad-sentinel.hcl"
-    owner: "{{ nomad_user }}"
-    group: "{{ nomad_group }}"
-    mode: "0600"
-  become: yes
-  notify: Restart Nomad
-  when: nomad_acl_enabled and nomad_server_enabled
-  tags: [configure, acl]
-
 - name: Deploy Nomad ACL policy
   template:
     src: nomad-acl-policy.hcl.j2
@@ -145,22 +133,44 @@
   become: yes
   tags: [configure]
 
+- name: Apply pending restarts before validating
+  meta: flush_handlers
+
 - name: Wait for the local Nomad agent to answer the HTTP API
   uri:
-    url: "https://127.0.0.1:4646/v1/agent/health"
+    url: "https://{{ nomad_bind_addr }}:4646/v1/agent/health"
     validate_certs: no
     status_code: [200, 429, 500]
   register: nomad_health
-  until: nomad_health.status is defined
+  until: nomad_health.status | default(-1) in [200, 429, 500]
   retries: 30
   delay: 5
+  ignore_errors: yes
   tags: [validate]
+
+- name: Fail if the Nomad agent never became healthy
+  fail:
+    msg: "Nomad agent did not answer https://{{ nomad_bind_addr }}:4646/v1/agent/health after 150s"
+  when: nomad_health.status | default(-1) not in [200, 429, 500]
+  tags: [validate]
+
+- name: Wait for a Raft leader before touching ACLs
+  uri:
+    url: "https://{{ nomad_bind_addr }}:4646/v1/status/leader"
+    validate_certs: no
+    return_content: yes
+  register: nomad_leader
+  until: nomad_leader.content | default('') is search(':4647')
+  retries: 30
+  delay: 5
+  when: nomad_server_enabled
+  tags: [validate, acl]
 
 # Only the first server bootstraps; a second attempt fails and is treated as success for idempotency.
 - name: Bootstrap Nomad ACLs (first server only)
-  command: nomad acl bootstrap -json
+  command: "{{ nomad_install_dir }}/nomad acl bootstrap -json"
   environment:
-    NOMAD_ADDR: "https://127.0.0.1:4646"
+    NOMAD_ADDR: "https://{{ nomad_bind_addr }}:4646"
     NOMAD_CACERT: "{{ nomad_tls_ca_file }}"
   register: nomad_acl_bootstrap
   failed_when: >
@@ -185,10 +195,10 @@
 
 - name: Apply Nomad ACL policy
   command: >
-    nomad acl policy apply -token={{ nomad_bootstrap_token }}
+    {{ nomad_install_dir }}/nomad acl policy apply -token={{ nomad_bootstrap_token }}
     default {{ nomad_config_dir }}/nomad-acl-policy.hcl
   environment:
-    NOMAD_ADDR: "https://127.0.0.1:4646"
+    NOMAD_ADDR: "https://{{ nomad_bind_addr }}:4646"
     NOMAD_CACERT: "{{ nomad_tls_ca_file }}"
   when: >
     nomad_acl_enabled and nomad_server_enabled and
@@ -199,32 +209,48 @@
   no_log: true
   tags: [validate, acl]
 
-- name: Apply Nomad Sentinel policy
-  command: >
-    nomad acl policy apply -token={{ nomad_bootstrap_token }}
-    sentinel {{ nomad_config_dir }}/nomad-sentinel.hcl
-  environment:
-    NOMAD_ADDR: "https://127.0.0.1:4646"
-    NOMAD_CACERT: "{{ nomad_tls_ca_file }}"
-  when: >
-    nomad_acl_enabled and nomad_server_enabled and
-    inventory_hostname == groups['nomad_servers'][0] and
-    nomad_bootstrap_token is defined
+- name: Configure scheduled Raft snapshots
+  include_tasks: snapshots.yml
+  when: nomad_snapshot_enabled and nomad_server_enabled
+  tags: [configure, snapshots]
+
+- name: Check for a persisted management token
+  stat:
+    path: "{{ nomad_config_dir }}/mgmt.token"
+  register: nomad_mgmt_token_file
   become: yes
-  become_user: "{{ nomad_user }}"
+  tags: [validate]
+
+- name: Load management token for verification
+  slurp:
+    src: "{{ nomad_config_dir }}/mgmt.token"
+  register: nomad_mgmt_token_slurp
+  become: yes
   no_log: true
-  tags: [validate, acl]
+  when: nomad_mgmt_token_file.stat.exists
+  tags: [validate]
+
+- name: Resolve verification token
+  set_fact:
+    nomad_verify_token: >-
+      {{ nomad_bootstrap_token
+         | default((nomad_mgmt_token_slurp.content | b64decode | trim) if nomad_mgmt_token_file.stat.exists
+         else (hostvars[groups['nomad_servers'][0]]['nomad_bootstrap_token'] | default(''))) }}
+  no_log: true
+  tags: [validate]
 
 - name: Verify Nomad is running
-  command: nomad node status
+  command: "{{ nomad_install_dir }}/nomad node status"
   environment:
-    NOMAD_ADDR: "https://127.0.0.1:4646"
+    NOMAD_ADDR: "https://{{ nomad_bind_addr }}:4646"
     NOMAD_CACERT: "{{ nomad_tls_ca_file }}"
+    NOMAD_TOKEN: "{{ nomad_verify_token }}"
   register: nomad_status
   failed_when: nomad_status.rc != 0
   changed_when: false
   become: yes
   become_user: "{{ nomad_user }}"
+  when: not nomad_acl_enabled or nomad_verify_token | length > 0
   tags: [validate]
 
 - name: Verify Podman version compatibility
@@ -238,27 +264,33 @@
   tags: [validate, podman]
 
 - name: Verify Podman integration with Nomad
-  command: nomad node status -self
+  command: "{{ nomad_install_dir }}/nomad node status -self"
   environment:
-    NOMAD_ADDR: "https://127.0.0.1:4646"
+    NOMAD_ADDR: "https://{{ nomad_bind_addr }}:4646"
     NOMAD_CACERT: "{{ nomad_tls_ca_file }}"
+    NOMAD_TOKEN: "{{ nomad_verify_token }}"
   register: nomad_node_status
   failed_when: '"podman" not in nomad_node_status.stdout'
   changed_when: false
   become: yes
   become_user: "{{ nomad_user }}"
-  when: nomad_podman_enabled and nomad_client_enabled
+  when: >
+    nomad_podman_enabled and nomad_client_enabled and
+    (not nomad_acl_enabled or nomad_verify_token | length > 0)
   tags: [validate, podman]
 
 - name: Verify native service discovery
-  command: nomad service list
+  command: "{{ nomad_install_dir }}/nomad service list"
   environment:
-    NOMAD_ADDR: "https://127.0.0.1:4646"
+    NOMAD_ADDR: "https://{{ nomad_bind_addr }}:4646"
     NOMAD_CACERT: "{{ nomad_tls_ca_file }}"
+    NOMAD_TOKEN: "{{ nomad_verify_token }}"
   register: nomad_service_list
   failed_when: nomad_service_list.rc != 0
   changed_when: false
   become: yes
   become_user: "{{ nomad_user }}"
-  when: nomad_service_discovery_enabled
+  when: >
+    nomad_service_discovery_enabled and
+    (not nomad_acl_enabled or nomad_verify_token | length > 0)
   tags: [validate, service_discovery]

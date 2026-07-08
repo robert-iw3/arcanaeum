@@ -28,7 +28,7 @@ variable "vault_version" {
 }
 
 source "amazon-ebs" "nomad-podman" {
-  ami_name      = "nomad-consul-vault-ubuntu-${formatdate("YYYYMMDDHHMMSS", timestamp())}"
+  ami_name      = "nomad-consul-vault-ubuntu-${formatdate("YYYYMMDDhhmmss", timestamp())}"
   instance_type = "t3.medium"
   region        = var.aws_region
   source_ami_filter {
@@ -72,29 +72,29 @@ build {
       "sudo chown -R nomad:nomad /home/nomad/.config",
       "sudo chmod -R 0600 /home/nomad/.config",
 
-      "cd /tmp && curl -fsSLO https://releases.hashicorp.com/nomad/${NOMAD_VERSION}/nomad_${NOMAD_VERSION}_linux_amd64.zip",
-      "cd /tmp && curl -fsSLO https://releases.hashicorp.com/nomad/${NOMAD_VERSION}/nomad_${NOMAD_VERSION}_SHA256SUMS",
-      "cd /tmp && grep \"nomad_${NOMAD_VERSION}_linux_amd64.zip\" nomad_${NOMAD_VERSION}_SHA256SUMS | sha256sum -c -",
-      "sudo unzip /tmp/nomad_${NOMAD_VERSION}_linux_amd64.zip -d /usr/local/bin",
+      "cd /tmp && curl -fsSLO https://releases.hashicorp.com/nomad/$${NOMAD_VERSION}/nomad_$${NOMAD_VERSION}_linux_amd64.zip",
+      "cd /tmp && curl -fsSLO https://releases.hashicorp.com/nomad/$${NOMAD_VERSION}/nomad_$${NOMAD_VERSION}_SHA256SUMS",
+      "cd /tmp && grep \"nomad_$${NOMAD_VERSION}_linux_amd64.zip\" nomad_$${NOMAD_VERSION}_SHA256SUMS | sha256sum -c -",
+      "sudo unzip /tmp/nomad_$${NOMAD_VERSION}_linux_amd64.zip -d /usr/local/bin",
       "sudo chmod 0750 /usr/local/bin/nomad",
       "sudo chown nomad:nomad /usr/local/bin/nomad",
-      "sudo /usr/local/bin/nomad --version | grep \"${NOMAD_VERSION}\" || exit 1",
+      "sudo /usr/local/bin/nomad --version | grep \"$${NOMAD_VERSION}\" || exit 1",
 
-      "cd /tmp && curl -fsSLO https://releases.hashicorp.com/consul/${CONSUL_VERSION}/consul_${CONSUL_VERSION}_linux_amd64.zip",
-      "cd /tmp && curl -fsSLO https://releases.hashicorp.com/consul/${CONSUL_VERSION}/consul_${CONSUL_VERSION}_SHA256SUMS",
-      "cd /tmp && grep \"consul_${CONSUL_VERSION}_linux_amd64.zip\" consul_${CONSUL_VERSION}_SHA256SUMS | sha256sum -c -",
-      "sudo unzip /tmp/consul_${CONSUL_VERSION}_linux_amd64.zip -d /usr/local/bin",
+      "cd /tmp && curl -fsSLO https://releases.hashicorp.com/consul/$${CONSUL_VERSION}/consul_$${CONSUL_VERSION}_linux_amd64.zip",
+      "cd /tmp && curl -fsSLO https://releases.hashicorp.com/consul/$${CONSUL_VERSION}/consul_$${CONSUL_VERSION}_SHA256SUMS",
+      "cd /tmp && grep \"consul_$${CONSUL_VERSION}_linux_amd64.zip\" consul_$${CONSUL_VERSION}_SHA256SUMS | sha256sum -c -",
+      "sudo unzip /tmp/consul_$${CONSUL_VERSION}_linux_amd64.zip -d /usr/local/bin",
       "sudo chmod 0750 /usr/local/bin/consul",
       "sudo chown consul:consul /usr/local/bin/consul",
-      "sudo /usr/local/bin/consul --version | grep \"${CONSUL_VERSION}\" || exit 1",
+      "sudo /usr/local/bin/consul --version | grep \"$${CONSUL_VERSION}\" || exit 1",
 
-      "cd /tmp && curl -fsSLO https://releases.hashicorp.com/vault/${VAULT_VERSION}/vault_${VAULT_VERSION}_linux_amd64.zip",
-      "cd /tmp && curl -fsSLO https://releases.hashicorp.com/vault/${VAULT_VERSION}/vault_${VAULT_VERSION}_SHA256SUMS",
-      "cd /tmp && grep \"vault_${VAULT_VERSION}_linux_amd64.zip\" vault_${VAULT_VERSION}_SHA256SUMS | sha256sum -c -",
-      "sudo unzip /tmp/vault_${VAULT_VERSION}_linux_amd64.zip -d /usr/local/bin",
+      "cd /tmp && curl -fsSLO https://releases.hashicorp.com/vault/$${VAULT_VERSION}/vault_$${VAULT_VERSION}_linux_amd64.zip",
+      "cd /tmp && curl -fsSLO https://releases.hashicorp.com/vault/$${VAULT_VERSION}/vault_$${VAULT_VERSION}_SHA256SUMS",
+      "cd /tmp && grep \"vault_$${VAULT_VERSION}_linux_amd64.zip\" vault_$${VAULT_VERSION}_SHA256SUMS | sha256sum -c -",
+      "sudo unzip /tmp/vault_$${VAULT_VERSION}_linux_amd64.zip -d /usr/local/bin",
       "sudo chmod 0750 /usr/local/bin/vault",
       "sudo chown vault:vault /usr/local/bin/vault",
-      "sudo /usr/local/bin/vault --version | grep \"${VAULT_VERSION}\" || exit 1",
+      "sudo /usr/local/bin/vault --version | grep \"$${VAULT_VERSION}\" || exit 1",
 
       "sudo sysctl -w vm.max_map_count=262144",
       "sudo sysctl -w net.core.somaxconn=1024",

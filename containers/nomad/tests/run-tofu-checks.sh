@@ -43,4 +43,26 @@ for dir in "${tf_dirs[@]}"; do
   fi
 done
 
+mapfile -t pkr_dirs < <(find "$TARGET_DIR" -name "*.pkr.hcl" -exec dirname {} \; | sort -u)
+for dir in "${pkr_dirs[@]}"; do
+  echo "== packer: ${dir} =="
+
+  if ! packer fmt -check -diff "$dir"; then
+    echo "packer fmt found unformatted files in ${dir}"
+    FAILED=1
+  fi
+
+  if ! (cd "$dir" && packer init . >/tmp/packer-init.log 2>&1); then
+    echo "packer init failed in ${dir}:"
+    cat /tmp/packer-init.log
+    FAILED=1
+    continue
+  fi
+
+  if ! (cd "$dir" && packer validate .); then
+    echo "packer validate failed in ${dir}"
+    FAILED=1
+  fi
+done
+
 exit "$FAILED"

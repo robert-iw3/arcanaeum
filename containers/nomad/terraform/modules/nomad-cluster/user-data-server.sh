@@ -24,6 +24,7 @@ chmod 0750 /var/log/nomad
 # Retrieve secrets from AWS Secrets Manager
 export AWS_REGION=${aws_region}
 secrets=$(aws secretsmanager get-secret-value --secret-id ${secrets_arn} --query SecretString --output text)
+nomad_acl_token=$(echo $secrets | jq -r '.nomad_acl_token')
 nomad_gossip_key=$(echo $secrets | jq -r '.nomad_gossip_key')
 vault_token=$(echo $secrets | jq -r '.vault_token')
 
@@ -34,6 +35,18 @@ log_level = "INFO"
 bind_addr = "0.0.0.0"
 region = "global"
 datacenter = "dc1"
+tls {
+  http = true
+  rpc = true
+  ca_file = "/etc/nomad.d/ca.pem"
+  cert_file = "/etc/nomad.d/nomad-cert.pem"
+  key_file = "/etc/nomad.d/nomad-key.pem"
+}
+acl {
+  enabled = true
+  token_ttl = "30m"
+  policy_ttl = "3h"
+}
 server {
   enabled = true
   bootstrap_expect = ${desired_capacity}
@@ -41,46 +54,30 @@ server {
   server_join {
     retry_join = ["provider=aws tag_key=NomadType tag_value=server"]
   }
-  acl {
+}
+%{ if podman_enabled }
+plugin "nomad-driver-podman" {
+  config {
     enabled = true
-    token_ttl = "30m"
-    policy_ttl = "3h"
-    token_min_ttl = "10m"
-  }
-  tls {
-    http = true
-    rpc = true
-    ca_file = "/etc/nomad.d/ca.pem"
-    cert_file = "/etc/nomad.d/nomad-cert.pem"
-    key_file = "/etc/nomad.d/nomad-key.pem"
+    socket_path = "/run/user/1000/podman/podman.sock"
+    volumes_enabled = true
   }
 }
-client {
-  enabled = ${client_enabled}
-  servers = ["localhost:4647"]
-  plugin "nomad-driver-podman" {
-    config {
-      enabled = true
-      socket_path = "/run/user/1000/podman/podman.sock"
-      volumes_enabled = true
-    }
-  }
-}
+%{ endif }
+%{ if vault_address != "" }
 vault {
   enabled = true
-  address = "https://localhost:8200"
+  address = "${vault_address}"
   token = "$${vault_token}"
   create_from_role = "nomad-cluster"
 }
+%{ endif }
 telemetry {
   collection_interval = "1s"
   disable_hostname = true
   prometheus_metrics = true
   publish_allocation_metrics = true
   publish_node_metrics = true
-}
-service_discovery {
-  enabled = true
 }
 EOF
 chown nomad:nomad /etc/nomad.d/nomad.hcl
@@ -145,8 +142,39 @@ systemctl daemon-reload
 systemctl enable nomad
 systemctl start nomad
 
-# Bootstrap ACLs. Only the first server to reach this point succeeds; a second
-# attempt fails once ACLs are already bootstrapped, which is not fatal here.
-nomad acl bootstrap > /etc/nomad.d/acl-bootstrap.txt || true
-chown nomad:nomad /etc/nomad.d/acl-bootstrap.txt
-chmod 0600 /etc/nomad.d/acl-bootstrap.txt
+# Bootstrap ACLs with the operator-provided token from Secrets Manager so the
+# management token is identical cluster-wide and retrievable later. Only the
+# first server to reach a healthy leader succeeds; subsequent attempts fail
+# ("already bootstrapped"), which is expected.
+export NOMAD_ADDR=https://127.0.0.1:4646
+export NOMAD_CACERT=/etc/nomad.d/ca.pem
+until curl -s --cacert /etc/nomad.d/ca.pem https://127.0.0.1:4646/v1/status/leader | grep -q ':4647'; do
+  sleep 5
+done
+echo "$${nomad_acl_token}" > /etc/nomad.d/root-token
+chmod 0600 /etc/nomad.d/root-token
+nomad acl bootstrap /etc/nomad.d/root-token || true
+rm -f /etc/nomad.d/root-token
+
+%{ if snapshot_s3_bucket != "" }
+# Daily Raft snapshot from the current leader, shipped to S3
+cat <<'SNAP' > /usr/local/bin/nomad-snapshot.sh
+#!/bin/bash
+set -euo pipefail
+export NOMAD_ADDR=https://127.0.0.1:4646
+export NOMAD_CACERT=/etc/nomad.d/ca.pem
+local_ip=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+leader=$(curl -s --cacert /etc/nomad.d/ca.pem https://127.0.0.1:4646/v1/status/leader | tr -d '"' | cut -d: -f1)
+[ "$leader" = "$local_ip" ] || exit 0
+NOMAD_TOKEN=$(aws secretsmanager get-secret-value --secret-id SECRETS_ARN --query SecretString --output text | jq -r '.nomad_acl_token')
+export NOMAD_TOKEN
+snap="/tmp/nomad-$(date +%Y%m%d%H%M%S).snap"
+nomad operator snapshot save "$snap"
+aws s3 cp "$snap" "s3://SNAPSHOT_BUCKET/CLUSTER_NAME/"
+rm -f "$snap"
+SNAP
+sed -i "s|SECRETS_ARN|${secrets_arn}|; s|SNAPSHOT_BUCKET|${snapshot_s3_bucket}|; s|CLUSTER_NAME|${cluster_name}|" /usr/local/bin/nomad-snapshot.sh
+chmod 0700 /usr/local/bin/nomad-snapshot.sh
+echo "15 3 * * * root /usr/local/bin/nomad-snapshot.sh >> /var/log/nomad/snapshot.log 2>&1" > /etc/cron.d/nomad-snapshot
+chmod 0644 /etc/cron.d/nomad-snapshot
+%{ endif }

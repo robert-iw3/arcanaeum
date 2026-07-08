@@ -6,17 +6,24 @@ resource "aws_security_group" "consul_sg" {
 
   ingress {
     from_port   = 8500
-    to_port     = 8500
+    to_port     = 8503
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Consul HTTP API/UI"
+    cidr_blocks = concat(var.cluster_cidr_blocks, var.admin_cidr_blocks)
+    description = "Consul HTTP API/UI + gRPC (Connect) from cluster and operators"
   }
   ingress {
     from_port   = 8300
-    to_port     = 8300
+    to_port     = 8302
     protocol    = "tcp"
     self        = true
-    description = "Consul Server RPC"
+    description = "Consul Server RPC + Serf"
+  }
+  ingress {
+    from_port   = 8301
+    to_port     = 8302
+    protocol    = "udp"
+    self        = true
+    description = "Consul Serf (UDP)"
   }
   egress {
     from_port   = 0

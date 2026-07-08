@@ -31,8 +31,8 @@
 
 [CmdletBinding()]
 param(
-    [string]$StigManagerDomain   = $env:DOMAIN,                   # e.g. stigman.local or IP
-    [string]$CollectionName      = "Default-Collection",          # Exact collection name in STIG-Manager
+    [string]$StigManagerDomain   = $env:DOMAIN,                    # e.g. stigman.local or IP
+    [string]$CollectionName      = "Default-Collection",           # Exact collection name in STIG-Manager
     [string]$CollectionId        = "1",                            # Find in STIG-Manager UI → Collection → URL has /collection/{id}
     [string]$ClientId            = "evaluatestig",                 # Keycloak client ID (do not change unless you know what you're doing)
     [string]$KeycloakAdminUser   = "admin",
@@ -42,8 +42,8 @@ param(
     [string]$EvaluateStigPath    = "C:\Evaluate-STIG\Evaluate-STIG.ps1",  # Change if different
     [string]$KeystorePath        = "C:\Evaluate-STIG\keystore.p12",       # Download from Keycloak UI
     [string]$PemPath             = "C:\Evaluate-STIG\evaluatestig.pem",   # Generated unencrypted PEM
-    [string]$PreferencesPath     = "C:\Evaluate-STIG\preferences.xml",   # Auto-generated
-    [switch]$UseFileOutput                                               # Use for air-gapped → generates CKL + optional SCP
+    [string]$PreferencesPath     = "C:\Evaluate-STIG\preferences.xml",    # Auto-generated
+    [switch]$UseFileOutput                                                # Use for air-gapped → generates CKL + optional SCP
 )
 
 # Convert secure string to plain text (only in memory)

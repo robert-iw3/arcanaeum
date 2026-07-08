@@ -1,4 +1,4 @@
-FROM docker.io/python:3.13.2-alpine3.21
+FROM docker.io/python:3.13.12-alpine3.22
 WORKDIR /app
 COPY ../.env .
 RUN \

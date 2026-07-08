@@ -2,7 +2,7 @@
 
 ARG repo="docker.io" \
     base_image="oraclelinux:9-slim" \
-    image_hash="30b2aaacaf531642618dd15227102725de3351658d78c4d0ab6c2e14d215fbd4"
+    image_hash="b5ffe32a771787f88951851ff3916b51d6c7b7a3215c7955bc72bb8c0b0928db"
 
 FROM ${repo}/${base_image}@sha256:${image_hash} AS base
 
@@ -48,7 +48,7 @@ RUN \
 	rm -rf "$GNUPGHOME"
 
 ENV MYSQL_MAJOR 8.4
-ENV MYSQL_VERSION 8.4.4-1.el9
+ENV MYSQL_VERSION 8.4.10-1.el9
 
 RUN set -eu; \
 	{ \
@@ -99,7 +99,7 @@ RUN set -eu; \
 # https://github.com/docker-library/mysql/pull/680#issuecomment-825930524
 		echo 'module_hotfixes=true'; \
 	} | tee /etc/yum.repos.d/mysql-community-tools.repo
-ENV MYSQL_SHELL_VERSION 8.4.4-1.el9
+ENV MYSQL_SHELL_VERSION 8.4.9-1.el9
 RUN set -eux; \
 	microdnf install -y "mysql-shell-$MYSQL_SHELL_VERSION"; \
 	microdnf clean all; \
@@ -108,7 +108,7 @@ RUN set -eux; \
 
 VOLUME /var/lib/mysql
 
-COPY docker-entrypoint.sh /usr/local/bin/
+COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/
 ENTRYPOINT ["docker-entrypoint.sh"]
 
 EXPOSE 3306 33060

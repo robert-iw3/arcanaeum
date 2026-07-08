@@ -16,3 +16,10 @@
       nomad_server_enabled: false
       nomad_client_enabled: true
   tags: [nomad, clients]
+
+- name: Deploy monitoring stack
+  hosts: nomad_monitoring
+  become: yes
+  roles:
+    - role: monitoring
+  tags: [monitoring]

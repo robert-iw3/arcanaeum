@@ -1,9 +1,9 @@
 ## nomad
 
-Production-ready HashiCorp Nomad cluster deployment, supporting multiple hosts, multiple servers, and multiple provisioning avenues from a single config file.
+Production-ready HashiCorp Nomad cluster deployment, supporting multiple hosts, multiple servers, and multiple provisioning avenues from a single config file — plus a pipeline connector that ships containers from CI or a laptop straight into the cluster as running workloads.
 
 <p align="center">
-  <img src="docs/architecture.svg" alt="Nomad multi-host cluster architecture" width="900" />
+  <img src="docs/architecture.svg" alt="Nomad system topology: ports and data flows" width="1000" />
 </p>
 
 ### Layout
@@ -13,13 +13,17 @@ nomad/
 ├── deploy.py                  # single entry point: renders inventory/tfvars from cluster.yml, then invokes the right avenue
 ├── cluster.yml.example        # copy to cluster.yml and edit
 ├── ansible/                   # avenue: bare metal / on-prem VMs / anything reachable over SSH
-│   └── roles/nomad/           # TLS (shared CA), ACLs, gossip encryption, Vault integration, Podman
+│   └── roles/
+│       ├── nomad/             # TLS (shared CA), ACLs, gossip encryption, Vault, snapshots, opt-in hardening
+│       └── monitoring/        # Prometheus + Grafana + Alertmanager (podman/systemd) with Nomad alert rules
 ├── terraform/                 # avenue: AWS, multi-region (primary + secondary)
-│   ├── modules/               # vpc, nomad-cluster, consul-cluster, vault-cluster, monitoring
-│   └── packer/                # pre-baked AMI with Nomad/Consul/Vault + Podman preinstalled
-├── baremetal/                 # avenue: single-host quickstart, or a local libvirt/vSphere multi-VM test cluster via Vagrant
-├── examples/jobs/             # example Nomad job specs (Consul Connect, fluent-bit sidecar)
-└── tests/                     # tofu/tflint validation Dockerfile + static test suite
+│   ├── modules/               # vpc, nomad-cluster, consul-cluster, vault-cluster (internal NLB), monitoring
+│   └── packer/                # pre-baked Ubuntu 24.04 AMI with Nomad/Consul/Vault + Podman
+├── baremetal/                 # avenue: single-host quickstart, or libvirt/vSphere multi-VM test cluster via Vagrant
+├── pipeline/                  # ship.py connector + GitHub/GitLab CI templates: build → push → deploy to Nomad
+├── examples/                  # job specs: Connect, fluent-bit, EBS CSI plugins, Autoscaler; Sentinel policies (Enterprise)
+├── docs/                      # topology diagram, rolling-upgrade runbook
+└── tests/                     # tofu/tflint/packer validation image + pytest for deploy.py and ship.py
 ```
 
 ### Choosing an avenue
@@ -27,15 +31,15 @@ nomad/
 | Avenue | When to use it |
 |---|---|
 | `ansible` | Bare metal or existing VMs, any cloud or on-prem, SSH access |
-| `terraform` | AWS, want managed infra (ASGs, Secrets Manager, monitoring) provisioned alongside the cluster |
+| `terraform` | AWS: ASGs, Secrets Manager (cross-region replica), internal Vault NLB, S3 Raft snapshots, monitoring + quorum alarms |
 | `baremetal/Vagrantfile` | Local multi-VM testing on KVM/QEMU (libvirt) or vSphere/ESXi before a real rollout |
 | `baremetal/install-nomad.sh` | Single-node quickstart/dev, no cluster |
 
-### Deploying
+### Deploying the cluster
 
 ```bash
 cp cluster.yml.example cluster.yml
-# edit cluster.yml: avenue, server/client hosts (ansible) or region/counts (terraform)
+# edit: avenue, hosts/regions, admin_cidr_blocks (operator/bastion access)
 
 python3 deploy.py --validate-only   # check cluster.yml before touching anything
 python3 deploy.py --dry-run         # render inventory/tfvars and print the commands, don't run them
@@ -44,26 +48,45 @@ python3 deploy.py                   # deploy
 
 `deploy.py` enforces an odd server count (Raft quorum requires 1, 3, 5, ...) and that `features.bootstrap_expect` matches the number of hosts listed, before it ever shells out to `ansible-playbook` or `terraform`.
 
+### Deploying workloads
+
+`pipeline/ship.py` (stdlib-only) builds any directory with a Dockerfile, pushes it, and registers it as a Nomad job through the HTTP API, blocking until the deployment is healthy and auto-reverting on failure:
+
+```bash
+export NOMAD_ADDR=https://<server>:4646 NOMAD_TOKEN=<token> NOMAD_CACERT=ca.pem
+python3 pipeline/ship.py build ../keycloak --image ghcr.io/org/keycloak:$(git rev-parse --short HEAD)
+python3 pipeline/ship.py push  --image ghcr.io/org/keycloak:abc1234
+python3 pipeline/ship.py deploy --image ghcr.io/org/keycloak:abc1234 --name keycloak --port 8080 --count 2
+```
+
+CI templates for GitHub Actions and GitLab live in [pipeline/](pipeline/) with token-scoping guidance.
+
 ### Design choices
 
 - **Podman is the primary task driver; Docker is an optional fallback** (`nomad_podman_enabled`/`nomad_docker_enabled` in the ansible role, `podman_enabled` in the terraform nomad-cluster module).
-- **A single shared CA signs every node's leaf certificate.** Generating an independent CA per host means no two nodes trust each other — see `ansible/roles/nomad/tasks/certificates.yml`.
-- **No secrets ship with defaults.** `nomad_gossip_key` and `nomad_vault_token` must be supplied by the operator (ansible-vault) since every server needs the identical value; the terraform avenue generates them once into AWS Secrets Manager and fetches them at boot via IAM, never bakes them into a config file.
-- **Nomad/Consul/Vault are pinned one point release back from the latest tag**, not bleeding-edge, after checking upstream changelogs for breaking config-schema changes — balancing security patches against stability.
-- **Multi-server clustering uses cloud auto-join** (`retry_join = ["provider=aws tag_key=NomadType tag_value=server"]`) rather than a static IP list, so the AWS avenue's autoscaling groups can actually scale.
+- **A single shared CA signs every node's leaf certificate**, distributed once from the first server; the CA key is removed from non-authority nodes after signing.
+- **ACLs enforced everywhere**; the terraform avenue bootstraps with an operator-provided token from Secrets Manager so the management token is retrievable, the ansible avenue persists it (0600) for the snapshot timer.
+- **Default-deny network posture**: SSH/UI/API ports open only to `admin_cidr_blocks`; intra-cluster ports are self-referencing security group rules; workload 80/443 is separately controllable.
+- **No secrets ship with defaults.** `nomad_gossip_key`/`nomad_vault_token`/`grafana_admin_password` must be supplied by the operator (ansible-vault); the AWS avenue generates them once into Secrets Manager (KMS, cross-region replica) and fetches at boot via IAM.
+- **Disaster recovery is built in**: daily Raft snapshots (leader-only) to S3 or a local systemd timer, plus a written [rolling-upgrade runbook](docs/rolling-upgrade.md).
+- **Consul Connect and native service discovery on**, Vault reached through an internal NLB (never localhost), CSI volumes and the Nomad Autoscaler available via [examples/](examples/) with IAM gated behind `csi_enabled`/`autoscaler_enabled` tfvars.
 
 ### Testing
 
-`tests/Dockerfile` builds a self-contained image with OpenTofu and tflint (checksummed downloads, no bare `curl | sh`) with this whole directory baked in at `/workspace`, and runs `tests/run-tofu-checks.sh` against every `.tf` directory: `tofu fmt -check`, `tofu init -backend=false`, `tofu validate`, `tflint`. CI builds and runs it as-is; for local iteration, bind-mount over the baked-in copy to test uncommitted changes:
+Three layers, all wired into CI:
 
 ```bash
-docker build -t nomad-tofu-tests -f tests/Dockerfile .
-docker run --rm nomad-tofu-tests                              # CI-equivalent: tests the image as built
-docker run --rm -v "$(pwd)":/workspace nomad-tofu-tests        # local iteration: tests the working tree
+# 1. Static: tofu fmt/validate + tflint on every module, packer validate on the AMI template
+docker build -t nomad-tofu-tests -f tests/Dockerfile . && docker run --rm nomad-tofu-tests
+
+# 2. Unit: deploy.py config/rendering + ship.py validation/rendering (66 tests)
+pip install -r tests/requirements.txt && pytest tests/
+
+# 3. Live: molecule converges the real roles in systemd containers and verifies behavior
+pip install molecule "molecule-plugins[podman]" ansible-core
+ansible-galaxy collection install containers.podman ansible.posix community.general
+(cd ansible/roles/nomad && molecule test)       # 3-node cluster: quorum, shared CA, ACLs, snapshots
+(cd ansible/roles/monitoring && molecule test)  # Prometheus rules, Grafana login/datasource, Alertmanager
 ```
 
-`tests/test_deploy.py` covers `deploy.py`'s config validation, inventory/tfvars rendering (`pip install -r tests/requirements.txt && pytest tests/`). `containers/tests/` (the repo-wide static suite) additionally validates every Dockerfile, compose file, and Kubernetes manifest under `nomad/`.
-
-### What's next
-
-See [`docs/enhancement-plan.md`](docs/enhancement-plan.md) for a gap analysis (security, HA, scaling, observability) and a proposed phasing for further work.
+The molecule suites are full converge → idempotence → verify runs against AlmaLinux 10 systemd containers — the nomad scenario forms a real 3-server Raft cluster and asserts leader election, ACL enforcement, identical CA fingerprints on every node, and a restorable snapshot on the leader.

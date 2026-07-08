@@ -35,6 +35,21 @@ nomad-terraform-validate:
     - docker build -t nomad-tofu-tests -f nomad/tests/Dockerfile nomad
     - docker run --rm nomad-tofu-tests
 
+# Requires a privileged runner (nested containers with systemd).
+nomad-molecule:
+  stage: validate
+  image: quay.io/podman/stable:latest
+  parallel:
+    matrix:
+      - ROLE: [nomad, monitoring]
+  before_script:
+    - dnf install -y python3-pip
+    - pip3 install molecule "molecule-plugins[podman]" ansible-core
+    - ansible-galaxy collection install containers.podman ansible.posix community.general
+  script:
+    - cd nomad/ansible/roles/$ROLE
+    - molecule test
+
 discover:
   stage: discover
   image: alpine:3.24

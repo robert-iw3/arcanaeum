@@ -99,3 +99,32 @@ variable "vault_enabled" {
   type        = bool
   default     = true
 }
+variable "admin_cidr_blocks" {
+  description = "CIDRs allowed operator access (SSH, Nomad/Consul/Vault UIs, Grafana, Prometheus); empty denies all external admin access"
+  type        = list(string)
+  default     = []
+}
+
+variable "workload_ingress_cidr_blocks" {
+  description = "CIDRs allowed to reach workloads on Nomad clients (80/443)"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
+variable "alert_email" {
+  description = "Email address subscribed to cluster health alerts; empty skips the subscription"
+  type        = string
+  default     = ""
+}
+
+variable "csi_enabled" {
+  description = "Enable EBS CSI plugin IAM permissions on Nomad clients"
+  type        = bool
+  default     = false
+}
+
+variable "autoscaler_enabled" {
+  description = "Enable Nomad Autoscaler IAM permissions on Nomad clients"
+  type        = bool
+  default     = false
+}

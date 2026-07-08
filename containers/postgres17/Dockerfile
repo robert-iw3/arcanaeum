@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
 
 ARG repo="docker.io" \
-    base_image="alpine:3.23" \
-    image_hash="4d889c14e7d5a73929ab00be2ef8ff22437e7cbc545931e52554a7b00e123d8b"
+    base_image="alpine:3.24" \
+    image_hash="79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f"
 
 FROM ${repo}/${base_image}@sha256:${image_hash} AS base
 
@@ -52,8 +52,8 @@ ENV LANG en_US.utf8
 RUN mkdir /docker-entrypoint-initdb.d
 
 ENV PG_MAJOR 17
-ENV PG_VERSION 17.3
-ENV PG_SHA256 13c18b35bf67a97bd639925fc581db7fd2aae4d3548eac39fcdb8da74ace2bea
+ENV PG_VERSION 17.10
+ENV PG_SHA256 078a03516dcdbdb705fecaf415ea3d13a956c589e46f09fed68a06fb00598c90
 
 ENV DOCKER_PG_LLVM_DEPS \
 		llvm19-dev \

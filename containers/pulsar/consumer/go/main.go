@@ -9,8 +9,7 @@ import (
 
 func main() {
     client, err := pulsar.NewClient(pulsar.ClientOptions{
-        URL:               "${brokerServiceURL}",
-        Authentication:    pulsar.NewAuthenticationToken("${apikey}"),
+        URL: "pulsar://pulsar:6650",
     })
 
     if err != nil {
@@ -20,8 +19,8 @@ func main() {
     defer client.Close()
 
     consumer, err := client.Subscribe(pulsar.ConsumerOptions{
-        Topic:            "persistent://${tenant}/${namespace}/${topic}",
-        SubscriptionName: "${subscription}",
+        Topic:            "persistent://public/default/my-topic",
+        SubscriptionName: "my-sub",
         SubscriptionInitialPosition: pulsar.SubscriptionPositionEarliest,
     })
 

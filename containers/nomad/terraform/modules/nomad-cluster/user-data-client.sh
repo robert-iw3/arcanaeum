@@ -41,14 +41,16 @@ client {
   server_join {
     retry_join = ["provider=aws tag_key=NomadType tag_value=server"]
   }
-  plugin "nomad-driver-podman" {
-    config {
-      enabled = true
-      socket_path = "/run/user/1000/podman/podman.sock"
-      volumes_enabled = true
-    }
+}
+%{ if podman_enabled }
+plugin "nomad-driver-podman" {
+  config {
+    enabled = true
+    socket_path = "/run/user/1000/podman/podman.sock"
+    volumes_enabled = true
   }
 }
+%{ endif }
 tls {
   http = true
   rpc = true
@@ -56,12 +58,14 @@ tls {
   cert_file = "/etc/nomad.d/nomad-cert.pem"
   key_file = "/etc/nomad.d/nomad-key.pem"
 }
+%{ if vault_address != "" }
 vault {
   enabled = true
-  address = "https://localhost:8200"
+  address = "${vault_address}"
   token = "$${vault_token}"
   create_from_role = "nomad-cluster"
 }
+%{ endif }
 telemetry {
   collection_interval = "1s"
   disable_hostname = true

@@ -34,6 +34,7 @@ nomad_gossip_key: ""
 
 nomad_consul_enabled: false
 nomad_consul_address: "127.0.0.1:8500"
+nomad_consul_grpc_address: "127.0.0.1:8503"
 
 # Must be supplied by the operator, same as nomad_gossip_key above.
 nomad_vault_enabled: false
@@ -53,13 +54,23 @@ nomad_docker_allow_privileged: false
 nomad_telemetry_enabled: true
 nomad_telemetry_prometheus: true
 nomad_service_discovery_enabled: true
-nomad_autoscaler_enabled: false
 nomad_service_name: "nomad"
 nomad_ulimits_nofile: 65536
 nomad_ulimits_nproc: 4096
 
 # Extra sources allowed to reach the HTTP API; cluster nodes are always allowed automatically.
 nomad_allowed_ips: ["127.0.0.1"]
+
+nomad_snapshot_enabled: true
+nomad_snapshot_dir: "/opt/nomad/snapshots"
+nomad_snapshot_retention: 7
+nomad_snapshot_on_calendar: "daily"
+# Optional S3 destination for off-box snapshot copies (requires aws cli on the servers).
+nomad_snapshot_s3_bucket: ""
+
+nomad_host_hardening_enabled: false
+# Disable only in containers/CI where sysctl, swap, chrony, grub, and firewall changes are impossible.
+nomad_manage_host_settings: true
 
 nomad_logrotate_maxsize: "100M"
 nomad_logrotate_rotate: 5

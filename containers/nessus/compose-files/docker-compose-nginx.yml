@@ -2,7 +2,7 @@
 services:
   nginx:
     container_name: nginx
-    image: bitnami/nginx:1.25
+    image: nginx:1.29
     hostname: nginx.testing.io
     security_opt:
       - no-new-privileges:true

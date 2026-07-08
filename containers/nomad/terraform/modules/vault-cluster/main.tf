@@ -8,8 +8,8 @@ resource "aws_security_group" "vault_sg" {
     from_port   = 8200
     to_port     = 8200
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Vault HTTP API/UI"
+    cidr_blocks = concat(var.cluster_cidr_blocks, var.admin_cidr_blocks)
+    description = "Vault HTTP API/UI from cluster and operators"
   }
   ingress {
     from_port   = 8201
@@ -111,4 +111,43 @@ resource "aws_autoscaling_group" "vault_asg" {
   }
   health_check_type         = "EC2"
   health_check_grace_period = 300
+}
+resource "aws_lb" "vault_nlb" {
+  name               = "${var.cluster_name}-vault-nlb"
+  internal           = true
+  load_balancer_type = "network"
+  subnets            = var.subnet_ids
+  count              = var.vault_enabled ? 1 : 0
+}
+
+resource "aws_lb_target_group" "vault_tg" {
+  name     = "${var.cluster_name}-vault-tg"
+  port     = 8200
+  protocol = "TCP"
+  vpc_id   = var.vpc_id
+  count    = var.vault_enabled ? 1 : 0
+
+  health_check {
+    protocol = "HTTPS"
+    path     = "/v1/sys/health"
+    matcher  = "200,429,472,473,501,503"
+  }
+}
+
+resource "aws_lb_listener" "vault_listener" {
+  load_balancer_arn = aws_lb.vault_nlb[0].arn
+  port              = 8200
+  protocol          = "TCP"
+  count             = var.vault_enabled ? 1 : 0
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.vault_tg[0].arn
+  }
+}
+
+resource "aws_autoscaling_attachment" "vault_asg_attachment" {
+  autoscaling_group_name = aws_autoscaling_group.vault_asg[0].name
+  lb_target_group_arn    = aws_lb_target_group.vault_tg[0].arn
+  count                  = var.vault_enabled ? 1 : 0
 }

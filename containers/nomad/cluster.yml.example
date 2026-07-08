@@ -1,5 +1,9 @@
 cluster_name: prod-nomad
 
+# Operator/bastion CIDRs allowed to reach SSH and the Nomad/Consul/Vault/Grafana
+# UIs. Empty means no external admin access (terraform) / localhost only (ansible).
+admin_cidr_blocks: []
+
 # Which underlying avenue to drive. "ansible" targets bare metal, on-prem VMs,
 # or any host reachable over SSH. "terraform" provisions the AWS cloud avenue
 # in terraform/.
@@ -22,6 +26,9 @@ ansible:
       address: 10.0.2.11
     - name: nomad-client-3
       address: 10.0.2.12
+  # Optional dedicated Prometheus+Grafana host (requires grafana_admin_password
+  # supplied via ansible-vault or -e).
+  monitoring: []
 
 terraform:
   region: us-east-1

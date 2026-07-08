@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   zoo1:
-    image: apachepulsar/pulsar:latest
+    image: apachepulsar/pulsar:4.2.3
     hostname: zoo1
     ports:
       - "2181:2181"
@@ -17,7 +17,7 @@ services:
     command: /bin/bash "/scripts/start_zk.sh"
 
   zoo2:
-    image: apachepulsar/pulsar:latest
+    image: apachepulsar/pulsar:4.2.3
     hostname: zoo2
     ports:
       - "2182:2181"
@@ -32,7 +32,7 @@ services:
     command: /bin/bash "/scripts/start_zk.sh"
 
   zoo3:
-    image: apachepulsar/pulsar:latest
+    image: apachepulsar/pulsar:4.2.3
     hostname: zoo3
     ports:
       - "2183:2181"
@@ -47,7 +47,7 @@ services:
     command: /bin/bash "/scripts/start_zk.sh"
 
   bookie1:
-    image: apachepulsar/pulsar:latest
+    image: apachepulsar/pulsar:4.2.3
     hostname: bookie1
     ports:
       - "3181:3181"
@@ -65,7 +65,7 @@ services:
       - zoo3
 
   bookie2:
-    image: apachepulsar/pulsar:latest
+    image: apachepulsar/pulsar:4.2.3
     hostname: bookie2
     ports:
       - "3182:3181"
@@ -81,7 +81,7 @@ services:
       - bookie1
 
   bookie3:
-    image: apachepulsar/pulsar:latest
+    image: apachepulsar/pulsar:4.2.3
     hostname: bookie3
     ports:
       - "3183:3181"
@@ -97,7 +97,7 @@ services:
       - bookie1
 
   broker1:
-    image: apachepulsar/pulsar:latest
+    image: apachepulsar/pulsar:4.2.3
     hostname: broker1
     environment:
         PULSAR_BROKER_CONF: /conf/broker.conf
@@ -116,7 +116,7 @@ services:
       - bookie3
 
   broker2:
-    image: apachepulsar/pulsar:latest
+    image: apachepulsar/pulsar:4.2.3
     hostname: broker2
     environment:
         PULSAR_BROKER_CONF: /conf/broker.conf
@@ -135,7 +135,7 @@ services:
       - bookie3
 
   pulsar-proxy:
-    image: apachepulsar/pulsar:latest
+    image: apachepulsar/pulsar:4.2.3
     hostname: pulsar-proxy
     ports:
       - "6650:6650"

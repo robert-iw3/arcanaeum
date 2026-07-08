@@ -10,7 +10,7 @@ volumes:
 services:
   api-firewall:
     container_name: api-fw-ingress
-    image: docker.io/wallarm/api-firewall:0.6.18
+    image: docker.io/wallarm/api-firewall:0.9.6
     hostname: api-fw.testing.io
     security_opt:
       - no-new-privileges:true

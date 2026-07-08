@@ -1,7 +1,7 @@
 python-dotenv==1.0.1
 wikipedia==1.4.0
 tiktoken==0.8.0
-neo4j==5.27.1
+neo4j==5.28.4
 streamlit==1.38.0
 Pillow==10.4.0
 fastapi==0.115.2

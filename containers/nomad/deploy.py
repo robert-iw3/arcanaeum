@@ -56,7 +56,7 @@ def validate_config(config):
                 f"to actually form"
             )
         _require_odd_quorum(len(servers), "the number of servers listed")
-        for role in ("servers", "clients"):
+        for role in ("servers", "clients", "monitoring"):
             for host in ansible_cfg.get(role, []):
                 if "name" not in host or "address" not in host:
                     raise ConfigError(f"each host in ansible.{role} needs a 'name' and an 'address'")
@@ -82,9 +82,14 @@ def render_inventory(config):
     for host in ansible_cfg.get("clients", []):
         lines.append(f"{host['name']} ansible_host={host['address']}")
     lines.append("")
+    lines.append("[nomad_monitoring]")
+    for host in ansible_cfg.get("monitoring", []):
+        lines.append(f"{host['name']} ansible_host={host['address']}")
+    lines.append("")
     lines.append("[nomad_cluster:children]")
     lines.append("nomad_servers")
     lines.append("nomad_clients")
+    lines.append("nomad_monitoring")
     lines.append("")
     lines.append("[nomad_cluster:vars]")
     lines.append(f"ansible_user={ansible_cfg.get('ssh_user', 'ansible')}")
@@ -103,6 +108,7 @@ def render_group_vars(config):
         "nomad_podman_enabled": features.get("podman_enabled", True),
         "nomad_telemetry_enabled": features.get("telemetry_enabled", True),
         "nomad_bootstrap_expect": features.get("bootstrap_expect", 3),
+        "nomad_allowed_ips": config.get("admin_cidr_blocks", ["127.0.0.1"]),
     }
 
 
@@ -141,6 +147,7 @@ def render_tfvars(config):
         "ssl_certificate_arn": tf_cfg.get("ssl_cert_arn", ""),
         "vault_enabled": features.get("vault_enabled", True),
         "consul_enabled": features.get("consul_enabled", True),
+        "admin_cidr_blocks": config.get("admin_cidr_blocks", []),
     }
 
 

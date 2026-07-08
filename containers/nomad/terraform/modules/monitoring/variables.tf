@@ -94,3 +94,8 @@ variable "ssh_key_name" {
     error_message = "SSH key name must be 1-255 characters long and contain only letters, numbers, hyphens, or underscores."
   }
 }
+variable "admin_cidr_blocks" {
+  description = "CIDRs allowed operator access (SSH, UI/API ports); empty list denies all external admin access"
+  type        = list(string)
+  default     = []
+}

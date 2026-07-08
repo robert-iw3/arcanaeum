@@ -15,3 +15,7 @@ data "aws_instances" "vault_instances" {
   }
   depends_on = [aws_autoscaling_group.vault_asg]
 }
+output "vault_address" {
+  description = "Internal NLB address for the Vault API"
+  value       = var.vault_enabled ? "https://${aws_lb.vault_nlb[0].dns_name}:8200" : ""
+}

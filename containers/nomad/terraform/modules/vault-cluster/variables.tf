@@ -38,3 +38,14 @@ variable "ssh_key_name" {
   type        = string
   default     = ""
 }
+variable "admin_cidr_blocks" {
+  description = "CIDRs allowed operator access (SSH, UI/API ports); empty list denies all external admin access"
+  type        = list(string)
+  default     = []
+}
+
+variable "cluster_cidr_blocks" {
+  description = "VPC/cluster CIDRs allowed to reach the service API (Nomad agents live in these ranges)"
+  type        = list(string)
+  default     = []
+}

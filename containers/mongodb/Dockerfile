@@ -2,7 +2,7 @@
 
 ARG repo="docker.io" \
     base_image="ubuntu:noble" \
-    image_hash="7c06e91f61fa88c08cc74f7e1b7c69ae24910d745357e0dfe1d2c0322aaf20f9"
+    image_hash="4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90"
 
 FROM ${repo}/${base_image}@sha256:${image_hash} AS base
 
@@ -13,10 +13,10 @@ ARG MONGO_PACKAGE=mongodb-org  # Change to mongodb-enterprise for auditing
 ARG MONGO_REPO=repo.mongodb.org
 ENV MONGO_PACKAGE=${MONGO_PACKAGE} MONGO_REPO=${MONGO_REPO}
 ENV MONGO_MAJOR 8.0
-ENV MONGO_VERSION 8.0.13
+ENV MONGO_VERSION 8.0.26
 
-LABEL org.opencontainers.image.version="8.0.13" \
-      org.opencontainers.image.description="MongoDB 8.0.13 Community/Enterprise with CIS Hardening" \
+LABEL org.opencontainers.image.version="8.0.26" \
+      org.opencontainers.image.description="MongoDB 8.0.26 Community/Enterprise with CIS Hardening" \
       org.opencontainers.image.licenses="SSPL-1.0"
 
 RUN \

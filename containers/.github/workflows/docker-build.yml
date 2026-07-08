@@ -42,8 +42,29 @@ jobs:
       - name: Build tofu/tflint validation image
         run: docker build -t nomad-tofu-tests -f nomad/tests/Dockerfile nomad
 
-      - name: Run tofu fmt/validate/tflint
+      - name: Run tofu fmt/validate/tflint/packer
         run: docker run --rm nomad-tofu-tests
+
+  nomad-molecule:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        role: [nomad, monitoring]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install molecule
+        run: |
+          pip install molecule "molecule-plugins[podman]" ansible-core
+          ansible-galaxy collection install containers.podman ansible.posix community.general
+
+      - name: Run molecule test (${{ matrix.role }})
+        working-directory: nomad/ansible/roles/${{ matrix.role }}
+        run: molecule test
 
   discover:
     runs-on: ubuntu-latest

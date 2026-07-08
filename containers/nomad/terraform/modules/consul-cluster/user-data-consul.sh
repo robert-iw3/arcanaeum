@@ -29,13 +29,17 @@ bind_addr = "0.0.0.0"
 client_addr = "0.0.0.0"
 ports {
   http = 8500
-  grpc = 8502
+  grpc = 8503
+  grpc_tls = 8502
   serf_lan = 8301
   serf_wan = 8302
   server = 8300
 }
 server = true
 bootstrap_expect = ${desired_capacity}
+connect {
+  enabled = true
+}
 retry_join = ["provider=aws tag_key=ConsulAutoJoin tag_value=auto-join"]
 acl {
   enabled = true

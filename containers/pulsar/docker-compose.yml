@@ -1,102 +1,72 @@
-version: '3.8'
-
 networks:
   magnetar:
     name: magnetar
     driver: bridge
 
+volumes:
+  pulsar-data:
+  pulsar-conf:
+
 services:
-  zookeeper:
-    image: apachepulsar/pulsar-zookeeper:latest
+  pulsar:
+    image: apachepulsar/pulsar:4.2.3
+    container_name: pulsar
+    command: bin/pulsar standalone
     ports:
-      - "2181:2181"
-    networks:
-      - magnetar
-
-  bookkeeper:
-    image: apachepulsar/pulsar-bookkeeper:latest
-    ports:
-      - "3181:3181"
+      - "6650:6650"   # Pulsar binary protocol
+      - "8080:8080"   # Admin/HTTP API
+      - "1883:1883"   # MQTT (requires the MoP .nar in ./protocols, see protocols/protocols.md)
     environment:
-      - BOOKIE_PORT=3181
-      - BOOKIE_ZOOKEEPER_CONNECT_STRING=zookeeper:2181
-    networks:
-      - magnetar
-
-  broker:
-    image: apachepulsar/pulsar:latest
-    ports:
-      - "6650:6650" # Pulsar
-      - "8080:8080" # Pulsar dashboard
-      - "1883:1883" # MQTT
-    environment:
-      - PULSAR_BROKER_BOOKIE_PORT=3181
-      - PULSAR_BROKER_ZOOKEEPER_CONNECT_STRING=zookeeper:2181
-      - PULSAR_BROKER_WEB_PORT=8080
       - PULSAR_MEM=-Xms512m -Xmx512m -XX:MaxDirectMemorySize=1g
-    command: bin/pulsar broker
     volumes:
-      - "./protocols:/pulsar/protocols"
-      - "./conf:/pulsar/conf"
+      - pulsar-data:/pulsar/data
+      - ./conf/standalone.conf:/pulsar/conf/standalone.conf
+      - ./protocols:/pulsar/protocols
     networks:
       - magnetar
+    healthcheck:
+      test: ["CMD", "bin/pulsar-admin", "brokers", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
   pulsar-manager:
-    image: apachepulsar/pulsar-manager:latest
+    image: apachepulsar/pulsar-manager:v0.4.0
+    container_name: pulsar-manager
     ports:
       - "9527:9527"
       - "7750:7750"
     environment:
-      - PULSAR_MANAGER_BROKER_URL=http://broker:8080
-      - PULSAR_MANAGER_BOOKIE_URL=http://bookkeeper:3181
-      - PULSAR_MANAGER_ZOOKEEPER_URL=zookeeper:2181
-    command: /pulsar-manager/bin/pulsar-manager
+      - SPRING_CONFIGURATION_FILE=/pulsar-manager/pulsar-manager/application.properties
+    depends_on:
+      pulsar:
+        condition: service_healthy
     networks:
       - magnetar
-
-  redis:
-    image: redis:8.0-M03-alpine3.21
-    ports:
-      - "6379:6379"
-    volumes:
-      - ./redis/redis-data:/var/lib/redis
-    environment:
-      - REDIS_REPLICATION_MODE=master
-      - PYTHONUNBUFFERED=1
-    networks:
-      - magnetar
-
-  alertmanager:
-    image: prom/alertmanager:latest
-    ports:
-      - "9093:9093"
-    volumes:
-      - ./alertmanager/:/etc/alertmanager/
-    networks:
-      - magnetar
-    restart: always
-    command:
-      - "--config.file=/etc/alertmanager/config.yml"
-      - "--storage.path=/alertmanager"
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.13.0
+    container_name: prometheus
     volumes:
-      - ./prometheus/standalone.prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus/standalone.prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
       - "9090:9090"
+    depends_on:
+      - pulsar
     networks:
       - magnetar
 
   grafana:
-    image: streamnative/apache-pulsar-grafana-dashboard:latest
+    image: streamnative/apache-pulsar-grafana-dashboard:0.0.17
+    container_name: grafana
     environment:
       PULSAR_CLUSTER: "standalone"
-      PULSAR_PROMETHEUS_URL: "http://192.168.7.12:9090"
+      PULSAR_PROMETHEUS_URL: "http://prometheus:9090"
     restart: unless-stopped
     ports:
       - "3000:3000"
-    networks:
-      - magnetar
     depends_on:
       - prometheus
+    networks:
+      - magnetar

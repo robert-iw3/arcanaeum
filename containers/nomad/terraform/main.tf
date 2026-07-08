@@ -31,6 +31,19 @@ resource "aws_secretsmanager_secret" "nomad_secrets" {
   provider   = aws.primary
   name       = "${var.cluster_name}-nomad-secrets"
   kms_key_id = aws_kms_key.nomad_secrets_key.arn
+
+  replica {
+    region = var.secondary_region
+  }
+}
+
+locals {
+  secret_arn_parts = split(":", aws_secretsmanager_secret.nomad_secrets.arn)
+  secondary_secrets_arn = join(":", concat(
+    slice(local.secret_arn_parts, 0, 3),
+    [var.secondary_region],
+    slice(local.secret_arn_parts, 4, length(local.secret_arn_parts))
+  ))
 }
 
 resource "aws_secretsmanager_secret_version" "nomad_secrets_version" {
@@ -174,76 +187,94 @@ module "vpc_secondary" {
 }
 
 module "nomad_servers_primary" {
-  source           = "./modules/nomad-cluster"
-  cluster_name     = "${var.cluster_name}-primary"
-  instance_type    = var.server_instance_type
-  ami_id           = var.nomad_ami_id
-  vpc_id           = module.vpc_primary.vpc_id
-  subnet_ids       = module.vpc_primary.subnet_ids
-  desired_capacity = var.num_nomad_servers
-  secrets_arn      = aws_secretsmanager_secret.nomad_secrets.arn
-  aws_region       = var.aws_region
-  nomad_version    = var.nomad_version
-  podman_enabled   = true
-  client_enabled   = false
-  ssh_key_name     = var.ssh_key_name
+  source                       = "./modules/nomad-cluster"
+  cluster_name                 = "${var.cluster_name}-primary"
+  instance_type                = var.server_instance_type
+  ami_id                       = var.nomad_ami_id
+  vpc_id                       = module.vpc_primary.vpc_id
+  subnet_ids                   = module.vpc_primary.subnet_ids
+  desired_capacity             = var.num_nomad_servers
+  secrets_arn                  = aws_secretsmanager_secret.nomad_secrets.arn
+  aws_region                   = var.aws_region
+  nomad_version                = var.nomad_version
+  podman_enabled               = true
+  client_enabled               = false
+  ssh_key_name                 = var.ssh_key_name
+  snapshot_s3_bucket           = aws_s3_bucket.nomad_snapshots.bucket
+  vault_address                = module.vault_cluster_primary.vault_address
+  admin_cidr_blocks            = var.admin_cidr_blocks
+  workload_ingress_cidr_blocks = var.workload_ingress_cidr_blocks
   providers = {
     aws = aws.primary
   }
 }
 
 module "nomad_servers_secondary" {
-  source           = "./modules/nomad-cluster"
-  cluster_name     = "${var.cluster_name}-secondary"
-  instance_type    = var.server_instance_type
-  ami_id           = var.nomad_ami_id
-  vpc_id           = module.vpc_secondary.vpc_id
-  subnet_ids       = module.vpc_secondary.subnet_ids
-  desired_capacity = var.num_nomad_servers
-  secrets_arn      = aws_secretsmanager_secret.nomad_secrets.arn
-  aws_region       = var.aws_region
-  nomad_version    = var.nomad_version
-  podman_enabled   = true
-  client_enabled   = false
-  ssh_key_name     = var.ssh_key_name
+  source                       = "./modules/nomad-cluster"
+  cluster_name                 = "${var.cluster_name}-secondary"
+  instance_type                = var.server_instance_type
+  ami_id                       = var.nomad_ami_id
+  vpc_id                       = module.vpc_secondary.vpc_id
+  subnet_ids                   = module.vpc_secondary.subnet_ids
+  desired_capacity             = var.num_nomad_servers
+  secrets_arn                  = local.secondary_secrets_arn
+  aws_region                   = var.secondary_region
+  nomad_version                = var.nomad_version
+  podman_enabled               = true
+  client_enabled               = false
+  ssh_key_name                 = var.ssh_key_name
+  snapshot_s3_bucket           = aws_s3_bucket.nomad_snapshots.bucket
+  vault_address                = module.vault_cluster_secondary.vault_address
+  admin_cidr_blocks            = var.admin_cidr_blocks
+  workload_ingress_cidr_blocks = var.workload_ingress_cidr_blocks
   providers = {
     aws = aws.secondary
   }
 }
 
 module "nomad_clients_primary" {
-  source           = "./modules/nomad-cluster"
-  cluster_name     = "${var.cluster_name}-client-primary"
-  instance_type    = var.client_instance_type
-  ami_id           = var.nomad_ami_id
-  vpc_id           = module.vpc_primary.vpc_id
-  subnet_ids       = module.vpc_primary.subnet_ids
-  desired_capacity = var.num_nomad_clients
-  secrets_arn      = aws_secretsmanager_secret.nomad_secrets.arn
-  aws_region       = var.aws_region
-  nomad_version    = var.nomad_version
-  podman_enabled   = true
-  client_enabled   = true
-  ssh_key_name     = var.ssh_key_name
+  source                       = "./modules/nomad-cluster"
+  cluster_name                 = "${var.cluster_name}-client-primary"
+  instance_type                = var.client_instance_type
+  ami_id                       = var.nomad_ami_id
+  vpc_id                       = module.vpc_primary.vpc_id
+  subnet_ids                   = module.vpc_primary.subnet_ids
+  desired_capacity             = var.num_nomad_clients
+  secrets_arn                  = aws_secretsmanager_secret.nomad_secrets.arn
+  aws_region                   = var.aws_region
+  nomad_version                = var.nomad_version
+  podman_enabled               = true
+  client_enabled               = true
+  ssh_key_name                 = var.ssh_key_name
+  csi_enabled                  = var.csi_enabled
+  autoscaler_enabled           = var.autoscaler_enabled
+  vault_address                = module.vault_cluster_primary.vault_address
+  admin_cidr_blocks            = var.admin_cidr_blocks
+  workload_ingress_cidr_blocks = var.workload_ingress_cidr_blocks
   providers = {
     aws = aws.primary
   }
 }
 
 module "nomad_clients_secondary" {
-  source           = "./modules/nomad-cluster"
-  cluster_name     = "${var.cluster_name}-client-secondary"
-  instance_type    = var.client_instance_type
-  ami_id           = var.nomad_ami_id
-  vpc_id           = module.vpc_secondary.vpc_id
-  subnet_ids       = module.vpc_secondary.subnet_ids
-  desired_capacity = var.num_nomad_clients
-  secrets_arn      = aws_secretsmanager_secret.nomad_secrets.arn
-  aws_region       = var.aws_region
-  nomad_version    = var.nomad_version
-  podman_enabled   = true
-  client_enabled   = true
-  ssh_key_name     = var.ssh_key_name
+  source                       = "./modules/nomad-cluster"
+  cluster_name                 = "${var.cluster_name}-client-secondary"
+  instance_type                = var.client_instance_type
+  ami_id                       = var.nomad_ami_id
+  vpc_id                       = module.vpc_secondary.vpc_id
+  subnet_ids                   = module.vpc_secondary.subnet_ids
+  desired_capacity             = var.num_nomad_clients
+  secrets_arn                  = local.secondary_secrets_arn
+  aws_region                   = var.secondary_region
+  nomad_version                = var.nomad_version
+  podman_enabled               = true
+  client_enabled               = true
+  ssh_key_name                 = var.ssh_key_name
+  csi_enabled                  = var.csi_enabled
+  autoscaler_enabled           = var.autoscaler_enabled
+  vault_address                = module.vault_cluster_secondary.vault_address
+  admin_cidr_blocks            = var.admin_cidr_blocks
+  workload_ingress_cidr_blocks = var.workload_ingress_cidr_blocks
   providers = {
     aws = aws.secondary
   }
@@ -458,60 +489,68 @@ resource "aws_cloudwatch_metric_alarm" "nomad_clients_memory_low_secondary" {
 }
 
 module "consul_cluster_primary" {
-  source           = "./modules/consul-cluster"
-  cluster_name     = "${var.cluster_name}-primary"
-  instance_type    = var.server_instance_type
-  ami_id           = var.consul_ami_id
-  vpc_id           = module.vpc_primary.vpc_id
-  subnet_ids       = module.vpc_primary.subnet_ids
-  desired_capacity = var.num_consul_servers
-  consul_enabled   = var.consul_enabled
-  ssh_key_name     = var.ssh_key_name
+  source              = "./modules/consul-cluster"
+  cluster_name        = "${var.cluster_name}-primary"
+  instance_type       = var.server_instance_type
+  ami_id              = var.consul_ami_id
+  vpc_id              = module.vpc_primary.vpc_id
+  subnet_ids          = module.vpc_primary.subnet_ids
+  desired_capacity    = var.num_consul_servers
+  consul_enabled      = var.consul_enabled
+  ssh_key_name        = var.ssh_key_name
+  admin_cidr_blocks   = var.admin_cidr_blocks
+  cluster_cidr_blocks = [module.vpc_primary.vpc_cidr]
   providers = {
     aws = aws.primary
   }
 }
 
 module "consul_cluster_secondary" {
-  source           = "./modules/consul-cluster"
-  cluster_name     = "${var.cluster_name}-secondary"
-  instance_type    = var.server_instance_type
-  ami_id           = var.consul_ami_id
-  vpc_id           = module.vpc_secondary.vpc_id
-  subnet_ids       = module.vpc_secondary.subnet_ids
-  desired_capacity = var.num_consul_servers
-  consul_enabled   = var.consul_enabled
-  ssh_key_name     = var.ssh_key_name
+  source              = "./modules/consul-cluster"
+  cluster_name        = "${var.cluster_name}-secondary"
+  instance_type       = var.server_instance_type
+  ami_id              = var.consul_ami_id
+  vpc_id              = module.vpc_secondary.vpc_id
+  subnet_ids          = module.vpc_secondary.subnet_ids
+  desired_capacity    = var.num_consul_servers
+  consul_enabled      = var.consul_enabled
+  ssh_key_name        = var.ssh_key_name
+  admin_cidr_blocks   = var.admin_cidr_blocks
+  cluster_cidr_blocks = [module.vpc_secondary.vpc_cidr]
   providers = {
     aws = aws.secondary
   }
 }
 
 module "vault_cluster_primary" {
-  source           = "./modules/vault-cluster"
-  cluster_name     = "${var.cluster_name}-primary"
-  instance_type    = var.server_instance_type
-  ami_id           = var.vault_ami_id
-  vpc_id           = module.vpc_primary.vpc_id
-  subnet_ids       = module.vpc_primary.subnet_ids
-  desired_capacity = var.num_vault_servers
-  vault_enabled    = var.vault_enabled
-  ssh_key_name     = var.ssh_key_name
+  source              = "./modules/vault-cluster"
+  cluster_name        = "${var.cluster_name}-primary"
+  instance_type       = var.server_instance_type
+  ami_id              = var.vault_ami_id
+  vpc_id              = module.vpc_primary.vpc_id
+  subnet_ids          = module.vpc_primary.subnet_ids
+  desired_capacity    = var.num_vault_servers
+  vault_enabled       = var.vault_enabled
+  ssh_key_name        = var.ssh_key_name
+  admin_cidr_blocks   = var.admin_cidr_blocks
+  cluster_cidr_blocks = [module.vpc_primary.vpc_cidr]
   providers = {
     aws = aws.primary
   }
 }
 
 module "vault_cluster_secondary" {
-  source           = "./modules/vault-cluster"
-  cluster_name     = "${var.cluster_name}-secondary"
-  instance_type    = var.server_instance_type
-  ami_id           = var.vault_ami_id
-  vpc_id           = module.vpc_secondary.vpc_id
-  subnet_ids       = module.vpc_secondary.subnet_ids
-  desired_capacity = var.num_vault_servers
-  vault_enabled    = var.vault_enabled
-  ssh_key_name     = var.ssh_key_name
+  source              = "./modules/vault-cluster"
+  cluster_name        = "${var.cluster_name}-secondary"
+  instance_type       = var.server_instance_type
+  ami_id              = var.vault_ami_id
+  vpc_id              = module.vpc_secondary.vpc_id
+  subnet_ids          = module.vpc_secondary.subnet_ids
+  desired_capacity    = var.num_vault_servers
+  vault_enabled       = var.vault_enabled
+  ssh_key_name        = var.ssh_key_name
+  admin_cidr_blocks   = var.admin_cidr_blocks
+  cluster_cidr_blocks = [module.vpc_secondary.vpc_cidr]
   providers = {
     aws = aws.secondary
   }
@@ -531,6 +570,7 @@ module "monitoring_primary" {
   secrets_arn         = aws_secretsmanager_secret.nomad_secrets.arn
   aws_region          = var.aws_region
   ssh_key_name        = var.ssh_key_name
+  admin_cidr_blocks   = var.admin_cidr_blocks
   providers = {
     aws = aws.primary
   }
@@ -547,9 +587,10 @@ module "monitoring_secondary" {
   nomad_ips           = module.nomad_servers_secondary.instance_ips
   consul_ips          = module.consul_cluster_secondary.instance_ips
   vault_ips           = module.vault_cluster_secondary.instance_ips
-  secrets_arn         = aws_secretsmanager_secret.nomad_secrets.arn
-  aws_region          = var.aws_region
+  secrets_arn         = local.secondary_secrets_arn
+  aws_region          = var.secondary_region
   ssh_key_name        = var.ssh_key_name
+  admin_cidr_blocks   = var.admin_cidr_blocks
   providers = {
     aws = aws.secondary
   }
@@ -613,4 +654,104 @@ output "grafana_lb_address_secondary" {
 output "budget_notifications_topic_arn" {
   description = "ARN of the SNS topic for budget notifications"
   value       = aws_sns_topic.budget_notifications.arn
+}
+resource "aws_s3_bucket" "nomad_snapshots" {
+  provider      = aws.primary
+  bucket_prefix = "${var.cluster_name}-nomad-snapshots-"
+}
+
+resource "aws_s3_bucket_public_access_block" "nomad_snapshots" {
+  provider                = aws.primary
+  bucket                  = aws_s3_bucket.nomad_snapshots.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "nomad_snapshots" {
+  provider = aws.primary
+  bucket   = aws_s3_bucket.nomad_snapshots.id
+
+  rule {
+    id     = "expire-old-snapshots"
+    status = "Enabled"
+    filter {}
+    expiration {
+      days = 30
+    }
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "nomad_snapshots" {
+  provider = aws.primary
+  bucket   = aws_s3_bucket.nomad_snapshots.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "aws:kms"
+    }
+  }
+}
+
+resource "aws_sns_topic" "cluster_alerts_primary" {
+  provider = aws.primary
+  name     = "${var.cluster_name}-cluster-alerts"
+}
+
+resource "aws_sns_topic" "cluster_alerts_secondary" {
+  provider = aws.secondary
+  name     = "${var.cluster_name}-cluster-alerts"
+}
+
+resource "aws_sns_topic_subscription" "cluster_alerts_email_primary" {
+  provider  = aws.primary
+  count     = var.alert_email != "" ? 1 : 0
+  topic_arn = aws_sns_topic.cluster_alerts_primary.arn
+  protocol  = "email"
+  endpoint  = var.alert_email
+}
+
+resource "aws_sns_topic_subscription" "cluster_alerts_email_secondary" {
+  provider  = aws.secondary
+  count     = var.alert_email != "" ? 1 : 0
+  topic_arn = aws_sns_topic.cluster_alerts_secondary.arn
+  protocol  = "email"
+  endpoint  = var.alert_email
+}
+
+resource "aws_cloudwatch_metric_alarm" "nomad_servers_unhealthy_primary" {
+  provider            = aws.primary
+  alarm_name          = "${var.cluster_name}-nomad-servers-unhealthy-primary"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "GroupInServiceInstances"
+  namespace           = "AWS/AutoScaling"
+  period              = 60
+  statistic           = "Minimum"
+  threshold           = var.num_nomad_servers
+  alarm_description   = "Fewer Nomad servers in service than required for quorum in the primary region"
+  alarm_actions       = [aws_sns_topic.cluster_alerts_primary.arn]
+  ok_actions          = [aws_sns_topic.cluster_alerts_primary.arn]
+  dimensions = {
+    AutoScalingGroupName = module.nomad_servers_primary.asg_name
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "nomad_servers_unhealthy_secondary" {
+  provider            = aws.secondary
+  alarm_name          = "${var.cluster_name}-nomad-servers-unhealthy-secondary"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "GroupInServiceInstances"
+  namespace           = "AWS/AutoScaling"
+  period              = 60
+  statistic           = "Minimum"
+  threshold           = var.num_nomad_servers
+  alarm_description   = "Fewer Nomad servers in service than required for quorum in the secondary region"
+  alarm_actions       = [aws_sns_topic.cluster_alerts_secondary.arn]
+  ok_actions          = [aws_sns_topic.cluster_alerts_secondary.arn]
+  dimensions = {
+    AutoScalingGroupName = module.nomad_servers_secondary.asg_name
+  }
 }

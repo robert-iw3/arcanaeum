@@ -122,7 +122,12 @@
       when: configsvr_result.changed
 
     - name: Initialize Config Server replica set
-      command: podman exec mongodb-configsvr-0-{{ inventory_hostname_short }} mongosh --eval "rs.initiate({_id: '{{ init_replset }}', members: [ {_id: 0, host: '{{ ansible_default_ipv4.address }}:27019'}, {_id: 1, host: '{{ ansible_default_ipv4.address }}:27029'}, {_id: 2, host: '{{ ansible_default_ipv4.address }}:27039'} ]})"
+      command: >-
+        podman exec mongodb-configsvr-0-{{ inventory_hostname_short }} mongosh --eval
+        "rs.initiate({_id: '{{ init_replset }}', members: [
+        {_id: 0, host: '{{ ansible_default_ipv4.address }}:27019'},
+        {_id: 1, host: '{{ ansible_default_ipv4.address }}:27029'},
+        {_id: 2, host: '{{ ansible_default_ipv4.address }}:27039'} ]})"
       when: inventory_hostname == groups['servers'][0] and configsvr_result.changed
 
     - name: Create shard directories
@@ -175,7 +180,12 @@
       when: shard_result.changed
 
     - name: Initialize Shard replica sets
-      command: podman exec mongodb-shard{{ item }}-0-{{ inventory_hostname_short }} mongosh --eval "rs.initiate({_id: 'shard{{ item }}', members: [ {_id: 0, host: '{{ ansible_default_ipv4.address }}:{{ 27017 + (item | int) * 100 }}'}, {_id: 1, host: '{{ ansible_default_ipv4.address }}:{{ 27027 + (item | int) * 100 }}'}, {_id: 2, host: '{{ ansible_default_ipv4.address }}:{{ 27037 + (item | int) * 100 }}'} ]})"
+      command: >-
+        podman exec mongodb-shard{{ item }}-0-{{ inventory_hostname_short }} mongosh --eval
+        "rs.initiate({_id: 'shard{{ item }}', members: [
+        {_id: 0, host: '{{ ansible_default_ipv4.address }}:{{ 27017 + (item | int) * 100 }}'},
+        {_id: 1, host: '{{ ansible_default_ipv4.address }}:{{ 27027 + (item | int) * 100 }}'},
+        {_id: 2, host: '{{ ansible_default_ipv4.address }}:{{ 27037 + (item | int) * 100 }}'} ]})"
       loop: "{{ range(0, num_shards) | list }}"
       when: inventory_hostname == groups['servers'][0] and shard_result.changed
 

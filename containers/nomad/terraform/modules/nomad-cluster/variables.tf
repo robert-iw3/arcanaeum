@@ -99,3 +99,38 @@ variable "ssh_key_name" {
     error_message = "SSH key name must be 1-255 characters long and contain only letters, numbers, hyphens, or underscores."
   }
 }
+variable "admin_cidr_blocks" {
+  description = "CIDRs allowed operator access (SSH, UI/API ports); empty list denies all external admin access"
+  type        = list(string)
+  default     = []
+}
+
+variable "workload_ingress_cidr_blocks" {
+  description = "CIDRs allowed to reach workloads on 80/443; empty list disables workload ingress"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
+variable "vault_address" {
+  description = "Vault API address (internal NLB); empty disables the vault stanza"
+  type        = string
+  default     = ""
+}
+
+variable "snapshot_s3_bucket" {
+  description = "S3 bucket for daily Raft snapshots (servers only); empty disables snapshot backups"
+  type        = string
+  default     = ""
+}
+
+variable "csi_enabled" {
+  description = "Grant EC2 volume permissions for the EBS CSI plugin (clients only)"
+  type        = bool
+  default     = false
+}
+
+variable "autoscaler_enabled" {
+  description = "Grant autoscaling permissions for the Nomad Autoscaler (clients only)"
+  type        = bool
+  default     = false
+}

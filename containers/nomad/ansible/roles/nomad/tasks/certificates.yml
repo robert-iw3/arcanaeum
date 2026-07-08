@@ -44,18 +44,31 @@
     - "{{ nomad_tls_ca_file }}"
     - "{{ nomad_config_dir }}/ca-key.pem"
 
-- name: Distribute CA cert and key to every node
+- name: Distribute CA cert to every node
   copy:
-    src: "{{ lookup('env', 'HOME') }}/.cache/nomad-ansible-ca/{{ item }}"
-    dest: "{{ nomad_config_dir }}/{{ item }}"
+    src: "{{ lookup('env', 'HOME') }}/.cache/nomad-ansible-ca/ca.pem"
+    dest: "{{ nomad_tls_ca_file }}"
     owner: "{{ nomad_user }}"
     group: "{{ nomad_group }}"
     mode: "0600"
   become: yes
   when: inventory_hostname != nomad_ca_authority_host
-  loop:
-    - "ca.pem"
-    - "ca-key.pem"
+
+- name: Check whether this node's leaf certificate already exists
+  stat:
+    path: "{{ nomad_tls_cert_file }}"
+  register: nomad_leaf_cert
+  become: yes
+
+- name: Distribute CA key to nodes that still need to sign a certificate
+  copy:
+    src: "{{ lookup('env', 'HOME') }}/.cache/nomad-ansible-ca/ca-key.pem"
+    dest: "{{ nomad_config_dir }}/ca-key.pem"
+    owner: "{{ nomad_user }}"
+    group: "{{ nomad_group }}"
+    mode: "0600"
+  become: yes
+  when: inventory_hostname != nomad_ca_authority_host and not nomad_leaf_cert.stat.exists
 
 - name: Compute typed subjectAltName entries for this node's certificate
   set_fact:

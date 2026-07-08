@@ -9,8 +9,7 @@ import (
 
 func main() {
     client, err := pulsar.NewClient(pulsar.ClientOptions{
-        URL:               "${brokerServiceURL}",
-        Authentication:    pulsar.NewAuthenticationToken("${apikey}"),
+        URL: "pulsar://pulsar:6650",
     })
 
     if err != nil {
@@ -20,7 +19,7 @@ func main() {
     defer client.Close()
 
     producer, err := client.CreateProducer(pulsar.ProducerOptions{
-        Topic: "persistent://${tenant}/${namespace}/${topic}",
+        Topic: "persistent://public/default/my-topic",
     })
 
     if err != nil {
