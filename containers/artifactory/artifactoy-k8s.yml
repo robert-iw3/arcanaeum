@@ -51,7 +51,7 @@ spec:
         fsGroup: 1000
       containers:
       - name: artifactory
-        image: releases-docker.jfrog.io/jfrog/artifactory-oss:7.104.10
+        image: releases-docker.jfrog.io/jfrog/artifactory-oss:7.146.22
         env:
         - name: JF_ROUTER_ENTRYPOINTS_EXTERNALPORT
           value: "8082"
@@ -128,7 +128,7 @@ spec:
         fsGroup: 101
       containers:
       - name: nginx
-        image: releases-docker.jfrog.io/jfrog/nginx-artifactory:7.104.10
+        image: releases-docker.jfrog.io/jfrog/nginx-artifactory:7.146.22
         env:
         - name: ART_BASE_URL
           value: "http://artifactory-service:8082"
@@ -189,7 +189,7 @@ spec:
         fsGroup: 1001
       containers:
       - name: postgres
-        image: postgres:13
+        image: postgres:18
         env:
         - name: POSTGRES_DB
           valueFrom:

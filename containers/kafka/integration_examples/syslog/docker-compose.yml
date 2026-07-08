@@ -167,7 +167,7 @@ services:
         sleep infinity
 
   neo4j:
-    image: neo4j:enterprise-bullseye
+    image: neo4j:enterprise-trixie
     container_name: syslog_neo4j
     hostname: neo4j
     ports:
@@ -179,7 +179,7 @@ services:
       NEO4J_ACCEPT_LICENSE_AGREEMENT: 'yes'
 
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:9.0.3
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.4.3
     container_name: syslog_elasticsearch
     hostname: elasticsearch
     # ports:
@@ -214,7 +214,7 @@ services:
         sleep infinity
 
   kibana:
-    image: docker.elastic.co/kibana/kibana:9.0.3
+    image: docker.elastic.co/kibana/kibana:9.4.3
     container_name: syslog_kibana
     hostname: kibana
     depends_on:

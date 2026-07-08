@@ -1,8 +1,6 @@
-FROM python:3.14-rc-slim-bookworm
-
+FROM python:3.14-slim-bookworm
 COPY requirements.txt /requirements.txt
 RUN pip install -r requirements.txt
-
 WORKDIR /app
 COPY . /app
 EXPOSE 80

@@ -10,9 +10,9 @@ metadata:
   name: qdrant-secrets
   namespace: qdrant
 type: Opaque
-data:
-  qdrant-api-key: "{{ lookup('env', 'QDRANT_API_KEY') | default('c2VjdXJlX3JhbmRvbV9rZXk=', true) | b64encode }}"
-  grafana-admin-password: "{{ lookup('env', 'GRAFANA_ADMIN_PASSWORD') | default('admin', true) | b64encode }}"
+stringData:
+  qdrant-api-key: secure_random_key
+  grafana-admin-password: admin
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -55,7 +55,7 @@ data:
       grpc_port: 6334
       enable_cors: true
       enable_tls: true
-      api_key: "{{ lookup('env', 'QDRANT_API_KEY') | default('secure_random_key', true) }}"
+      api_key: secure_random_key
     cluster:
       enabled: false
     telemetry_disabled: false

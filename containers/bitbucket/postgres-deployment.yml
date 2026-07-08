@@ -9,7 +9,7 @@ metadata:
   name: postgres-bitbucket
   namespace: bitbucket
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: postgres-bitbucket
@@ -23,7 +23,7 @@ spec:
         runAsUser: 999
       containers:
       - name: postgres
-        image: postgres:13
+        image: postgres:18
         env:
         - name: POSTGRES_USER
           valueFrom:
@@ -139,7 +139,7 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: postgres-bitbucket
-  minReplicas: 2
+  minReplicas: 1
   maxReplicas: 5
   metrics:
   - type: Resource

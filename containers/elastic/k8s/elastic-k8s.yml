@@ -655,15 +655,6 @@ spec:
         runAsUser: 1000
         runAsGroup: 1000
         fsGroup: 1000
-      affinity:
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchLabels:
-                    app: elasticsearch
-                topologyKey: kubernetes.io/hostname
       initContainers:
         - name: init-sysctl
           image: busybox
@@ -794,6 +785,22 @@ spec:
       containers:
         - name: elasticsearch
           image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTIC_VERSION}
+          command:
+            - bash
+            - -c
+            - |
+              set -e
+              case "$HOSTNAME" in
+                elasticsearch-0) suffix= ;;
+                elasticsearch-1) suffix=1 ;;
+                *) suffix=2 ;;
+              esac
+              exec env \
+                "xpack.security.http.ssl.key=certs/elasticsearch${suffix}/elasticsearch${suffix}.key" \
+                "xpack.security.http.ssl.certificate=certs/elasticsearch${suffix}/elasticsearch${suffix}.chain.pem" \
+                "xpack.security.transport.ssl.key=certs/elasticsearch${suffix}/elasticsearch${suffix}.key" \
+                "xpack.security.transport.ssl.certificate=certs/elasticsearch${suffix}/elasticsearch${suffix}.crt" \
+                /bin/tini -- /usr/local/bin/docker-entrypoint.sh eswrapper
           resources:
             requests:
               cpu: "1"
@@ -825,10 +832,6 @@ spec:
               value: "true"
             - name: xpack.security.http.ssl.enabled
               value: "true"
-            - name: xpack.security.http.ssl.key
-              value: certs/elasticsearch$(metadata.name == 'elasticsearch-0' ? '' : metadata.name == 'elasticsearch-1' ? '1' : '2')/elasticsearch$(metadata.name == 'elasticsearch-0' ? '' : metadata.name == 'elasticsearch-1' ? '1' : '2').key
-            - name: xpack.security.http.ssl.certificate
-              value: certs/elasticsearch$(metadata.name == 'elasticsearch-0' ? '' : metadata.name == 'elasticsearch-1' ? '1' : '2')/elasticsearch$(metadata.name == 'elasticsearch-0' ? '' : metadata.name == 'elasticsearch-1' ? '1' : '2').chain.pem
             - name: xpack.security.http.ssl.certificate_authorities
               value: certs/ca/ca.crt
             - name: xpack.security.http.ssl.verification_mode
@@ -837,10 +840,6 @@ spec:
               value: optional
             - name: xpack.security.transport.ssl.enabled
               value: "true"
-            - name: xpack.security.transport.ssl.key
-              value: certs/elasticsearch$(metadata.name == 'elasticsearch-0' ? '' : metadata.name == 'elasticsearch-1' ? '1' : '2')/elasticsearch$(metadata.name == 'elasticsearch-0' ? '' : metadata.name == 'elasticsearch-1' ? '1' : '2').key
-            - name: xpack.security.transport.ssl.certificate
-              value: certs/elasticsearch$(metadata.name == 'elasticsearch-0' ? '' : metadata.name == 'elasticsearch-1' ? '1' : '2')/elasticsearch$(metadata.name == 'elasticsearch-0' ? '' : metadata.name == 'elasticsearch-1' ? '1' : '2').crt
             - name: xpack.security.transport.ssl.certificate_authorities
               value: certs/ca/ca.crt
             - name: xpack.security.transport.ssl.verification_mode

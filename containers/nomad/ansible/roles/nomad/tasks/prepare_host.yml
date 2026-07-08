@@ -147,17 +147,25 @@
   become: yes
   tags: [prepare]
 
+- name: Compute the full set of addresses allowed to reach cluster ports
+  set_fact:
+    nomad_cluster_allowed_ips: >-
+      {{
+        (nomad_allowed_ips
+          + (groups['nomad_servers'] | default([]) | map('extract', hostvars, ['nomad_bind_addr']) | list)
+          + (groups['nomad_clients'] | default([]) | map('extract', hostvars, ['nomad_bind_addr']) | list))
+        | unique
+      }}
+  tags: [prepare]
+
 - name: Configure firewall for Nomad (RedHat)
   firewalld:
-    port: "{{ item }}"
+    port: "{{ item.1 }}"
     permanent: yes
     state: enabled
     immediate: yes
-    source: "{{ nomad_allowed_ips | join(',') }}"
-  with_items:
-    - 4646/tcp  # HTTP API/UI
-    - 4647/tcp  # RPC
-    - 4648/tcp  # Serf
+    source: "{{ item.0 }}"
+  loop: "{{ nomad_cluster_allowed_ips | product(['4646/tcp', '4647/tcp', '4648/tcp', '4648/udp']) | list }}"
   become: yes
   when: ansible_os_family == "RedHat"
   tags: [prepare]
@@ -165,15 +173,18 @@
 - name: Configure firewall for Nomad (Debian)
   iptables:
     chain: INPUT
-    protocol: tcp
-    destination_port: "{{ item }}"
-    source: "{{ nomad_allowed_ips | join(' ') }}"
+    protocol: "{{ item.1.proto }}"
+    destination_port: "{{ item.1.port }}"
+    source: "{{ item.0 }}"
     jump: ACCEPT
-    comment: "Allow Nomad ports"
-  with_items:
-    - 4646
-    - 4647
-    - 4648
+    comment: "Allow Nomad cluster traffic"
+  loop: >-
+    {{ nomad_cluster_allowed_ips | product([
+      {'proto': 'tcp', 'port': '4646'},
+      {'proto': 'tcp', 'port': '4647'},
+      {'proto': 'tcp', 'port': '4648'},
+      {'proto': 'udp', 'port': '4648'},
+    ]) | list }}
   become: yes
   when: ansible_os_family == "Debian"
   tags: [prepare]
@@ -181,15 +192,17 @@
 - name: Configure firewall for Podman CNI networking
   iptables:
     chain: INPUT
-    protocol: "{{ item.proto }}"
-    destination_port: "{{ item.port }}"
-    source: "{{ nomad_allowed_ips | join(' ') }}"
+    protocol: "{{ item.1.proto }}"
+    destination_port: "{{ item.1.port }}"
+    source: "{{ item.0 }}"
     jump: ACCEPT
     comment: "Allow Podman CNI"
-  with_items:
-    - { proto: tcp, port: 80 }
-    - { proto: tcp, port: 443 }
-    - { proto: udp, port: 1024-65535 }
+  loop: >-
+    {{ nomad_cluster_allowed_ips | product([
+      {'proto': 'tcp', 'port': '80'},
+      {'proto': 'tcp', 'port': '443'},
+      {'proto': 'udp', 'port': '1024-65535'},
+    ]) | list }}
   become: yes
   when: ansible_os_family == "Debian" and nomad_podman_enabled
   tags: [prepare]

@@ -24,8 +24,8 @@ services:
   postgres:
     <<: *common-vars-apps
     image: docker.io/bitnami/postgresql:latest
-    container_name: postgres-onedev
-    hostname: postgres-onedev.dev.io
+    container_name: postgres-confluence
+    hostname: postgres-confluence.io
     ports:
       - 5432:5432
     environment:
@@ -182,16 +182,17 @@ services:
       - -c
       - |
         sleep 30m
-        && while true; do
-        pg_dump
-        -h postgres-confluence.io
-        -p 5432
-        -d "${POSTGRESQL_DATABASE}"
-        -U "${POSTGRESQL_USERNAME}" | gzip > /srv/confluence-postgres/backups/confluence-postgres-backup-$$(date "+%Y-%m-%d_%H-%M").gz
-        && tar -zcpf /srv/confluence-application-data/backups/confluence-application-data-backup-$$(date "+%Y-%m-%d_%H-%M").tar.gz /var/atlassian/application-data/confluence
-        && find /srv/confluence-postgres/backups -type f -mtime +7 | xargs rm -f
-        && find /srv/confluence-application-data/backups -type f -mtime +7 | xargs rm -f;
-        sleep 24h; done
+        while true; do
+          pg_dump -h postgres-confluence.io -p 5432 -d "${POSTGRESQL_DATABASE}" -U "${POSTGRESQL_USERNAME}" | gzip > /srv/confluence-postgres/backups/confluence-postgres-backup-$(date "+%Y-%m-%d_%H-%M").gz || {
+            echo "postgres backup failed at $(date)"; exit 1;
+          }
+          tar -zcpf /srv/confluence-application-data/backups/confluence-application-data-backup-$(date "+%Y-%m-%d_%H-%M").tar.gz /var/atlassian/application-data/confluence || {
+            echo "application-data backup failed at $(date)"; exit 1;
+          }
+          find /srv/confluence-postgres/backups -type f -mtime +7 -delete
+          find /srv/confluence-application-data/backups -type f -mtime +7 -delete
+          sleep 24h
+        done
     volumes:
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
@@ -203,7 +204,7 @@ services:
       POSTGRESQL_REPLICATION_MODE: slave
       POSTGRESQL_REPLICATION_USER: ${POSTGRESQL_REPLICATION_USER}
       POSTGRESQL_REPLICATION_PASSWORD: ${POSTGRESQL_REPLICATION_PASSWORD}
-      POSTGRESQL_MASTER_HOST: postgres-grafana.io
+      POSTGRESQL_MASTER_HOST: postgres-confluence.io
       POSTGRESQL_MASTER_PORT_NUMBER: 5432
     depends_on:
       postgres:

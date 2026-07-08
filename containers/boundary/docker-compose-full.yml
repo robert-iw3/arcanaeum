@@ -117,14 +117,13 @@ services:
       - -c
       - |
         sleep 30m
-        && while true; do
-        pg_dump
-        -h postgres-boundary.testing.io
-        -p 5432
-        -d "${POSTGRESQL_DATABASE}"
-        -U "${POSTGRESQL_USERNAME} | gzip > /srv/boundary-postgres/backups/boundary-postgres-backup-$$(date "+%Y-%m-%d_%H-%M").gz
-        && find /srv/boundary-postgres/backups -type f -mtime +7 | xargs rm -f;
-        sleep 24h; done
+        while true; do
+          pg_dump -h postgres-boundary.testing.io -p 5432 -d "${POSTGRESQL_DATABASE}" -U "${POSTGRESQL_USERNAME}" | gzip > /srv/boundary-postgres/backups/boundary-postgres-backup-$(date "+%Y-%m-%d_%H-%M").gz || {
+            echo "Backup failed at $(date)"; exit 1;
+          }
+          find /srv/boundary-postgres/backups -type f -mtime +7 -delete
+          sleep 24h
+        done
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - boundary-postgres:/bitnami/postgresql:z
@@ -133,7 +132,7 @@ services:
       POSTGRESQL_REPLICATION_MODE: slave
       POSTGRESQL_REPLICATION_USER: ${POSTGRESQL_REPLICATION_USER}
       POSTGRESQL_REPLICATION_PASSWORD: ${POSTGRESQL_REPLICATION_PASSWORD}
-      POSTGRESQL_MASTER_HOST: postgres-boundary.io
+      POSTGRESQL_MASTER_HOST: postgres-boundary.testing.io
       POSTGRESQL_MASTER_PORT_NUMBER: 5432
     ports:
       - 5432:5432

@@ -17,7 +17,7 @@ x-common-vars-postgres: &common-vars-postgres
 services:
   bitbucket:
     <<: *common-vars-apps
-    image: atlassian/bitbucket:8.19
+    image: ${BITBUCKET_IMAGE:-atlassian/bitbucket:10.3.1}
     container_name: bitbucket
     environment:
       JVM_MINIMUM_MEMORY: ${BITBUCKET_JVM_MINIMUM_MEMORY:-1024m}
@@ -55,7 +55,7 @@ services:
 
   bitbucket-exporter:
     <<: *common-vars-apps
-    image: python:3.9-slim
+    image: ${EXPORTER_IMAGE:-python:3.13-slim}
     container_name: bitbucket-exporter
     volumes:
       - ./bitbucket-exporter.py:/app/bitbucket-exporter.py
@@ -83,7 +83,7 @@ services:
 
   postgres-bitbucket:
     <<: *common-vars-postgres
-    image: postgres:13
+    image: ${POSTGRES_IMAGE:-postgres:18}
     container_name: postgres-bitbucket
     environment:
       POSTGRES_USER: ${POSTGRESQL_USERNAME:-bitbucket_user}
@@ -109,7 +109,7 @@ services:
 
   postgres2-bitbucket:
     <<: *common-vars-postgres
-    image: postgres:13
+    image: ${POSTGRES_IMAGE:-postgres:18}
     container_name: postgres2-bitbucket
     environment:
       POSTGRES_USER: ${POSTGRESQL_USERNAME:-bitbucket_user}

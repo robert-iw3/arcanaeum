@@ -1,6 +1,7 @@
 import pytest
 import subprocess
 import os
+import glob
 import yaml
 from kube_bench_orchestrator import KubeBenchOrchestrator
 
@@ -37,7 +38,7 @@ def test_docker_integration(sample_config, tmp_path):
     dockerfile = tmp_path / 'Dockerfile.test'
     with open(dockerfile, 'w') as f:
         f.write("""
-FROM alpine:3.23
+FROM alpine:3.24
 RUN echo '{"checks": [{"id": "1.1.1", "status": "PASS", "description": "Test check"}]}' > /output.json
 CMD ["cat", "/output.json"]
 """)
@@ -48,7 +49,7 @@ CMD ["cat", "/output.json"]
     result = orchestrator.run_scan({'endpoint': 'cluster1.example.com', 'timeout': 300})
     assert result['returncode'] == 0
     assert 'PASS' in result['stdout']
-    assert os.path.exists(os.path.join(orchestrator.reports_dir, 'kube_bench_cluster1.example.com_'))
+    assert glob.glob(os.path.join(orchestrator.reports_dir, 'kube_bench_cluster1.example.com_*'))
 
 @pytest.mark.integration
 def test_podman_integration(sample_config, tmp_path):
@@ -60,7 +61,7 @@ def test_podman_integration(sample_config, tmp_path):
     dockerfile = tmp_path / 'Dockerfile.test'
     with open(dockerfile, 'w') as f:
         f.write("""
-FROM alpine:3.23
+FROM alpine:3.24
 RUN echo '{"checks": [{"id": "1.1.1", "status": "PASS", "description": "Test check"}]}' > /output.json
 CMD ["cat", "/output.json"]
 """)
@@ -71,7 +72,7 @@ CMD ["cat", "/output.json"]
     result = orchestrator.run_scan({'endpoint': 'cluster1.example.com', 'timeout': 300})
     assert result['returncode'] == 0
     assert 'PASS' in result['stdout']
-    assert os.path.exists(os.path.join(orchestrator.reports_dir, 'kube_bench_cluster1.example.com_'))
+    assert glob.glob(os.path.join(orchestrator.reports_dir, 'kube_bench_cluster1.example.com_*'))
 
 @pytest.mark.integration
 def test_ansible_playbook(tmp_path):

@@ -2,9 +2,9 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: sql-splunk
-  namespace: {{namespace}}
+  namespace: default
 spec:
-  replicas: {{replicas}}
+  replicas: 1
   selector:
     matchLabels:
       app: sql-splunk
@@ -23,33 +23,33 @@ spec:
         - name: STATE_PATH
           value: "/app/state.db"
         - name: SPLUNK_HEC_URL
-          value: "{{splunk_hec_url}}"
+          value: "https://splunk:8088/services/collector"
         - name: SPLUNK_TOKEN
-          value: "{{splunk_token}}"
+          value: "your-splunk-hec-token"
         - name: BATCH_SIZE
-          value: "{{batch_size}}"
+          value: "100"
         - name: BUFFER_TIMEOUT
-          value: "{{buffer_timeout}}"
+          value: "30"
         - name: WORKER_COUNT
-          value: "{{worker_count}}"
+          value: "4"
         - name: POLL_INTERVAL
-          value: "{{poll_interval}}"
+          value: "30"
         - name: DB_TYPE
-          value: "{{db_type}}"
+          value: "postgresql"
         - name: DB_CONN_STR
-          value: "{{db_conn_str}}"
+          value: "postgresql://user:password@db-host:5432/dbname"
         - name: CDC_ENABLED
-          value: "{{cdc_enabled}}"
+          value: "false"
         - name: MAX_CONNECTIONS_PER_TABLE
-          value: "{{max_connections_per_table}}"
+          value: "5"
         - name: METRICS_PORT
-          value: "{{metrics_port}}"
+          value: "9090"
         - name: ENABLE_SPLUNK
           value: "true"
         - name: RUST_LOG
           value: "info"
         ports:
-        - containerPort: {{metrics_port}}
+        - containerPort: 9090
           name: metrics
         resources:
           limits:

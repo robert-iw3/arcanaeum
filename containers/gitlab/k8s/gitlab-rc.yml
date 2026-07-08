@@ -23,10 +23,10 @@ spec:
     spec:
       containers:
       - name: gitlab
-        image: docker.io/gitlab/gitlab:ce
+        image: docker.io/gitlab/gitlab-ce:latest
         envFrom:
         - secretRef:
-          name: gitlab-secrets
+            name: gitlab-secrets
         env:
         - name: TZ
           value: America/Denver

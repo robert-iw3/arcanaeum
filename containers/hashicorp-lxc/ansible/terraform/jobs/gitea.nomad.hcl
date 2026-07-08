@@ -1,6 +1,16 @@
 variable "version" {
   type    = string
-  default = "1.20.0-rootless"
+  default = "1.26.4-rootless"
+}
+
+variable "redis_version" {
+  type    = string
+  default = "8.8-alpine"
+}
+
+variable "postgres_version" {
+  type    = string
+  default = "18-alpine"
 }
 
 variable "namespace" {
@@ -96,7 +106,7 @@ job "gitea" {
       }
 
       config {
-        image = "redis:7.0-alpine"
+        image = "redis:${var.redis_version}"
       }
 
       resources {
@@ -220,7 +230,7 @@ job "gitea" {
       driver = "docker"
 
       config {
-        image = "postgres:15.2-alpine"
+        image = "postgres:${var.postgres_version}"
       }
 
       env {

@@ -47,7 +47,7 @@
     chdir: "{{ kube_bench_dir | default('/opt/kube-bench') }}"
   with_items:
     - "{{ 'podman' if deployment_type == 'podman' else 'docker' }}"
-  when: deployment_type in ['docker', 'podman']
+  when: deployment_type in ['docker', 'podman', 'kubernetes']
   register: build_result
   changed_when: build_result.rc == 0
 

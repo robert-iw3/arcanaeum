@@ -28,7 +28,7 @@ RUN \
     python3 -m pip install --upgrade pip; \
     python3 -m pip install -r requirements.txt; \
     python3 -m playwright install; \
-    rm -rf /var/cache/apk/* /root/.cache/*
+    rm -rf /var/cache/apt/* /root/.cache/*
 
 CMD [ "bash", "-c", "python3 app.py --port 8080 --host 0.0.0.0" ]
 # podman build -t apidetector .

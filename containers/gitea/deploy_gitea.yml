@@ -10,13 +10,13 @@
     podman_enabled: "{{ podman_enabled | default(true) }}"
     kubernetes_enabled: "{{ kubernetes_enabled | default(false) }}"
     use_letsencrypt: "{{ use_letsencrypt | default(true) }}"
-    docker_compose_version: 2.29.2
-    gitea_image: docker.io/gitea/gitea:1.22.0
-    postgresql_image: docker.io/bitnami/postgresql:16
-    traefik_image: docker.io/traefik:v3.5
+    docker_compose_version: 5.3.1
+    gitea_image: docker.io/gitea/gitea:1.26.4
+    postgresql_image: docker.io/bitnami/postgresql:latest
+    traefik_image: docker.io/traefik:v3.7.6
     minio_image: quay.io/minio/minio:latest
-    loki_image: docker.io/grafana/loki:3.2.1
-    pgbouncer_image: docker.io/bitnami/pgbouncer:1.23.1
+    loki_image: docker.io/grafana/loki:3.7.3
+    pgbouncer_image: docker.io/edoburu/pgbouncer:v1.25.2-p0
     vault_addr: "{{ lookup('env', 'VAULT_ADDR') | default('http://vault:8200', true) }}"
     vault_role_id: "{{ lookup('env', 'VAULT_ROLE_ID') }}"
     vault_secret_id: "{{ lookup('env', 'VAULT_SECRET_ID') }}"

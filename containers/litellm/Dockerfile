@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
 # LiteLLM: Call all LLM APIs using the OpenAI format [Anthropic, Huggingface, Cohere, TogetherAI, Azure, OpenAI, etc.]
 ARG repo="docker.io" \
-    base_image="alpine:3.23" \
-    image_hash="4d889c14e7d5a73929ab00be2ef8ff22437e7cbc545931e52554a7b00e123d8b"
+    base_image="alpine:3.24" \
+    image_hash="79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f"
 
 FROM ${repo}/${base_image}@sha256:${image_hash}
 
@@ -24,14 +24,14 @@ RUN \
     pip install --no-cache-dir --upgrade pip; \
     pip install --no-cache-dir litellm[proxy]; \
     \
+    addgroup -g 65535 litellm; \
+    adduser --shell /sbin/nologin --disabled-password -h /home/litellm --uid 65535 --ingroup litellm litellm; \
+    \
     apk add --no-cache -t .litellm-security \
         clamav \
         freshclam; \
     freshclam; \
     clamscan -rvi -l /home/litellm/last_scan.log --exclude-dir="^/sys" /; \
-    \
-    addgroup -g 65535 litellm; \
-    adduser --shell /sbin/nologin --disabled-password -h /home/litellm --uid 65535 --ingroup litellm litellm; \
     chown litellm:litellm /home/litellm/last_scan.log; \
     \
     apk del --purge .litellm-build .litellm-security; \

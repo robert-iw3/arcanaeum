@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1
 # boundary: provides access to applications and critical systems with fine-grained authorizations without managing credentials or exposing your network.
 ARG repo="docker.io" \
-    base_image="alpine:3.23" \
-    image_hash="4d889c14e7d5a73929ab00be2ef8ff22437e7cbc545931e52554a7b00e123d8b"
+    base_image="alpine:3.24" \
+    image_hash="79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f"
 
-FROM ${repo}/${base_image} AS base
+FROM ${repo}/${base_image}@sha256:${image_hash} AS base
 
 RUN apk add --no-cache \
     dumb-init \
@@ -16,7 +16,7 @@ RUN apk add --no-cache \
 
 FROM base AS build-env
 
-ENV PRODUCT_VERSION=0.20.1 \
+ENV PRODUCT_VERSION=0.21.3 \
     GPG_KEY=C874011F0AB405110D02105534365D9472D7468F
 
 RUN apk add --no-cache -t .boundary-deps \

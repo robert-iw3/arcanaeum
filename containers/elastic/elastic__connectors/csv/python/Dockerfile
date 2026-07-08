@@ -2,10 +2,10 @@
 # csv-connector: Sends CSV logs to Splunk and/or Elasticsearch
 
 ARG repo="docker.io" \
-    base_image="python:3.9-alpine" \
-    image_hash="f1a87fd82b7f2a2b9a7e6a07a5b3e99a1d0b8b6c7e4a0c4f7e8b2c1d9f3a5b6"
+    base_image="python:3.14-alpine" \
+    image_hash="47f36929d95852c8aa959380eeeea761ba7411ebe793d090da4cd518ac3af237"
 
-FROM ${repo}/${base_image}
+FROM ${repo}/${base_image}@sha256:${image_hash}
 
 LABEL org.opencontainers.image.name='CSV-Connector' \
     org.opencontainers.image.description='Connector for forwarding CSV logs to Splunk and Elasticsearch' \

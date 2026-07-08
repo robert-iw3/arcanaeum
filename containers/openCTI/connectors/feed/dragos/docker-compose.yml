@@ -9,7 +9,7 @@ services:
       - DRAGOS_API_SECRET=ChangeMe
     restart: unless-stopped
     networks:
-      - docker_default
+      - default
 
 networks:
   default:

@@ -115,14 +115,23 @@ spec:
         image: boundary:latest
         command: ["boundary", "server", "-config", "/boundary/config.hcl"]
         env:
-        - name: BOUNDARY_POSTGRES_URL
+        - name: POSTGRESQL_USERNAME
           valueFrom:
             secretKeyRef:
               name: boundary-secrets
               key: postgresql-username
+        - name: POSTGRESQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: boundary-secrets
               key: postgresql-password
+        - name: POSTGRESQL_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: boundary-secrets
               key: postgresql-database
-              value: "postgresql://$(POSTGRESQL_USERNAME):$(POSTGRESQL_PASSWORD)@postgres.boundary.svc.cluster.local:5432/$(POSTGRESQL_DATABASE)?sslmode=disable"
+        - name: BOUNDARY_POSTGRES_URL
+          value: "postgresql://$(POSTGRESQL_USERNAME):$(POSTGRESQL_PASSWORD)@postgres.boundary.svc.cluster.local:5432/$(POSTGRESQL_DATABASE)?sslmode=disable"
         - name: BOUNDARY_ROOT_KEY
           valueFrom:
             secretKeyRef:
@@ -205,14 +214,23 @@ spec:
         image: boundary:latest
         command: ["boundary", "server", "-config", "/boundary/config.hcl"]
         env:
-        - name: BOUNDARY_POSTGRES_URL
+        - name: POSTGRESQL_USERNAME
           valueFrom:
             secretKeyRef:
               name: boundary-secrets
               key: postgresql-username
+        - name: POSTGRESQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: boundary-secrets
               key: postgresql-password
+        - name: POSTGRESQL_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: boundary-secrets
               key: postgresql-database
-              value: "postgresql://$(POSTGRESQL_USERNAME):$(POSTGRESQL_PASSWORD)@postgres.boundary.svc.cluster.local:5432/$(POSTGRESQL_DATABASE)?sslmode=disable"
+        - name: BOUNDARY_POSTGRES_URL
+          value: "postgresql://$(POSTGRESQL_USERNAME):$(POSTGRESQL_PASSWORD)@postgres.boundary.svc.cluster.local:5432/$(POSTGRESQL_DATABASE)?sslmode=disable"
         - name: BOUNDARY_WORKER_AUTH_KEY
           valueFrom:
             secretKeyRef:

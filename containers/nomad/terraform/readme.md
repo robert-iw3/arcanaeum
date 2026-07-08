@@ -18,20 +18,20 @@ This project deploys a multi-region HashiCorp Nomad cluster (v1.9.2) on AWS usin
 ## File Structure
 ```
 nomad-aws-deployment/
-├── .github/workflows/deploy.yml      # CI/CD workflow
-├── modules/                         # Terraform modules (nomad, consul, vault, monitoring, vpc)
-├── packer/nomad-podman-ami.pkr.hcl  # Packer AMI template
+├── .github/workflows/deploy.yml         # CI/CD workflow
+├── modules/                             # Terraform modules (nomad, consul, vault, monitoring, vpc)
+├── packer/nomad-podman-ami.pkr.hcl      # Packer AMI template
 ├── lambda/grafana_password_rotation.py  # Lambda for Grafana password rotation
-├── deploy_nomad.py                  # Deployment script
-├── test_deploy_nomad.py             # Unit/chaos tests
-├── config.json                      # Deployment config
-├── main.tf                          # Terraform configuration
-├── variables.tf                     # Variable definitions
-├── variables.tfvars                 # Variable values
-├── provider.tf                      # AWS provider
-├── fluent-bit.nomad                 # Sample Nomad job
-├── *-dashboard.json                 # Grafana dashboards (nomad, consul, vault, fluent-bit)
-├── grafana-alerts.yml               # Grafana alerts
+├── deploy_nomad.py                      # Deployment script
+├── test_deploy_nomad.py                 # Unit/chaos tests
+├── config.json                          # Deployment config
+├── main.tf                              # Terraform configuration
+├── variables.tf                         # Variable definitions
+├── variables.tfvars                     # Variable values
+├── provider.tf                          # AWS provider
+├── fluent-bit.nomad                     # Sample Nomad job
+├── *-dashboard.json                     # Grafana dashboards (nomad, consul, vault, fluent-bit)
+├── grafana-alerts.yml                   # Grafana alerts
 └── README.md
 ```
 

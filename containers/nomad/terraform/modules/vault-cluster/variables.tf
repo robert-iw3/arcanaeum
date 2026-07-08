@@ -33,8 +33,8 @@ variable "vault_enabled" {
   type        = bool
 }
 
-variable "vault_token" {
-  description = "Vault token for Nomad integration"
+variable "ssh_key_name" {
+  description = "Name of the SSH key pair for EC2 instances"
   type        = string
-  sensitive   = true
+  default     = ""
 }

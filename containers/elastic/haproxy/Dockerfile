@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.4
 # haproxy: a free, very fast and reliable reverse-proxy offering high availability, load balancing, and proxying for TCP and HTTP-based applications.
-FROM docker.io/alpine:3.23
+FROM docker.io/alpine:3.24
 
 # runtime dependencies
 RUN \

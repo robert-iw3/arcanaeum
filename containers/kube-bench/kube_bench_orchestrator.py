@@ -13,6 +13,8 @@ import hashlib
 import hmac
 from jinja2 import Template
 
+logger = logging.getLogger(__name__)
+
 # HTML report template
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -90,9 +92,11 @@ class KubeBenchOrchestrator:
         Raises:
             KubeBenchError: If path is invalid or contains unsafe characters.
         """
-        if not re.match(r'^[a-zA-Z0-9_/.-]+$', path):
+        if not re.match(r'^[a-zA-Z0-9_~/.-]+$', path):
             raise KubeBenchError(f"Invalid characters in path: {path}")
-        return os.path.abspath(path)
+        if '..' in path.split('/'):
+            raise KubeBenchError(f"Invalid characters in path: {path}")
+        return os.path.abspath(os.path.expanduser(path))
 
     def validate_endpoint(self, endpoint: str) -> None:
         """Validate endpoint URL to prevent command injection.
@@ -119,11 +123,18 @@ class KubeBenchOrchestrator:
             logger.warning("No binary signature provided, skipping verification")
             return
 
+        hmac_key = os.getenv('KUBE_BENCH_HMAC_KEY')
+        if not hmac_key:
+            raise KubeBenchError(
+                "KUBE_BENCH_HMAC_KEY is not set; a binary signature was provided but there is "
+                "no secret key to verify it against"
+            )
+
         try:
             with open(binary_path, 'rb') as f:
                 binary_data = f.read()
             computed_signature = hmac.new(
-                b'secret_key', binary_data, hashlib.sha256
+                hmac_key.encode(), binary_data, hashlib.sha256
             ).hexdigest()
             if not hmac.compare_digest(computed_signature, self.binary_signature):
                 raise KubeBenchError("Binary signature verification failed")
@@ -327,7 +338,7 @@ class KubeBenchOrchestrator:
 
         if self.deployment_type == 'docker':
             base_cmd = [
-                'docker', 'run', '--rm', '-it',
+                'docker', 'run', '--rm',
                 '--pid=host',
                 '--security-opt', 'apparmor=kube_bench_profile',
                 '-v', '/etc:/etc:ro',
@@ -339,7 +350,7 @@ class KubeBenchOrchestrator:
             ]
         elif self.deployment_type == 'podman':
             base_cmd = [
-                'podman', 'run', '--rm', '-it',
+                'podman', 'run', '--rm',
                 '--pid=host',
                 '--selinux', 'label=type:kube_bench_t',
                 '-v', '/etc:/etc:ro',

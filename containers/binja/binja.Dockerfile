@@ -1,4 +1,5 @@
-FROM docker.io/debian:12
+ARG DEBIAN_VERSION=13
+FROM docker.io/debian:${DEBIAN_VERSION}
 
 LABEL \
     org.opencontainers.image.name='Binary Ninja' \

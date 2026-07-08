@@ -23,7 +23,7 @@ spec:
         - --log.level=INFO
         - --accesslog=true
         - --metrics.prometheus=true
-      image: docker.io/traefik:v3.5
+      image: docker.io/traefik:v3.7.6
       name: traefik
       ports:
         - containerPort: 80
@@ -115,7 +115,7 @@ spec:
         - containerPort: 2802
       securityContext:
         privileged: false
-    - image: docker.io/redis/redis-stack:7.2.0-v17
+    - image: docker.io/redis/redis-stack:7.4.0-v8
       name: redis
       ports:
         - containerPort: 6379

@@ -15,7 +15,7 @@ services:
 
   nginx:
     restart: always
-    image: docker.io/nginx:alpine
+    image: ${NGINX_IMAGE:-docker.io/nginx:alpine}
     ports:
       - 8005:8005/tcp #frontend port to backend
       - 443:443/tcp
@@ -34,7 +34,7 @@ services:
       - certs
 
 networks:
-  - app
+  app: {}
 
 secrets:
   proxy.ca:

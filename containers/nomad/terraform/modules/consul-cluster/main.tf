@@ -30,7 +30,7 @@ resource "aws_security_group" "consul_sg" {
 }
 
 resource "aws_iam_role" "consul_role" {
-  name = "${var.cluster_name}-consul-role"
+  name  = "${var.cluster_name}-consul-role"
   count = var.consul_enabled ? 1 : 0
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -45,8 +45,8 @@ resource "aws_iam_role" "consul_role" {
 }
 
 resource "aws_iam_role_policy" "consul_policy" {
-  name = "${var.cluster_name}-consul-policy"
-  role = aws_iam_role.consul_role[0].id
+  name  = "${var.cluster_name}-consul-policy"
+  role  = aws_iam_role.consul_role[0].id
   count = var.consul_enabled ? 1 : 0
   policy = jsonencode({
     Version = "2012-10-17"
@@ -64,22 +64,24 @@ resource "aws_iam_role_policy" "consul_policy" {
 }
 
 resource "aws_iam_instance_profile" "consul_profile" {
-  name = "${var.cluster_name}-consul-profile"
-  role = aws_iam_role.consul_role[0].name
+  name  = "${var.cluster_name}-consul-profile"
+  role  = aws_iam_role.consul_role[0].name
   count = var.consul_enabled ? 1 : 0
 }
 
 resource "aws_launch_template" "consul_lt" {
-  name = "${var.cluster_name}-consul-lt"
-  count = var.consul_enabled ? 1 : 0
-  image_id = var.ami_id
+  name          = "${var.cluster_name}-consul-lt"
+  count         = var.consul_enabled ? 1 : 0
+  image_id      = var.ami_id
   instance_type = var.instance_type
   iam_instance_profile {
     name = aws_iam_instance_profile.consul_profile[0].name
   }
   vpc_security_group_ids = [aws_security_group.consul_sg[0].id]
+  key_name               = var.ssh_key_name
   user_data = base64encode(templatefile("${path.module}/user-data-consul.sh", {
-    cluster_name = var.cluster_name
+    cluster_name     = var.cluster_name
+    desired_capacity = var.desired_capacity
   }))
   block_device_mappings {
     device_name = "/dev/sda1"
@@ -91,7 +93,7 @@ resource "aws_launch_template" "consul_lt" {
   tag_specifications {
     resource_type = "instance"
     tags = {
-      Name = "${var.cluster_name}-consul"
+      Name           = "${var.cluster_name}-consul"
       ConsulAutoJoin = "auto-join"
     }
   }

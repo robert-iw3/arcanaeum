@@ -9,6 +9,9 @@ ExecStart=/usr/local/bin/nomad agent -config=/etc/nomad.d/nomad.hcl
 ExecReload=/bin/kill -HUP $MAINPID
 KillMode=process
 Restart=on-failure
+RestartSec=5
+User=nomad
+Group=nomad
 LimitNOFILE=65536
 
 [Install]

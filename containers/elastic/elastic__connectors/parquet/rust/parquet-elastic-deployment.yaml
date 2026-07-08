@@ -2,9 +2,9 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: parquet-elastic
-  namespace: {{namespace}}
+  namespace: default
 spec:
-  replicas: {{replicas}}
+  replicas: 1
   selector:
     matchLabels:
       app: parquet-elastic
@@ -23,42 +23,42 @@ spec:
         - name: STATE_PATH
           value: "/app/state.db"
         - name: ES_HOST
-          value: "{{es_host}}"
+          value: "http://elasticsearch:9200"
         - name: ES_INDEX
-          value: "{{es_index}}"
+          value: "parquet-logs"
         - name: ES_AUTH
-          value: "{{es_auth}}"
+          value: ""
         - name: BATCH_SIZE
-          value: "{{batch_size}}"
+          value: "100"
         - name: BUFFER_TIMEOUT
-          value: "{{buffer_timeout}}"
+          value: "30"
         - name: WORKER_COUNT
-          value: "{{worker_count}}"
+          value: "4"
         - name: POLL_INTERVAL
-          value: "{{poll_interval}}"
+          value: "30"
         - name: DATA_DIR
-          value: "{{data_dir}}"
+          value: "/data"
         - name: INCREMENTAL_ENABLED
-          value: "{{incremental_enabled}}"
+          value: "true"
         - name: MAX_FILES_CONCURRENT
-          value: "{{max_files_concurrent}}"
+          value: "5"
         - name: MAX_MEMORY_MB
-          value: "{{max_memory_mb}}"
+          value: "512"
         - name: METRICS_PORT
-          value: "{{metrics_port}}"
+          value: "9090"
         - name: SQLCIPHER_KEY
-          value: "{{sqlcipher_key}}"
+          value: "your-sqlcipher-key"
         - name: RUST_LOG
-          value: "{{rust_log}}"
+          value: "info"
         - name: PYTHON_LOGGING_LEVEL
-          value: "{{python_logging_level}}"
+          value: "INFO"
         ports:
-        - containerPort: {{metrics_port}}
+        - containerPort: 9090
           name: metrics
         resources:
           limits:
             cpu: "1"
-            memory: "{{max_memory_mb}}Mi"
+            memory: "512Mi"
           requests:
             cpu: "0.5"
             memory: "512Mi"
@@ -80,4 +80,4 @@ spec:
       volumes:
       - name: data
         hostPath:
-          path: {{data_dir}}
+          path: /data

@@ -32,3 +32,9 @@ variable "consul_enabled" {
   description = "Enable Consul deployment"
   type        = bool
 }
+
+variable "ssh_key_name" {
+  description = "Name of the SSH key pair for EC2 instances"
+  type        = string
+  default     = ""
+}

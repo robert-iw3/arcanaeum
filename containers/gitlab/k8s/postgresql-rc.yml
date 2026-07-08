@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: postgresql
-        image: docker.io/bitnami/postgresql:14
+        image: docker.io/bitnami/postgresql:latest
         env:
         - name: POSTGRESQL_USERNAME
           value: gitlab

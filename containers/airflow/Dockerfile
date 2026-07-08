@@ -1,4 +1,5 @@
-FROM docker.io/apache/airflow:3.0.3
+ARG AIRFLOW_VERSION=3.3.0
+FROM docker.io/apache/airflow:${AIRFLOW_VERSION}
 
 USER root
 # Install security updates and additional dependencies

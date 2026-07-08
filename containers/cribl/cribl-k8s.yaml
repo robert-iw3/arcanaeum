@@ -59,7 +59,7 @@ spec:
             - name: SCOPE_EVENT_DEST
               value: "tcp://cribl-workers:10001"
             - name: CRIBL_SPLUNK
-              value: "{{ .Values.splunkHost | default 'cribl-workers:9999' }}"
+              value: "cribl-workers:9999"
             - name: CRIBL_SPLUNK_ARGS
               value: "-ssl-cert-path /opt/cribl/certs/client.pem"
             - name: CRIBL_SPLUNK_HEC_TOKEN
@@ -68,7 +68,7 @@ spec:
                   name: cribl-certs
                   key: splunk_hec_token
             - name: CRIBL_ELASTIC
-              value: "{{ .Values.elasticHost | default 'http://cribl-workers:10200' }}"
+              value: "http://cribl-workers:10200"
             - name: CRIBL_ELASTIC_AUTH
               valueFrom:
                 secretKeyRef:
@@ -173,7 +173,7 @@ metadata:
   name: cribl-workers
 spec:
   serviceName: cribl-workers
-  replicas: "{{ .Values.replicaCount | default 2 }}"
+  replicas: 2
   selector:
     matchLabels:
       app: cribl-workers
@@ -204,7 +204,7 @@ spec:
             - name: SCOPE_EVENT_DEST
               value: "tcp://cribl-workers:10001"
             - name: CRIBL_SPLUNK
-              value: "{{ .Values.splunkHost | default 'cribl-workers:9999' }}"
+              value: "cribl-workers:9999"
             - name: CRIBL_SPLUNK_ARGS
               value: "-ssl-cert-path /opt/cribl/certs/client.pem"
             - name: CRIBL_SPLUNK_HEC_TOKEN
@@ -213,7 +213,7 @@ spec:
                   name: cribl-certs
                   key: splunk_hec_token
             - name: CRIBL_ELASTIC
-              value: "{{ .Values.elasticHost | default 'http://cribl-workers:10200' }}"
+              value: "http://cribl-workers:10200"
             - name: CRIBL_ELASTIC_AUTH
               valueFrom:
                 secretKeyRef:
@@ -342,7 +342,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: cribl-network-policy
-  namespace: "{{ .Values.namespace | default 'default' }}"
+  namespace: default
 spec:
   podSelector:
     matchLabels:

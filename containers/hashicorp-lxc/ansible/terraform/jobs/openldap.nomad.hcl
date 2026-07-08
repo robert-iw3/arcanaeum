@@ -1,6 +1,6 @@
 variable "version" {
   type    = string
-  default = "2.6.6"
+  default = "2.6.10-alpha"
 }
 
 variable "namespace" {
@@ -46,23 +46,25 @@ job "ldap" {
       driver = "docker"
 
       config {
-        image = "bitnami/openldap:${var.version}"
+        image = "osixia/openldap:${var.version}"
         ports = ["ldap"]
+        args  = ["--copy-service"]
 
         volumes = [
-          "local/root.ldif:/ldifs/root.ldif",
+          "local/root.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/root.ldif",
         ]
       }
 
       env {
-        LDAP_ROOT = "dc=nomad,dc=local"
-        LDAP_ADMIN_USERNAME = "admin"
+        LDAP_ORGANISATION   = "nomad"
+        LDAP_DOMAIN         = "nomad.local"
         LDAP_ADMIN_PASSWORD = "admin"
+        LDAP_TLS            = "false"
       }
 
       volume_mount {
         volume      = "data"
-        destination = "/bitnami/openldap"
+        destination = "/var/lib/ldap"
       }
 
       template {

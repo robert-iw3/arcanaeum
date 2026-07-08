@@ -1,4 +1,4 @@
-FROM golang:1.23-alpine AS builder
+FROM golang:1.26.4-alpine3.24 AS builder
 #
 # Include dist
 COPY dist/ /root/dist/
@@ -22,7 +22,7 @@ RUN apk --no-cache -U upgrade && \
     make build && \
 	cp /root/dist/*.yaml /opt/glutton/config/
 #
-FROM alpine:3.20
+FROM alpine:3.24
 #
 COPY --from=builder /opt/glutton/bin /opt/glutton/bin
 COPY --from=builder /opt/glutton/config /opt/glutton/config

@@ -75,8 +75,8 @@ services:
       dockerfile: Dockerfile
     container_name: arkime
     depends_on:
-      - ${OS_NODE1}
-      # - $OS_NODE2
+      - os01
+      # - os02
     environment:
       - OS_HOST=${OS_NODE1}
       - OS_PORT=9200

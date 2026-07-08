@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1.4
 # keycloak: Add authentication to applications and secure services with minimum effort.
 
-ARG fetcher_image="registry.access.redhat.com/ubi9/ubi-minimal:9.5-1739420147" \
-    fetcher_hash="fb77e447ab97f3fecd15d2fa5361a99fe2f34b41422e8ebb3612eecd33922fa0" \
-    keycloak_image="quay.io/keycloak/keycloak:26.1.2" \
-    keycloak_hash="c0bd68ac92a2ba5cf9e477d16259abb574fc1eb4f7d8bb43af0803d81cbc82eb"
+ARG fetcher_image="registry.access.redhat.com/ubi9/ubi-minimal:9.8-1782797275" \
+    fetcher_hash="8201445bebcb5bd4fe23fcc2a76cd5fec029ab401d270926a1563c03b36f0137" \
+    keycloak_image="quay.io/keycloak/keycloak:26.6.4" \
+    keycloak_hash="22c8cf9e79af88d320499c93994bb2c319ca255092d8ae7c7a45dd46d68192e2"
 
 FROM ${fetcher_image}@sha256:${fetcher_hash} as fetcher
 
@@ -14,11 +14,11 @@ ARG GOMPLATE_VERSION \
     RESTRICT_CLIENT_AUTH_VERSION
 
     # renovate: datasource=github-releases depName=hairyhenderson/gomplate
-ENV GOMPLATE_VERSION="${GOMPLATE_VERSION:-v4.3.0}" \
+ENV GOMPLATE_VERSION="${GOMPLATE_VERSION:-v5.1.0}" \
     # renovate: datasource=github-releases depName=thegeeklab/wait-for
-    WAIT_FOR_VERSION="${WAIT_FOR_VERSION:-v0.4.3}" \
+    WAIT_FOR_VERSION="${WAIT_FOR_VERSION:-v0.4.4}" \
     # renovate: datasource=github-releases depName=sventorben/keycloak-restrict-client-auth
-    RESTRICT_CLIENT_AUTH_VERSION="${RESTRICT_CLIENT_AUTH_VERSION:-v26.0.0}"
+    RESTRICT_CLIENT_AUTH_VERSION="${RESTRICT_CLIENT_AUTH_VERSION:-v26.1.0}"
 
 RUN microdnf install -y \
         tar \

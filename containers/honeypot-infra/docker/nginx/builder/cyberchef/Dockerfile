@@ -1,5 +1,5 @@
 #FROM node:17.9.0-alpine3.15 as builder
-FROM node:18-alpine as builder
+FROM node:26.4.0-alpine3.24 as builder
 #
 # Prep and build Cyberchef
 ENV CY_VER=v10.19.4

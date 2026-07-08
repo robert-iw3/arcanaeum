@@ -16,13 +16,13 @@ spec:
       hostPID: true
       containers:
       - name: mw-agent
-        image: mw-agent:1.3.0
+        image: mw-agent:1.20.3
         envFrom:
         - secretRef:
             name: mw-agent-secret
         env:
         - name: MW_HOST_TAGS
-          value: "env:prod,cluster:${KUBERNETES_CLUSTER_NAME:-unknown}"
+          value: "env:prod,cluster:your-cluster-name"
         volumeMounts:
         - name: config
           mountPath: /etc/mw-agent/otel-config.yaml

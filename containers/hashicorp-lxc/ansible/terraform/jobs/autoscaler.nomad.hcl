@@ -1,6 +1,6 @@
 variable "version" {
   type    = string
-  default = "0.3.7"
+  default = "0.5.0"
 }
 
 variable "namespace" {
@@ -10,7 +10,7 @@ variable "namespace" {
 
 variable "promtail_version" {
   type    = string
-  default = "2.9.1"
+  default = "3.7.3"
 }
 
 variable "nomad_token" {

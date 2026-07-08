@@ -22,9 +22,8 @@ chmod 0700 /etc/nomad.d /opt/nomad/data
 chmod 0750 /var/log/nomad
 
 # Retrieve secrets from AWS Secrets Manager
-export AWS_REGION=us-east-1
+export AWS_REGION=${aws_region}
 secrets=$(aws secretsmanager get-secret-value --secret-id ${secrets_arn} --query SecretString --output text)
-nomad_acl_token=$(echo $secrets | jq -r '.nomad_acl_token')
 nomad_gossip_key=$(echo $secrets | jq -r '.nomad_gossip_key')
 vault_token=$(echo $secrets | jq -r '.vault_token')
 
@@ -38,7 +37,10 @@ datacenter = "dc1"
 server {
   enabled = true
   bootstrap_expect = ${desired_capacity}
-  encrypt = "${nomad_gossip_key}"
+  encrypt = "$${nomad_gossip_key}"
+  server_join {
+    retry_join = ["provider=aws tag_key=NomadType tag_value=server"]
+  }
   acl {
     enabled = true
     token_ttl = "30m"
@@ -67,7 +69,7 @@ client {
 vault {
   enabled = true
   address = "https://localhost:8200"
-  token = "${vault_token}"
+  token = "$${vault_token}"
   create_from_role = "nomad-cluster"
 }
 telemetry {
@@ -89,8 +91,8 @@ local_ip=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
 openssl genrsa -out /etc/nomad.d/ca-key.pem 4096
 openssl req -x509 -new -nodes -key /etc/nomad.d/ca-key.pem -sha256 -days 365 -out /etc/nomad.d/ca.pem -subj "/CN=Nomad CA"
 openssl genrsa -out /etc/nomad.d/nomad-key.pem 4096
-openssl req -new -key /etc/nomad.d/nomad-key.pem -out /etc/nomad.d/nomad.csr -subj "/CN=${cluster_name}/O=Nomad" -addext "subjectAltName=IP:${local_ip},DNS:localhost,IP:127.0.0.1"
-openssl x509 -req -in /etc/nomad.d/nomad.csr -CA /etc/nomad.d/ca.pem -CAkey /etc/nomad.d/ca-key.pem -CAcreateserial -out /etc/nomad.d/nomad-cert.pem -days 365 -sha256 -extfile <(echo "subjectAltName=IP:${local_ip},DNS:localhost,IP:127.0.0.1")
+openssl req -new -key /etc/nomad.d/nomad-key.pem -out /etc/nomad.d/nomad.csr -subj "/CN=${cluster_name}/O=Nomad" -addext "subjectAltName=IP:$${local_ip},DNS:localhost,IP:127.0.0.1"
+openssl x509 -req -in /etc/nomad.d/nomad.csr -CA /etc/nomad.d/ca.pem -CAkey /etc/nomad.d/ca-key.pem -CAcreateserial -out /etc/nomad.d/nomad-cert.pem -days 365 -sha256 -extfile <(echo "subjectAltName=IP:$${local_ip},DNS:localhost,IP:127.0.0.1")
 chown nomad:nomad /etc/nomad.d/*.pem /etc/nomad.d/*.csr
 chmod 0600 /etc/nomad.d/*.pem /etc/nomad.d/*.csr
 
@@ -143,7 +145,8 @@ systemctl daemon-reload
 systemctl enable nomad
 systemctl start nomad
 
-# Bootstrap ACLs
-nomad acl bootstrap > /etc/nomad.d/acl-bootstrap.txt
+# Bootstrap ACLs. Only the first server to reach this point succeeds; a second
+# attempt fails once ACLs are already bootstrapped, which is not fatal here.
+nomad acl bootstrap > /etc/nomad.d/acl-bootstrap.txt || true
 chown nomad:nomad /etc/nomad.d/acl-bootstrap.txt
 chmod 0600 /etc/nomad.d/acl-bootstrap.txt

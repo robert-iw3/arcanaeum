@@ -5,24 +5,24 @@ global:
 scrape_configs:
   - job_name: 'nomad'
     static_configs:
-      - targets: ['${nomad_lb_address}:4646']
+      - targets: [%{ for ip in nomad_ips }"${ip}:4646",%{ endfor }]
         labels:
           group: 'nomad'
 
   - job_name: 'consul'
     static_configs:
-      - targets: [${join(",", consul_ips)}]
+      - targets: [%{ for ip in consul_ips }"${ip}:8500",%{ endfor }]
         labels:
           group: 'consul'
 
   - job_name: 'vault'
     static_configs:
-      - targets: [${join(",", vault_ips)}]
+      - targets: [%{ for ip in vault_ips }"${ip}:8200",%{ endfor }]
         labels:
           group: 'vault'
 
   - job_name: 'fluent-bit'
     static_configs:
-      - targets: ['${nomad_lb_address}:2021']
+      - targets: [%{ for ip in nomad_ips }"${ip}:2021",%{ endfor }]
         labels:
           group: 'fluent-bit'

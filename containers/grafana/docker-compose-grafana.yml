@@ -26,7 +26,7 @@ x-common-vars-apps: &common-vars-apps
 services:
   postgres:
     <<: *common-vars-apps
-    image: docker.io/bitnami/postgresql:16
+    image: docker.io/bitnami/postgresql:latest
     container_name: postgres
     hostname: postgres-grafana.io
     ports:
@@ -128,7 +128,7 @@ services:
 
   traefik:
     <<: *common-vars-apps
-    image: docker.io/traefik:v3.0
+    image: docker.io/traefik:v3.7.6
     container_name: traefik
     hostname: traefik.io
     command:
@@ -189,7 +189,7 @@ services:
 
   backups:
     <<: *common-vars-apps
-    image: docker.io/bitnami/postgresql:16
+    image: docker.io/bitnami/postgresql:latest
     container_name: psql-backup
     hostname: grafana-backup-psql.io
     command:

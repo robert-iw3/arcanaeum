@@ -2,12 +2,12 @@
 # It is designed to protect REST and GraphQL API endpoints in cloud-native environments.
 # API Firewall provides API hardening with the use of a positive security model allowing calls that match a predefined API specification for requests and responses, while rejecting everything else.
 ARG repo="docker.io" \
-    base_image="alpine:3.23" \
-    image_hash="4d889c14e7d5a73929ab00be2ef8ff22437e7cbc545931e52554a7b00e123d8b"
+    base_image="alpine:3.24" \
+    image_hash="79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f"
 
 FROM ${repo}/${base_image}@sha256:${image_hash} AS build-env
 
-ENV APIFIREWALL_VERSION=0.9.3 \
+ENV APIFIREWALL_VERSION=0.9.6 \
     GOPATH=/usr/local/bin/go \
     SNYK_API=
 

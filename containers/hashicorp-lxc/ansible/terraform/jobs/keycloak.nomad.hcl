@@ -1,11 +1,11 @@
 variable "version" {
   type    = string
-  default = "22.0"
+  default = "26.6.4"
 }
 
 variable "postgres_version" {
   type    = string
-  default = "15-alpine"
+  default = "18-alpine"
 }
 
 variable "namespace" {

@@ -2,9 +2,9 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: json-elasticsearch
-  namespace: {{namespace}}
+  namespace: default
 spec:
-  replicas: {{replicas}}
+  replicas: 1
   selector:
     matchLabels:
       app: json-elasticsearch
@@ -23,15 +23,15 @@ spec:
         - name: SCHEMAS_FILE
           value: "/app/schemas.yaml"
         - name: ES_HOST
-          value: "{{es_host}}"
+          value: "http://elasticsearch:9200"
         - name: ES_INDEX
-          value: "{{es_index}}"
+          value: "json-logs"
         - name: BATCH_SIZE
-          value: "{{batch_size}}"
+          value: "100"
         - name: BUFFER_TIMEOUT
-          value: "{{buffer_timeout}}"
+          value: "30"
         - name: WORKER_COUNT
-          value: "{{worker_count}}"
+          value: "4"
         - name: ENABLE_SPLUNK
           value: "false"
         volumeMounts:

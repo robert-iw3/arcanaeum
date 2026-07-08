@@ -39,7 +39,7 @@ spec:
         - name: DEFGUARD_LOG_LEVEL
           value: "info"
         - name: DEFGUARD_DB_HOST
-          value: "db"
+          value: "defguard-db"
         - name: DEFGUARD_DB_PORT
           value: "5432"
         - name: DEFGUARD_URL
@@ -69,8 +69,94 @@ spec:
             port: 8000
           initialDelaySeconds: 5
           periodSeconds: 5
+      - name: gateway
+        image: ghcr.io/defguard/gateway:latest
+        ports:
+        - containerPort: 50051
+          protocol: UDP
+          name: wireguard
+        envFrom:
+        - secretRef:
+            name: defguard-secrets
+        env:
+        - name: DEFGUARD_GRPC_URL
+          value: "https://localhost:50055"
+        - name: DEFGUARD_STATS_PERIOD
+          value: "60"
+        - name: RUST_LOG
+          value: "info"
+        volumeMounts:
+        - name: certs
+          mountPath: /certs
+          readOnly: true
+        resources:
+          limits:
+            cpu: "0.4"
+            memory: "256Mi"
+          requests:
+            cpu: "0.2"
+            memory: "128Mi"
+        securityContext:
+          capabilities:
+            add: ["NET_ADMIN"]
+      - name: proxy
+        image: ghcr.io/defguard/defguard-proxy:current
+        ports:
+        - containerPort: 8080
+          name: proxy
+        env:
+        - name: DEFGUARD_PROXY_UPSTREAM_GRPC_URL
+          value: "https://localhost:50055/"
+        volumeMounts:
+        - name: certs
+          mountPath: /certs
+          readOnly: true
+        resources:
+          limits:
+            cpu: "0.3"
+            memory: "256Mi"
+          requests:
+            cpu: "0.1"
+            memory: "128Mi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: certs
+        secret:
+          secretName: defguard-tls
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: defguard-db
+  namespace: defguard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: defguard-db
+  template:
+    metadata:
+      labels:
+        app: defguard-db
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        fsGroup: 999
+      containers:
       - name: db
-        image: postgres:15-alpine
+        image: postgres:18-alpine
         ports:
         - containerPort: 5432
           name: postgres
@@ -104,71 +190,7 @@ spec:
             command: ["pg_isready", "-U", "defguard"]
           initialDelaySeconds: 5
           periodSeconds: 5
-      - name: gateway
-        image: ghcr.io/defguard/gateway:latest
-        ports:
-        - containerPort: 50051
-          protocol: UDP
-          name: wireguard
-        envFrom:
-        - secretRef:
-            name: defguard-secrets
-        env:
-        - name: DEFGUARD_GRPC_URL
-          value: "https://core:50055"
-        - name: DEFGUARD_STATS_PERIOD
-          value: "60"
-        - name: RUST_LOG
-          value: "info"
-        volumeMounts:
-        - name: certs
-          mountPath: /certs
-          readOnly: true
-        resources:
-          limits:
-            cpu: "0.4"
-            memory: "256Mi"
-          requests:
-            cpu: "0.2"
-            memory: "128Mi"
-        securityContext:
-          capabilities:
-            add: ["NET_ADMIN"]
-      - name: proxy
-        image: ghcr.io/defguard/defguard-proxy:current
-        ports:
-        - containerPort: 8080
-          name: proxy
-        env:
-        - name: DEFGUARD_PROXY_UPSTREAM_GRPC_URL
-          value: "https://core:50055/"
-        volumeMounts:
-        - name: certs
-          mountPath: /certs
-          readOnly: true
-        resources:
-          limits:
-            cpu: "0.3"
-            memory: "256Mi"
-          requests:
-            cpu: "0.1"
-            memory: "128Mi"
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 15
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 5
-          periodSeconds: 5
       volumes:
       - name: db-storage
         persistentVolumeClaim:
           claimName: defguard-db-pvc
-      - name: certs
-        secret:
-          secretName: defguard-tls

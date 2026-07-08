@@ -1,13 +1,15 @@
 # syntax=docker/dockerfile:1
 # kube-bench: Checks whether Kubernetes is deployed according to security best practices as defined in the CIS Kubernetes Benchmark.
 ARG repo="docker.io" \
-    base_image="alpine:3.23" \
-    image_hash="4d889c14e7d5a73929ab00be2ef8ff22437e7cbc545931e52554a7b00e123d8b"
+    base_image="alpine:3.24" \
+    image_hash="79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f" \
+    ubi_image="registry.access.redhat.com/ubi9/ubi-minimal:9.8-1782797275" \
+    ubi_hash="8201445bebcb5bd4fe23fcc2a76cd5fec029ab401d270926a1563c03b36f0137"
 
 FROM ${repo}/${base_image}@sha256:${image_hash} AS go-builder
 
 ENV GOPATH=/usr/local/bin/go \
-    KBENCH_VER=0.14.0
+    KBENCH_VER=0.15.6
 
 RUN \
     apk add --no-cache -t .kbench-deps \
@@ -22,9 +24,6 @@ RUN \
     cp kube-bench ${GOPATH}/bin/kube-bench; \
     apk del --purge .kbench-deps; \
     rm -rf /var/cache/apk/*
-
-ARG ubi_image="registry.access.redhat.com/ubi9/ubi-minimal" \
-    ubi_hash="3660caede14750ab8df58f780016be487e490055acf07f67333c0001c661c913"
 
 FROM ${ubi_image}@sha256:${ubi_hash}
 

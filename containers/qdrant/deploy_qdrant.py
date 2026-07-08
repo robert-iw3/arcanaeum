@@ -36,6 +36,12 @@ class QdrantDeployer:
             logger.error(f"Failed to load config: {str(e)}")
             raise
 
+    def read_template(self, filename: str) -> str:
+        """Read a template file's raw text from this script's own directory."""
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(script_dir, filename), 'r') as f:
+            return f.read()
+
     def generate_inventory(self) -> None:
         """Generate Ansible inventory file."""
         inventory = {
@@ -66,7 +72,9 @@ class QdrantDeployer:
                     'kafka_version': self.config.get('kafka_version', 'latest-ubi8'),
                     'data_dir': self.config.get('data_dir', '/opt/qdrant'),
                     'tls_enabled': self.config.get('tls_enabled', True),
-                    'api_key': self.config.get('api_key', os.urandom(32).hex())
+                    'api_key': self.config.get('api_key', os.urandom(32).hex()),
+                    'docker_compose_content': self.read_template('docker-compose.yml.j2'),
+                    'qdrant_config_content': self.read_template('config.yaml.j2')
                 },
                 'tasks': [
                     {
@@ -103,7 +111,7 @@ class QdrantDeployer:
                     {
                         'name': 'Copy docker-compose configuration',
                         'copy': {
-                            'content': '{{ docker_compose_content | to_yaml }}',
+                            'content': '{{ docker_compose_content }}',
                             'dest': '{{ data_dir }}/docker-compose.yml',
                             'mode': '0640'
                         }
@@ -111,7 +119,7 @@ class QdrantDeployer:
                     {
                         'name': 'Copy Qdrant configuration',
                         'copy': {
-                            'content': '{{ qdrant_config_content | to_yaml }}',
+                            'content': '{{ qdrant_config_content }}',
                             'dest': '{{ data_dir }}/config.yaml',
                             'mode': '0640'
                         }

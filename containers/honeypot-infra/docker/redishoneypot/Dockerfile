@@ -1,4 +1,4 @@
-FROM golang:1.23-alpine as builder
+FROM golang:1.26.4-alpine3.24 as builder
 #
 # Include dist
 COPY dist/ /root/dist/
@@ -21,7 +21,7 @@ RUN apk --no-cache -U upgrade && \
     go mod download && \
     go install
 #
-FROM alpine:3.20
+FROM alpine:3.24
 #
 # Setup redishoneypot
 #

@@ -20,7 +20,7 @@ services:
 
   nginx:
     restart: always
-    image: docker.io/nginx:alpine
+    image: ${NGINX_IMAGE:-docker.io/nginx:alpine}
     #build:
     #  context: ./nginx
     #  dockerfile: Dockerfile

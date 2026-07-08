@@ -98,7 +98,7 @@ services:
       start_period: 30s
 
   postgres:
-    image: postgres:13 # Use official Postgres image with stable tag
+    image: ${POSTGRES_IMAGE:-postgres:18}
     container_name: postgresql
     user: "1001:1001" # Run as non-root
     env_file:

@@ -1,17 +1,58 @@
+resource "aws_iam_role" "monitoring_role" {
+  name = "${var.cluster_name}-monitoring-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "ec2.amazonaws.com"
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "monitoring_policy" {
+  name = "${var.cluster_name}-monitoring-policy"
+  role = aws_iam_role.monitoring_role.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "secretsmanager:GetSecretValue"
+        Resource = var.secrets_arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = "kms:Decrypt"
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_instance_profile" "monitoring_profile" {
+  name = "${var.cluster_name}-monitoring-profile"
+  role = aws_iam_role.monitoring_role.name
+}
+
 resource "aws_instance" "monitoring" {
-  ami           = var.monitoring_ami_id
-  instance_type = var.instance_type
-  subnet_id     = var.subnet_ids[0]
-  key_name      = var.ssh_key_name
+  ami                    = var.monitoring_ami_id
+  instance_type          = var.instance_type
+  subnet_id              = var.subnet_ids[0]
+  key_name               = var.ssh_key_name
+  iam_instance_profile   = aws_iam_instance_profile.monitoring_profile.name
   vpc_security_group_ids = [aws_security_group.monitoring_sg.id]
 
   user_data = templatefile("${path.module}/user-data-monitoring.sh", {
     prometheus_config = base64encode(templatefile("${path.module}/prometheus.yml", {
-      nomad_lb_address = var.nomad_lb_address,
-      consul_ips       = var.consul_ips,
-      vault_ips        = var.vault_ips
+      nomad_ips  = var.nomad_ips,
+      consul_ips = var.consul_ips,
+      vault_ips  = var.vault_ips
     })),
-    grafana_admin_password = var.grafana_admin_password
+    secrets_arn = var.secrets_arn,
+    aws_region  = var.aws_region
   })
 
   tags = {
@@ -89,13 +130,9 @@ resource "aws_lb_target_group_attachment" "grafana_attachment" {
   port             = 3000
 }
 
-data "aws_instance" "monitoring_instance" {
-  instance_id = aws_instance.monitoring.id
-}
-
 output "monitoring_instance_ip" {
   description = "Private IP of the monitoring instance"
-  value       = data.aws_instance.monitoring_instance.private_ip
+  value       = aws_instance.monitoring.private_ip
 }
 
 output "grafana_lb_address" {

@@ -3,8 +3,8 @@
 # https://python-gitlab.readthedocs.io/en/stable/
 
 ARG repo="docker.io" \
-    base_image="alpine:3.18" \
-    image_hash="d695c3de6fcd8cfe3a6222b0358425d40adfd129a8a47c3416faff1a8aece389"
+    base_image="alpine:3.24" \
+    image_hash="79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f"
 
 FROM ${repo}/${base_image}@sha256:${image_hash}
 

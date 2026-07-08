@@ -3,7 +3,7 @@ output "security_group_id" {
   value       = var.consul_enabled ? aws_security_group.consul_sg[0].id : ""
 }
 
-output "consul_instance_ips" {
+output "instance_ips" {
   description = "Private IPs of Consul instances"
   value       = var.consul_enabled ? data.aws_instances.consul_instances[0].private_ips : []
 }

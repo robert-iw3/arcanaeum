@@ -13,7 +13,6 @@ spec:
         - webui.example.com
         - yakgpt.example.com
         - nextchat.example.com
-        - chat.example.com
       secretName: litellm-tls
   rules:
     - host: litellm.example.com
@@ -56,13 +55,7 @@ spec:
                 name: nextchat
                 port:
                   number: 3000
-    - host: chat.example.com
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: ollama-webui
-                port:
-                  number: 8080
+    # chat.example.com / ollama-webui intentionally omitted: that compose service builds
+    # from a locally-tagged image (ollama-webui:local, no registry) and only runs behind the
+    # opt-in "custom-ui" compose profile — it isn't something a generic k8s node can pull, so
+    # there's no corresponding Deployment/Service to route to here.

@@ -168,7 +168,7 @@ metadata:
     app: postgres
 spec:
   serviceName: postgres
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: postgres
@@ -185,11 +185,6 @@ spec:
       - name: postgres
         image: docker.io/bitnami/postgresql:latest
         env:
-        - name: POSTGRESQL_REPLICATION_MODE
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.name
-            value: "postgres-0" ? "master" : "slave"
         - name: POSTGRESQL_USERNAME
           valueFrom:
             secretKeyRef:
@@ -205,20 +200,6 @@ spec:
             configMapKeyRef:
               name: keycloak-config
               key: postgresql-database
-        - name: POSTGRESQL_REPLICATION_USER
-          valueFrom:
-            secretKeyRef:
-              name: keycloak-secrets
-              key: postgresql-replication-user
-        - name: POSTGRESQL_REPLICATION_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: keycloak-secrets
-              key: postgresql-replication-password
-        - name: POSTGRESQL_MASTER_HOST
-          value: "postgres-0.postgres.keycloak.svc.cluster.local"
-        - name: POSTGRESQL_MASTER_PORT_NUMBER
-          value: "5432"
         volumeMounts:
         - name: localtime
           mountPath: /etc/localtime
@@ -330,7 +311,7 @@ spec:
             secretKeyRef:
               name: keycloak-secrets
               key: postgresql-password
-        - name: KEYikasCLOAK_ADMIN
+        - name: KEYCLOAK_ADMIN
           valueFrom:
             secretKeyRef:
               name: keycloak-secrets
@@ -411,7 +392,6 @@ metadata:
   namespace: keycloak
 spec:
   selector:
-    clusterIP: None
     app: keycloak
   ports:
   - port: 8080
@@ -430,7 +410,70 @@ metadata:
   name: traefik
   namespace: keycloak
   labels:
-    app: traefik...
+    app: traefik
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: traefik
+  template:
+    metadata:
+      labels:
+        app: traefik
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+      containers:
+      - name: traefik
+        image: docker.io/traefik:latest
+        args:
+        - "--configfile=/etc/traefik/traefik.yml"
+        ports:
+        - name: web
+          containerPort: 80
+        - name: websecure
+          containerPort: 443
+        - name: ping
+          containerPort: 8082
+        volumeMounts:
+        - name: traefik-config
+          mountPath: /etc/traefik/traefik.yml
+          subPath: traefik.yml
+        - name: traefik-certificates
+          mountPath: /etc/traefik/acme
+        resources:
+          limits:
+            cpu: "0.5"
+            memory: "512Mi"
+          requests:
+            cpu: "0.1"
+            memory: "128Mi"
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+            # NET_BIND_SERVICE: binding ports 80/443 requires this capability when not running as root
+            add: ["NET_BIND_SERVICE"]
+        readinessProbe:
+          httpGet:
+            path: /ping
+            port: 8082
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 5
+      volumes:
+      - name: traefik-config
+        configMap:
+          name: keycloak-config
+          items:
+          - key: traefik.yml
+            path: traefik.yml
+      - name: traefik-certificates
+        persistentVolumeClaim:
+          claimName: traefik-certificates
 
 ---
 apiVersion: v1
@@ -490,15 +533,15 @@ spec:
   - match: Host(`traefik.io`)
     kind: Rule
     services:
-    - name: traefik
-      port: 8080
+    - kind: TraefikService
+      name: api@internal
     middlewares:
     - name: redirect-to-https
   - match: Host(`traefik.io`)
     kind: Rule
     services:
-    - name: traefik
-      port: 8080
+    - kind: TraefikService
+      name: api@internal
     middlewares:
     - name: authtraefik
   tls:

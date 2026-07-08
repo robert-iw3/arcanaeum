@@ -8,9 +8,9 @@
 # - Otel Collector (otelcol)
 
 ARG NODE_VERSION=22.16.0
-ARG CLICKHOUSE_VERSION=25.6
-ARG OTEL_COLLECTOR_VERSION=0.129.1
-ARG OTEL_COLLECTOR_OPAMPSUPERVISOR_VERSION=0.128.0
+ARG CLICKHOUSE_VERSION=26.6
+ARG OTEL_COLLECTOR_VERSION=0.156.0
+ARG OTEL_COLLECTOR_OPAMPSUPERVISOR_VERSION=0.156.0
 
 # base #############################################################################################
 # == Otel Collector Image ==
@@ -76,7 +76,7 @@ COPY --chown=node:node --from=hyperdx ./entry.prod.sh /etc/local/entry.sh
 ENTRYPOINT ["sh", "/etc/local/entry.sh"]
 
 # all-in-one base ############################################################################################
-FROM hairyhenderson/gomplate:v4.3.3-alpine AS gomplate
+FROM hairyhenderson/gomplate:v5.1.0-alpine AS gomplate
 FROM clickhouse/clickhouse-server:${CLICKHOUSE_VERSION}-alpine AS all-in-one-base
 
 ARG CODE_VERSION
@@ -112,7 +112,6 @@ COPY --from=otel-collector --chmod=755 ./log-rotator.sh /log-rotator.sh
 # Copy gomplate binary from the gomplate image
 COPY --from=gomplate /bin/gomplate /usr/local/bin/gomplate
 
-# Install MongoDB and other dependencies (consolidated into a single RUN command)
 RUN echo 'http://dl-cdn.alpinelinux.org/alpine/v3.9/main' >> /etc/apk/repositories && \
   echo 'http://dl-cdn.alpinelinux.org/alpine/v3.9/community' >> /etc/apk/repositories && \
   apk update && \

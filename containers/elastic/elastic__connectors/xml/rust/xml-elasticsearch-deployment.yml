@@ -2,9 +2,9 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: xml-elasticsearch
-  namespace: {{namespace}}
+  namespace: default
 spec:
-  replicas: {{replicas}}
+  replicas: 1
   selector:
     matchLabels:
       app: xml-elasticsearch
@@ -25,15 +25,15 @@ spec:
         - name: ES_ENABLED
           value: "true"
         - name: ES_HOST
-          value: "{{es_host}}"
+          value: "http://elasticsearch:9200"
         - name: ES_INDEX
-          value: "{{es_index}}"
+          value: "xml-logs"
         - name: BATCH_SIZE
-          value: "{{batch_size}}"
+          value: "100"
         - name: BUFFER_TIMEOUT
-          value: "{{buffer_timeout}}"
+          value: "30"
         - name: WORKER_COUNT
-          value: "{{worker_count}}"
+          value: "4"
         - name: CONFIG_FILE
           value: "/app/deploy_config.yaml"
         volumeMounts:

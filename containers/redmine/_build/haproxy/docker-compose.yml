@@ -5,7 +5,7 @@ x-common-vars-apps: &common-vars-apps
   env_file:
     - ../.env
   networks:
-    - n8n
+    - redmine
 
 services:
   ha-proxy:

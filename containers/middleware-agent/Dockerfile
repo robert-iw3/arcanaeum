@@ -1,15 +1,18 @@
 # syntax=docker/dockerfile:1
 
 ARG repo="docker.io" \
-    base_image="alpine:3.23" \
-    image_hash="4d889c14e7d5a73929ab00be2ef8ff22437e7cbc545931e52554a7b00e123d8b"
+    base_image="alpine:3.24" \
+    image_hash="79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f" \
+    runtime_repo="docker.io" \
+    runtime_image="busybox:glibc" \
+    runtime_hash="1cfa4e2b09e127b9c4ed43578d3f3c18e7d44ea47b9ea98475c0cbe9086525f8"
 
 FROM ${repo}/${base_image}@sha256:${image_hash} AS build
 
 RUN apk add --no-cache ca-certificates git openssl
 
 ENV PATH /usr/local/go/bin:$PATH
-ENV GOLANG_VERSION 1.23.2
+ENV GOLANG_VERSION 1.26.5
 
 # Install Go from source for supported architectures
 RUN set -eux; \
@@ -26,8 +29,8 @@ RUN set -eux; \
         's390x') export GOARCH='s390x' GOOS='linux'; ;; \
         *) echo >&2 "error: unsupported architecture '$arch'"; exit 1 ;; \
     esac; \
-    url='https://dl.google.com/go/go1.23.2.src.tar.gz'; \
-    sha256='b1e1e4e3601f6ce6f8a4a0f374f79a50ccee1d9581f73f6a9b82707e05a2cb39'; \
+    url="https://dl.google.com/go/go${GOLANG_VERSION}.src.tar.gz"; \
+    sha256='495be4bc87176ac567392e5b4116abd98466d33d7b49d41e764ccc6976b2dc42'; \
     wget -O go.tgz.asc "$url.asc"; \
     wget -O go.tgz "$url"; \
     echo "$sha256 *go.tgz" | sha256sum -c -; \
@@ -55,21 +58,22 @@ ENV GOPATH /go
 ENV PATH $GOPATH/bin:$PATH
 RUN mkdir -p "$GOPATH/src" "$GOPATH/bin" && chmod -R 1777 "$GOPATH"
 
+ENV AGENT_VERSION="1.20.3"
 WORKDIR /app
-RUN git clone https://github.com/middleware-labs/mw-agent; \
+RUN git clone --depth 1 --branch "${AGENT_VERSION}" https://github.com/middleware-labs/mw-agent; \
     cd mw-agent; \
     CGO_ENABLED=0; \
     go get -d -v ./...; \
     go mod tidy
 
-ENV AGENT_VERSION="1.3.0"
-RUN CGO_ENABLED=0 go build -ldflags "-s -w -X main.agentVersion=${AGENT_VERSION}" -o /tmp/mw-agent cmd/host-agent/main.go
+RUN cd mw-agent; \
+    CGO_ENABLED=0 go build -ldflags "-s -w -X main.agentVersion=${AGENT_VERSION}" -o /tmp/mw-agent cmd/host-agent/main.go
 
-FROM busybox:glibc
+FROM ${runtime_repo}/${runtime_image}@sha256:${runtime_hash}
 RUN adduser -D -u 1001 mw-agent && mkdir -p /var/log && chown mw-agent /var/log
 WORKDIR /opt/mw-host-agent
 USER 1001
 COPY --from=build --chown=mw-agent /etc/ssl/certs /etc/ssl/certs
 COPY --from=build --chown=mw-agent /tmp/mw-agent /opt/mw-host-agent/mw-agent
-COPY --from=build --chown=mw-agent /app/otel-config.yaml /etc/mw-agent/otel-config.yaml
+COPY --from=build --chown=mw-agent /app/mw-agent/configyamls-k8s/otel-config.yaml /etc/mw-agent/otel-config.yaml
 CMD ["/opt/mw-host-agent/mw-agent", "start"]

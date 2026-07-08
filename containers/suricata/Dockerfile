@@ -10,11 +10,11 @@ FROM ${repo}/${base_image}@sha256:${image_hash} AS base
 LABEL \
     org.opencontainers.image.name='Suricata' \
     org.opencontainers.image.description='Suricata is a high performance, open source network analysis and threat detection software.' \
-    org.opencontainers.image.usage='https://suricata.readthedocs.io/en/suricata-8.0.3/' \
+    org.opencontainers.image.usage='https://suricata.readthedocs.io/en/suricata-8.0.6/' \
     org.opencontainers.image.url='https://suricata.io/' \
     org.opencontainers.image.licenses='GNU General Public License v2.0' \
     org.opencontainers.image.vendor='The Open Information Security Foundation (OISF)' \
-    org.opencontainers.image.schema-version='8.0.3'
+    org.opencontainers.image.schema-version='8.0.6'
 
 # base dependencies for runtime
 RUN \
@@ -64,7 +64,7 @@ RUN \
 
 FROM base AS build-env
 
-ARG VERSION=8.0.3
+ARG VERSION=8.0.6
 
 RUN \
     microdnf install -y yum-utils epel-release; \

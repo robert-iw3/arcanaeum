@@ -66,11 +66,16 @@ variable "secrets_arn" {
 variable "nomad_version" {
   description = "Nomad version to install"
   type        = string
-  default     = "1.9.2"
+  default     = "2.0.3"
   validation {
     condition     = can(regex("^\\d+\\.\\d+\\.\\d+$", var.nomad_version))
-    error_message = "Nomad version must be in the format X.Y.Z (e.g., 1.9.2)."
+    error_message = "Nomad version must be in the format X.Y.Z (e.g., 2.0.3)."
   }
+}
+
+variable "aws_region" {
+  description = "AWS region of the Secrets Manager secret (always the primary region, even for secondary-region instances)"
+  type        = string
 }
 
 variable "podman_enabled" {

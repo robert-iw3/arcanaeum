@@ -1,6 +1,6 @@
 variable "version" {
   type    = string
-  default = "v2.47.1"
+  default = "v3.13.0"
 }
 
 variable "namespace" {

@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
-ARG BASE_IMAGE=alpine:3.23
-ARG JS_IMAGE=node:22-alpine3.22
+ARG BASE_IMAGE=alpine:3.24
+ARG JS_IMAGE=node:24-alpine3.24
 ARG JS_PLATFORM=linux/amd64
-ARG GO_IMAGE=golang:1.24.1-alpine3.22
+ARG GO_IMAGE=golang:1.26.4-alpine3.22
 
 ARG GO_SRC=go-builder
 ARG JS_SRC=js-builder
@@ -90,8 +90,8 @@ RUN apk add --no-cache ca-certificates bash curl tzdata musl-utils && \
 # Install glibc for Alpine x86_64
 RUN if [ `arch` = "x86_64" ]; then \
       wget -q -O /etc/apk/keys/sgerrand.rsa.pub https://alpine-pkgs.sgerrand.com/sgerrand.rsa.pub && \
-      wget -q https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.35-r0/glibc-2.35-r0.apk -O /tmp/glibc.apk && \
-      wget -q https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.35-r0/glibc-bin-2.35-r0.apk -O /tmp/glibc-bin.apk && \
+      wget -q https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.35-r1/glibc-2.35-r1.apk -O /tmp/glibc.apk && \
+      wget -q https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.35-r1/glibc-bin-2.35-r1.apk -O /tmp/glibc-bin.apk && \
       apk add --no-cache /tmp/glibc.apk /tmp/glibc-bin.apk && \
       rm -f /tmp/glibc.apk /tmp/glibc-bin.apk && \
       ln -sf /usr/glibc-compat/lib64/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2; \

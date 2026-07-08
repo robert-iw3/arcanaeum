@@ -2,9 +2,9 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: suricata-connector
-  namespace: {{namespace}}
+  namespace: default
 spec:
-  replicas: {{replicas}}
+  replicas: 1
   selector:
     matchLabels:
       app: suricata-connector
@@ -21,23 +21,23 @@ spec:
         - name: LOG_DIR
           value: "/var/log/suricata"
         - name: SPLUNK_ENABLED
-          value: "{{splunk_enabled}}"
+          value: "false"
         - name: SPLUNK_HEC_URL
-          value: "{{splunk_hec_url}}"
+          value: "https://splunk:8088/services/collector"
         - name: SPLUNK_TOKEN
-          value: "{{splunk_token}}"
+          value: "your-splunk-hec-token"
         - name: ES_ENABLED
-          value: "{{es_enabled}}"
+          value: "true"
         - name: ES_HOST
-          value: "{{es_host}}"
+          value: "http://elasticsearch:9200"
         - name: ES_INDEX
-          value: "{{es_index}}"
+          value: "suricata-logs"
         - name: BATCH_SIZE
-          value: "{{batch_size}}"
+          value: "100"
         - name: BUFFER_TIMEOUT
-          value: "{{buffer_timeout}}"
+          value: "30"
         - name: WORKER_COUNT
-          value: "{{worker_count}}"
+          value: "4"
         volumeMounts:
         - name: logs
           mountPath: /var/log/suricata

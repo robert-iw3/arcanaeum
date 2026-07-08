@@ -8,7 +8,7 @@ networks:
 
 services:
   postgres:
-    image: docker.io/bitnami/postgresql:16
+    image: docker.io/bitnami/postgresql:latest
     container_name: postgres
     hostname: postgres-grafana.io
     ports:

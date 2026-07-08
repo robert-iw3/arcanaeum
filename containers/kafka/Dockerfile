@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1
 # kafka: Apache Kafka is an open-source distributed event streaming platform used by thousands of companies for high-performance data pipelines, streaming analytics, data integration, and mission-critical applications.
 ARG repo="docker.io" \
-    base_image="alpine:3.23" \
-    image_hash="4d889c14e7d5a73929ab00be2ef8ff22437e7cbc545931e52554a7b00e123d8b"
+    base_image="alpine:3.24" \
+    image_hash="79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f"
 
 FROM ${repo}/${base_image}@sha256:${image_hash}
 
-ENV KAFKA_VERSION=3.9.1 \
-    SCALA_VERSION=2.13-3.9.1
+ENV KAFKA_VERSION=3.9.2 \
+    SCALA_VERSION=2.13
 
 WORKDIR /opt
 
@@ -21,7 +21,8 @@ RUN apk add --no-cache \
         docker-cli \
         coreutils \
         openjdk17-jre \
-        su-exec; \
+        su-exec \
+        gcompat; \
     \
     mirror=$(curl --stderr /dev/null https://www.apache.org/dyn/closer.cgi\?as_json\=1 | jq -r '.preferred'); \
     curl -sSL "${mirror}kafka/${KAFKA_VERSION}/kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz" | tar -xzf - -C . ;\

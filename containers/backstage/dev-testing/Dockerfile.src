@@ -1,5 +1,6 @@
 # Stage 1 - Create yarn install skeleton layer
-FROM node:20-bookworm-slim AS packages
+ARG NODE_VERSION=24-bookworm-slim
+FROM node:${NODE_VERSION} AS packages
 
 WORKDIR /app
 COPY package.json yarn.lock ./
@@ -12,7 +13,7 @@ COPY plugins plugins
 RUN find packages \! -name "package.json" -mindepth 2 -maxdepth 2 -exec rm -rf {} \+
 
 # Stage 2 - Install dependencies and build packages
-FROM node:20-bookworm-slim AS build
+FROM node:${NODE_VERSION} AS build
 
 # Install isolate-vm dependencies, these are needed by the @backstage/plugin-scaffolder-backend.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -48,7 +49,7 @@ RUN mkdir packages/backend/dist/skeleton packages/backend/dist/bundle \
     && tar xzf packages/backend/dist/bundle.tar.gz -C packages/backend/dist/bundle
 
 # Stage 3 - Build the actual backend image and install production dependencies
-FROM node:20-bookworm-slim
+FROM node:${NODE_VERSION}
 
 # Install isolate-vm dependencies, these are needed by the @backstage/plugin-scaffolder-backend.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \

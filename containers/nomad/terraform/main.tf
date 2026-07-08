@@ -34,8 +34,8 @@ resource "aws_secretsmanager_secret" "nomad_secrets" {
 }
 
 resource "aws_secretsmanager_secret_version" "nomad_secrets_version" {
-  provider      = aws.primary
-  secret_id     = aws_secretsmanager_secret.nomad_secrets.id
+  provider  = aws.primary
+  secret_id = aws_secretsmanager_secret.nomad_secrets.id
   secret_string = jsonencode({
     nomad_acl_token        = random_uuid.nomad_acl_token.result
     nomad_gossip_key       = random_uuid.nomad_gossip_key.result
@@ -67,8 +67,8 @@ resource "aws_iam_role_policy" "grafana_password_rotation_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect   = "Allow"
-        Action   = [
+        Effect = "Allow"
+        Action = [
           "secretsmanager:PutSecretValue",
           "secretsmanager:GetSecretValue",
           "kms:Decrypt",
@@ -80,8 +80,8 @@ resource "aws_iam_role_policy" "grafana_password_rotation_policy" {
         ]
       },
       {
-        Effect   = "Allow"
-        Action   = [
+        Effect = "Allow"
+        Action = [
           "logs:CreateLogGroup",
           "logs:CreateLogStream",
           "logs:PutLogEvents"
@@ -92,15 +92,21 @@ resource "aws_iam_role_policy" "grafana_password_rotation_policy" {
   })
 }
 
+data "archive_file" "grafana_password_rotation" {
+  type        = "zip"
+  source_file = "${path.module}/lambda/grafana_password_rotation.py"
+  output_path = "${path.module}/lambda/grafana_password_rotation.zip"
+}
+
 resource "aws_lambda_function" "grafana_password_rotation" {
   provider         = aws.primary
-  filename         = "${path.module}/lambda/grafana_password_rotation.zip"
+  filename         = data.archive_file.grafana_password_rotation.output_path
   function_name    = "${var.cluster_name}-grafana-password-rotation"
   role             = aws_iam_role.grafana_password_rotation.arn
   handler          = "grafana_password_rotation.lambda_handler"
-  runtime          = "python3.8"
+  runtime          = "python3.13"
   timeout          = 30
-  source_code_hash = filebase64sha256("${path.module}/lambda/grafana_password_rotation.zip")
+  source_code_hash = data.archive_file.grafana_password_rotation.output_base64sha256
 }
 
 resource "aws_cloudwatch_event_rule" "grafana_password_rotation_schedule" {
@@ -131,20 +137,20 @@ resource "aws_sns_topic" "budget_notifications" {
 }
 
 resource "aws_budgets_budget" "nomad_budget" {
-  provider       = aws.primary
-  name           = "${var.cluster_name}-budget"
-  budget_type    = "COST"
-  limit_amount   = "1000"
-  limit_unit     = "USD"
-  time_unit      = "MONTHLY"
+  provider          = aws.primary
+  name              = "${var.cluster_name}-budget"
+  budget_type       = "COST"
+  limit_amount      = "1000"
+  limit_unit        = "USD"
+  time_unit         = "MONTHLY"
   time_period_start = "2025-01-01_00:00"
   time_period_end   = "2030-01-01_00:00"
 
   notification {
-    notification_type = "ACTUAL"
-    comparison_operator = "GREATER_THAN"
-    threshold = 80
-    threshold_type = "PERCENTAGE"
+    notification_type         = "ACTUAL"
+    comparison_operator       = "GREATER_THAN"
+    threshold                 = 80
+    threshold_type            = "PERCENTAGE"
     subscriber_sns_topic_arns = [aws_sns_topic.budget_notifications.arn]
   }
 }
@@ -176,11 +182,11 @@ module "nomad_servers_primary" {
   subnet_ids       = module.vpc_primary.subnet_ids
   desired_capacity = var.num_nomad_servers
   secrets_arn      = aws_secretsmanager_secret.nomad_secrets.arn
+  aws_region       = var.aws_region
   nomad_version    = var.nomad_version
   podman_enabled   = true
   client_enabled   = false
   ssh_key_name     = var.ssh_key_name
-  multi_region     = true
   providers = {
     aws = aws.primary
   }
@@ -195,11 +201,11 @@ module "nomad_servers_secondary" {
   subnet_ids       = module.vpc_secondary.subnet_ids
   desired_capacity = var.num_nomad_servers
   secrets_arn      = aws_secretsmanager_secret.nomad_secrets.arn
+  aws_region       = var.aws_region
   nomad_version    = var.nomad_version
   podman_enabled   = true
   client_enabled   = false
   ssh_key_name     = var.ssh_key_name
-  multi_region     = true
   providers = {
     aws = aws.secondary
   }
@@ -214,6 +220,7 @@ module "nomad_clients_primary" {
   subnet_ids       = module.vpc_primary.subnet_ids
   desired_capacity = var.num_nomad_clients
   secrets_arn      = aws_secretsmanager_secret.nomad_secrets.arn
+  aws_region       = var.aws_region
   nomad_version    = var.nomad_version
   podman_enabled   = true
   client_enabled   = true
@@ -232,47 +239,13 @@ module "nomad_clients_secondary" {
   subnet_ids       = module.vpc_secondary.subnet_ids
   desired_capacity = var.num_nomad_clients
   secrets_arn      = aws_secretsmanager_secret.nomad_secrets.arn
+  aws_region       = var.aws_region
   nomad_version    = var.nomad_version
   podman_enabled   = true
   client_enabled   = true
   ssh_key_name     = var.ssh_key_name
   providers = {
     aws = aws.secondary
-  }
-}
-
-resource "aws_globalaccelerator_accelerator" "nomad_global" {
-  name            = "${var.cluster_name}-global-accelerator"
-  ip_address_type = "IPV4"
-  enabled         = true
-}
-
-resource "aws_globalaccelerator_listener" "nomad_listener" {
-  accelerator_arn = aws_globalaccelerator_accelerator.nomad_global.arn
-  protocol        = "TCP"
-  port_range {
-    from_port = 443
-    to_port   = 443
-  }
-}
-
-resource "aws_globalaccelerator_endpoint_group" "nomad_endpoint_primary" {
-  listener_arn = aws_globalaccelerator_listener.nomad_listener.arn
-  region       = var.aws_region
-  endpoint_configuration {
-    endpoint_id        = module.nomad_servers_primary.nomad_alb_arn
-    weight             = 100
-    client_ip_preservation_enabled = true
-  }
-}
-
-resource "aws_globalaccelerator_endpoint_group" "nomad_endpoint_secondary" {
-  listener_arn = aws_globalaccelerator_listener.nomad_listener.arn
-  region       = var.secondary_region
-  endpoint_configuration {
-    endpoint_id        = module.nomad_servers_secondary.nomad_alb_arn
-    weight             = 100
-    client_ip_preservation_enabled = true
   }
 }
 
@@ -492,7 +465,7 @@ module "consul_cluster_primary" {
   vpc_id           = module.vpc_primary.vpc_id
   subnet_ids       = module.vpc_primary.subnet_ids
   desired_capacity = var.num_consul_servers
-  secrets_arn      = aws_secretsmanager_secret.nomad_secrets.arn
+  consul_enabled   = var.consul_enabled
   ssh_key_name     = var.ssh_key_name
   providers = {
     aws = aws.primary
@@ -507,7 +480,7 @@ module "consul_cluster_secondary" {
   vpc_id           = module.vpc_secondary.vpc_id
   subnet_ids       = module.vpc_secondary.subnet_ids
   desired_capacity = var.num_consul_servers
-  secrets_arn      = aws_secretsmanager_secret.nomad_secrets.arn
+  consul_enabled   = var.consul_enabled
   ssh_key_name     = var.ssh_key_name
   providers = {
     aws = aws.secondary
@@ -522,7 +495,7 @@ module "vault_cluster_primary" {
   vpc_id           = module.vpc_primary.vpc_id
   subnet_ids       = module.vpc_primary.subnet_ids
   desired_capacity = var.num_vault_servers
-  secrets_arn      = aws_secretsmanager_secret.nomad_secrets.arn
+  vault_enabled    = var.vault_enabled
   ssh_key_name     = var.ssh_key_name
   providers = {
     aws = aws.primary
@@ -537,7 +510,7 @@ module "vault_cluster_secondary" {
   vpc_id           = module.vpc_secondary.vpc_id
   subnet_ids       = module.vpc_secondary.subnet_ids
   desired_capacity = var.num_vault_servers
-  secrets_arn      = aws_secretsmanager_secret.nomad_secrets.arn
+  vault_enabled    = var.vault_enabled
   ssh_key_name     = var.ssh_key_name
   providers = {
     aws = aws.secondary
@@ -545,54 +518,41 @@ module "vault_cluster_secondary" {
 }
 
 module "monitoring_primary" {
-  source                = "./modules/monitoring"
-  cluster_name          = "${var.cluster_name}-primary"
-  monitoring_ami_id     = var.nomad_ami_id
-  instance_type         = var.server_instance_type
-  vpc_id                = module.vpc_primary.vpc_id
-  subnet_ids            = module.vpc_primary.subnet_ids
-  ssl_certificate_arn   = var.ssl_certificate_arn
-  nomad_lb_address      = module.nomad_servers_primary.nomad_lb_address
-  consul_ips            = module.consul_cluster_primary.instance_ips
-  vault_ips             = module.vault_cluster_primary.instance_ips
-  secrets_arn           = aws_secretsmanager_secret.nomad_secrets.arn
-  ssh_key_name          = var.ssh_key_name
+  source              = "./modules/monitoring"
+  cluster_name        = "${var.cluster_name}-primary"
+  monitoring_ami_id   = var.nomad_ami_id
+  instance_type       = var.server_instance_type
+  vpc_id              = module.vpc_primary.vpc_id
+  subnet_ids          = module.vpc_primary.subnet_ids
+  ssl_certificate_arn = var.ssl_certificate_arn
+  nomad_ips           = module.nomad_servers_primary.instance_ips
+  consul_ips          = module.consul_cluster_primary.instance_ips
+  vault_ips           = module.vault_cluster_primary.instance_ips
+  secrets_arn         = aws_secretsmanager_secret.nomad_secrets.arn
+  aws_region          = var.aws_region
+  ssh_key_name        = var.ssh_key_name
   providers = {
     aws = aws.primary
   }
 }
 
 module "monitoring_secondary" {
-  source                = "./modules/monitoring"
-  cluster_name          = "${var.cluster_name}-secondary"
-  monitoring_ami_id     = var.nomad_ami_id
-  instance_type         = var.server_instance_type
-  vpc_id                = module.vpc_secondary.vpc_id
-  subnet_ids            = module.vpc_secondary.subnet_ids
-  ssl_certificate_arn   = var.ssl_certificate_arn
-  nomad_lb_address      = module.nomad_servers_secondary.nomad_lb_address
-  consul_ips            = module.consul_cluster_secondary.instance_ips
-  vault_ips             = module.vault_cluster_secondary.instance_ips
-  secrets_arn           = aws_secretsmanager_secret.nomad_secrets.arn
-  ssh_key_name          = var.ssh_key_name
+  source              = "./modules/monitoring"
+  cluster_name        = "${var.cluster_name}-secondary"
+  monitoring_ami_id   = var.nomad_ami_id
+  instance_type       = var.server_instance_type
+  vpc_id              = module.vpc_secondary.vpc_id
+  subnet_ids          = module.vpc_secondary.subnet_ids
+  ssl_certificate_arn = var.ssl_certificate_arn
+  nomad_ips           = module.nomad_servers_secondary.instance_ips
+  consul_ips          = module.consul_cluster_secondary.instance_ips
+  vault_ips           = module.vault_cluster_secondary.instance_ips
+  secrets_arn         = aws_secretsmanager_secret.nomad_secrets.arn
+  aws_region          = var.aws_region
+  ssh_key_name        = var.ssh_key_name
   providers = {
     aws = aws.secondary
   }
-}
-
-output "nomad_global_address" {
-  description = "DNS name of the Global Accelerator for Nomad"
-  value       = aws_globalaccelerator_accelerator.nomad_global.dns_name
-}
-
-output "nomad_lb_address_primary" {
-  description = "DNS name of the Nomad load balancer in primary region"
-  value       = module.nomad_servers_primary.nomad_lb_address
-}
-
-output "nomad_lb_address_secondary" {
-  description = "DNS name of the Nomad load balancer in secondary region"
-  value       = module.nomad_servers_secondary.nomad_lb_address
 }
 
 output "secrets_arn" {

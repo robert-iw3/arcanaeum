@@ -19,11 +19,11 @@ metadata:
   name: hanko-secrets
   namespace: hanko
 type: Opaque
-data:
-  db_username: {{ .Values.vault.enabled | ternary (printf "{{ vault_secret('%s', 'db_username') | b64enc }}" .Values.vault.secretPath) (.Values.db.username | b64enc) }}
-  db_password: {{ .Values.vault.enabled | ternary (printf "{{ vault_secret('%s', 'db_password') | b64enc }}" .Values.vault.secretPath) (.Values.db.password | b64enc) }}
-  repl_user: {{ .Values.vault.enabled | ternary (printf "{{ vault_secret('%s', 'repl_user') | b64enc }}" .Values.vault.secretPath) (.Values.db.repl_user | b64enc) }}
-  repl_password: {{ .Values.vault.enabled | ternary (printf "{{ vault_secret('%s', 'repl_password') | b64enc }}" .Values.vault.secretPath) (.Values.db.repl_password | b64enc) }}
+stringData:
+  db_username: hanko_user
+  db_password: change-me-postgres-password
+  repl_user: hanko_repl
+  repl_password: change-me-repl-password
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -51,7 +51,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: postgresql
-          image: docker.io/bitnami/postgresql:16
+          image: docker.io/bitnami/postgresql:latest
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

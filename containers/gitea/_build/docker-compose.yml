@@ -5,6 +5,8 @@ volumes:
     driver: local
   gitea-data:
     driver: local
+  gitea-postgres-backups:
+    driver: local
 
 networks:
   gitea-net:
@@ -93,13 +95,13 @@ services:
       gitea-net:
         ipv4_address: ${GITEA_IPv4}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://$(echo $GITEA_IPv4):3000/"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 90s
     depends_on:
-      postgres:
+      postgresql:
         condition: service_healthy
     deploy:
       mode: replicated
@@ -123,14 +125,13 @@ services:
       - -c
       - |
         sleep 30m
-        && while true; do
-        pg_dump
-        -h postgres-gitea.dev.io
-        -p 5432
-        -d "${POSTGRESQL_DATABASE}"
-        -U "${POSTGRESQL_USERNAME} | gzip > /srv/gitea-postgres/backups/gitea-postgres-backup-$$(date "+%Y-%m-%d_%H-%M").gz
-        && find /srv/gitea-postgres/backups -type f -mtime +7 | xargs rm -f;
-        sleep 24h; done
+        while true; do
+          pg_dump -h postgres-gitea.dev.io -p 5432 -d "${POSTGRESQL_DATABASE}" -U "${POSTGRESQL_USERNAME}" | gzip > /srv/gitea-postgres/backups/gitea-postgres-backup-$(date "+%Y-%m-%d_%H-%M").gz || {
+            echo "Backup failed at $(date)"; exit 1;
+          }
+          find /srv/gitea-postgres/backups -type f -mtime +7 -delete
+          sleep 24h
+        done
     volumes:
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro

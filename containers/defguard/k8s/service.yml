@@ -21,3 +21,17 @@ spec:
     targetPort: 50051
     protocol: UDP
   type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: defguard-db
+  namespace: defguard
+spec:
+  selector:
+    app: defguard-db
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: 5432
+  type: ClusterIP

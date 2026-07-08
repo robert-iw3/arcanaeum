@@ -9,6 +9,7 @@ spec:
       containers:
       - name: kube-bench
         image: kube-bench:latest
+        imagePullPolicy: IfNotPresent
         volumeMounts:
         - name: etc
           mountPath: /etc

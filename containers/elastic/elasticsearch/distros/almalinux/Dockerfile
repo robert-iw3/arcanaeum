@@ -1,6 +1,6 @@
 FROM quay.io/almalinuxorg/almalinux:10 AS build-env
 
-ARG ELASTIC_VERSION=9.2.0
+ARG ELASTIC_VERSION=9.4.3
 
 RUN set -eux ; \
     dnf -y update; \

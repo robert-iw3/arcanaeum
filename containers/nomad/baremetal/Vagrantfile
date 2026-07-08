@@ -1,240 +1,150 @@
 # -*- mode: ruby -*-
 # vi: set ft=ruby :
+#
+# Self-contained multi-VM Nomad cluster for local testing. Spins up
+# SERVER_COUNT server VMs and CLIENT_COUNT client VMs on a private network,
+# using only the scripts vendored in this directory (no external repo
+# dependency). Mirrors the ansible role's bootstrap_expect/retry_join model
+# at a much smaller scale, for quick iteration before a real multi-host run.
+#
+# Providers: libvirt (KVM/QEMU) for local/on-prem Linux hosts, vsphere for
+# ESXi/vCenter. Select with `vagrant up --provider=libvirt` or `--provider=vsphere`.
 
-# Networking
-private_ip = ENV['PRIVATE_IP'] || "192.168.50.163"
+require "ipaddr"
+require "fileutils"
 
-# Base box selection
-base_box = ENV['BASE_BOX'] || "almalinux/9"
+base_box      = ENV["BASE_BOX"] || "generic/rocky10"
+network_cidr  = ENV["NETWORK_CIDR"] || "192.168.56.0/24"
+server_count  = (ENV["SERVER_COUNT"] || "3").to_i
+client_count  = (ENV["CLIENT_COUNT"] || "2").to_i
+nomad_version = ENV["NOMAD_VERSION"] || "2.0.3"
 
-# Consul variables
-consul_install = ["true", "1"].include?((ENV['CONSUL_INSTALL'] || true).to_s.downcase)
-consul_host_port = ENV['CONSUL_HOST_PORT'] || 8500
-consul_version = ENV['CONSUL_VERSION'] || "1.20.5"
-consul_ent_url = ENV['CONSUL_ENT_URL']
-consul_group = "consul"
-consul_user = "consul"
-consul_comment = "Consul"
-consul_home = "/srv/consul"
+raise "SERVER_COUNT must be odd for Raft quorum (1, 3, 5, ...)" if server_count < 1 || server_count.even?
+raise "CLIENT_COUNT must be >= 0" if client_count < 0
 
-# Vault variables
-vault_install = ["true", "1"].include?((ENV['VAULT_INSTALL'] || true).to_s.downcase)
-vault_host_port = ENV['VAULT_HOST_PORT'] || 8200
-vault_version = ENV['VAULT_VERSION'] || "0.19.0"
-vault_ent_url = ENV['VAULT_ENT_URL']
-vault_group = "vault"
-vault_user = "vault"
-vault_comment = "Vault"
-vault_home = "/srv/vault"
+network_base = IPAddr.new(network_cidr)
+node_ip = ->(offset) { (network_base | offset).to_s }
+server_ips = (1..server_count).map { |i| node_ip.call(10 + i) }
 
-# Nomad variables
-nomad_host_port = ENV['NOMAD_HOST_PORT'] || 4646
-nomad_version = ENV['NOMAD_VERSION'] || "1.9.7"
-nomad_ent_url = ENV['NOMAD_ENT_URL']
-nomad_group = "root"
-nomad_user = "root"
-docker_install = ["true", "1"].include?((ENV['DOCKER_INSTALL'] || true).to_s.downcase)
-java_install = ["true", "1"].include?((ENV['JAVA_INSTALL'] || true).to_s.downcase)
+def render_nomad_hcl(role, bind_addr, server_ips, bootstrap_expect)
+  server_block = role == :server ? <<~HCL : ""
+    server {
+      enabled          = true
+      bootstrap_expect = #{bootstrap_expect}
 
-# Wetty variables
-wetty_host_port = ENV['WETTY_HOST_PORT'] || 3030
-wetty_install = ["true", "1"].include?((ENV['WETTY_INSTALL'] || true).to_s.downcase)
-wetty_group = ENV['WETTY_GROUP'] || "wetty"
-wetty_user = ENV['WETTY_USER'] || "wetty"
-wetty_password = ENV['WETTY_PASSWORD'] || "wetty"
-wetty_comment = "Wetty Web Terminal SSH user"
-
-# Tests & cleanup
-run_tests = ["true", "1"].include?((ENV['RUN_TESTS'] || false).to_s.downcase)
-cleanup = ["true", "1"].include?((ENV['CLEANUP'] || true).to_s.downcase)
-
-$nomad_setup = <<SCRIPT
-echo "Minimal configuration for Nomad UI"
-sudo tee /etc/nomad.d/default.hcl > /dev/null <<CONFIG
-bind_addr = "0.0.0.0"
-
-advertise {
-  http = "#{private_ip}:4646"
-  rpc  = "#{private_ip}:4647"
-  serf = "#{private_ip}:4648"
-}
-CONFIG
-
-sudo systemctl restart nomad
-SCRIPT
-
-Vagrant.configure("2") do |config|
-  # Use vagrant insecure public key, comment this out to restrict access
-  config.ssh.insert_key = false
-
-  # Setup networking
-  config.vm.network :private_network, ip: private_ip
-  config.vm.network "private_network", type: "dhcp"
-
-  # Use base_box set at the top of this file
-  config.vm.box = base_box
-  config.vm.hostname = "nomad"
-
-  # Copy the Consul and shared directories to the vm
-  config.vm.provision "file", source: "../../guides-configuration", destination: "/tmp"
-
-  # Bootstrap the vm
-  config.vm.provision "shell", inline: "bash /tmp/shared/scripts/base.sh"
-
-  if (consul_install)
-    # Forward Consul port
-    config.vm.network :forwarded_port, guest: 8500, host: consul_host_port, auto_correct: true
-
-    # Setup Consul user
-    config.vm.provision "shell", inline: "bash /tmp/shared/scripts/setup-user.sh",
-      env: {
-        "GROUP" => consul_group,
-        "USER" => consul_user,
-        "COMMENT" => consul_comment,
-        "HOME" => consul_home,
+      server_join {
+        retry_join = [#{server_ips.map { |ip| "\"#{ip}:4648\"" }.join(", ")}]
       }
+    }
+  HCL
 
-    # Install Consul
-    config.vm.provision "shell", inline: "bash /tmp/consul/scripts/install-consul.sh",
-      env: {
-        "VERSION" => consul_version,
-        "URL" => consul_ent_url,
-        "USER" => consul_user,
-        "GROUP" => consul_group,
-      }
+  <<~HCL
+    data_dir  = "/opt/nomad/data"
+    bind_addr = "#{bind_addr}"
 
-    config.vm.provision "shell", inline: "bash /tmp/consul/scripts/install-consul-systemd.sh"
-  end
-
-  if (vault_install)
-    # Forward Vault port
-    config.vm.network :forwarded_port, guest: 8200, host: vault_host_port, auto_correct: true
-
-    # Setup Vault user
-    config.vm.provision "shell", inline: "bash /tmp/shared/scripts/setup-user.sh",
-      env: {
-        "GROUP" => vault_group,
-        "USER" => vault_user,
-        "COMMENT" => vault_comment,
-        "HOME" => vault_home,
-      }
-
-    # Install Vault
-    config.vm.provision "shell", inline: "bash /tmp/vault/scripts/install-vault.sh",
-      env: {
-        "VERSION" => vault_version,
-        "URL" => vault_ent_url,
-        "USER" => vault_user,
-        "GROUP" => vault_group,
-      }
-
-    config.vm.provision "shell", inline: "bash /tmp/vault/scripts/install-vault-systemd.sh"
-  end
-
-  # Forward Nomad port
-  config.vm.network :forwarded_port, guest: 4646, host: nomad_host_port, auto_correct: true
-
-  # Install Nomad
-  config.vm.provision "shell", inline: "bash /tmp/nomad/scripts/install-nomad.sh",
-    env: {
-      "VERSION" => nomad_version,
-      "URL" => nomad_ent_url,
-      "USER" => nomad_user,
-      "GROUP" => nomad_group,
+    advertise {
+      http = "#{bind_addr}"
+      rpc  = "#{bind_addr}"
+      serf = "#{bind_addr}"
     }
 
-  config.vm.provision "shell", inline: "bash /tmp/nomad/scripts/install-nomad-systemd.sh"
-  config.vm.provision "shell", inline: $nomad_setup, privileged: false
+    #{server_block}
+    client {
+      enabled = true
+      servers = [#{server_ips.map { |ip| "\"#{ip}:4647\"" }.join(", ")}]
+    }
 
-  if (docker_install)
-    config.vm.provision "shell", inline: "bash /tmp/nomad/scripts/install-docker.sh"
+    telemetry {
+      collection_interval = "1s"
+      disable_hostname    = true
+      prometheus_metrics  = true
+    }
+  HCL
+end
+
+generated_dir = File.join(File.dirname(__FILE__), ".generated")
+FileUtils.mkdir_p(generated_dir)
+
+def provision_node(node, role, ip, server_ips, server_count, nomad_version, generated_dir)
+  hcl_path = File.join(generated_dir, "#{node.vm.hostname}.hcl")
+  File.write(hcl_path, render_nomad_hcl(role, ip, server_ips, server_count))
+
+  node.vm.network :private_network, ip: ip
+  node.vm.provision "file", source: "install-nomad.sh", destination: "/tmp/install-nomad.sh"
+  node.vm.provision "file", source: "install-nomad-systemd.sh", destination: "/tmp/install-nomad-systemd.sh"
+  node.vm.provision "file", source: "nomad.service", destination: "/tmp/nomad.service"
+  node.vm.provision "file", source: "init/systemd", destination: "/tmp/init/systemd"
+  node.vm.provision "file", source: hcl_path, destination: "/tmp/nomad.hcl"
+
+  if role == :client
+    node.vm.provision "shell", inline: <<~SHELL
+      command -v podman &>/dev/null || dnf install -y podman crun slirp4netns 2>/dev/null || apt-get install -y podman crun slirp4netns
+    SHELL
   end
 
-  if (java_install)
-    config.vm.provision "shell", inline: "bash /tmp/nomad/scripts/install-java.sh"
-  end
+  node.vm.provision "shell", inline: <<~SHELL
+    set -euo pipefail
+    install -d /home/vagrant/init/systemd
+    cp /tmp/nomad.service /tmp/install-nomad.sh /tmp/install-nomad-systemd.sh /home/vagrant/
+    cp -r /tmp/init/systemd/. /home/vagrant/init/systemd/
+    chmod +x /home/vagrant/install-nomad.sh /home/vagrant/install-nomad-systemd.sh
+    cd /home/vagrant && NOMAD_VERSION=#{nomad_version} ./install-nomad.sh
+    install -o nomad -g nomad -m 0600 /tmp/nomad.hcl /etc/nomad.d/nomad.hcl
+    cd /home/vagrant && ./install-nomad-systemd.sh
+  SHELL
+end
 
-  if (wetty_install)
-    # Forward Wetty port
-    config.vm.network :forwarded_port, guest: 3030, host: wetty_host_port, auto_correct: true
+Vagrant.configure("2") do |config|
+  config.vm.box = base_box
 
-    # Install Wetty
-    config.vm.provision "shell", inline: "bash /tmp/shared/scripts/web-terminal.sh"
-    config.vm.provision "shell", inline: "bash /tmp/shared/scripts/setup-ssh-user.sh",
-      env: {
-        "GROUP" => wetty_group,
-        "USER" => wetty_user,
-        "PASSWORD" => wetty_password,
-        "COMMENT" => wetty_comment,
-      }
-  end
-
-  # Run tests if `RUN_TESTS` env var is provided
-  if (run_tests)
-    config.vm.provision "shell", inline: "cd /tmp && bash /tmp/shared/scripts/setup-testing.sh"
-    config.vm.provision "shell", inline: "cd /tmp && rake nomad:spec"
-  end
-
-  # Cleanup if `CLEANUP` env var is provided
-  if (cleanup)
-    config.vm.provision "shell", inline: "bash /tmp/shared/scripts/cleanup.sh"
-  end
-
-  # Increase memory for Parallels Desktop
-  config.vm.provider "parallels" do |p, o|
-    p.memory = "1024"
-  end
-
-  # Increase memory for Virtualbox
-  config.vm.provider "virtualbox" do |vb|
-    vb.memory = "1024"
-  end
-
-  # Increase memory for VMware
-  ["vmware_fusion", "vmware_workstation"].each do |p|
-    config.vm.provider p do |v|
-      v.vmx["memsize"] = "1024"
+  (1..server_count).each do |i|
+    config.vm.define "server-#{i}" do |node|
+      node.vm.hostname = "nomad-server-#{i}"
+      provision_node(node, :server, server_ips[i - 1], server_ips, server_count, nomad_version, generated_dir)
     end
   end
 
-   config.vm.post_up_message = "
-Your Nomad dev cluster has been successfully provisioned!
+  (1..client_count).each do |i|
+    config.vm.define "client-#{i}" do |node|
+      node.vm.hostname = "nomad-client-#{i}"
+      ip = node_ip.call(10 + server_count + i)
+      provision_node(node, :client, ip, server_ips, server_count, nomad_version, generated_dir)
+    end
+  end
 
-To SSH into a Nomad host, run the below command.
+  # KVM/QEMU via vagrant-libvirt (production Linux hypervisor path).
+  config.vm.provider :libvirt do |lv|
+    lv.driver = "kvm"
+    lv.cpus = (ENV["VM_CPUS"] || "2").to_i
+    lv.memory = (ENV["VM_MEMORY"] || "2048").to_i
+    lv.machine_type = "q35"
+    lv.disk_bus = "virtio"
+    lv.nic_model_type = "virtio"
+  end
 
-  $ vagrant ssh
+  # ESXi/vCenter via vagrant-vsphere. Clones an existing template rather than
+  # booting `base_box`, so the box itself is a placeholder required by the plugin.
+  config.vm.provider :vsphere do |vsphere, override|
+    override.vm.box = "vsphere-dummy"
+    override.vm.box_url = "https://github.com/devopsgroup-io/vagrant-vsphere/raw/master/example_box/dummy.box"
+    vsphere.host = ENV.fetch("VSPHERE_HOST", "")
+    vsphere.user = ENV.fetch("VSPHERE_USER", "")
+    vsphere.password = ENV.fetch("VSPHERE_PASSWORD", "")
+    vsphere.insecure = ENV.fetch("VSPHERE_INSECURE", "false") == "true"
+    vsphere.template_name = ENV.fetch("VSPHERE_TEMPLATE", "")
+    vsphere.data_center_name = ENV.fetch("VSPHERE_DATACENTER", "")
+    vsphere.compute_resource_name = ENV.fetch("VSPHERE_CLUSTER", "")
+    vsphere.data_store_name = ENV.fetch("VSPHERE_DATASTORE", "")
+    vsphere.vm_base_path = ENV.fetch("VSPHERE_VM_FOLDER", "")
+  end
 
-You can interact with Nomad using any of the CLI (https://www.nomadproject.io/docs/commands/index.html)
-or API (https://www.nomadproject.io/api/index.html) commands.
+  config.vm.post_up_message = <<~MSG
+    Nomad test cluster is up: #{server_count} server(s), #{client_count} client(s).
 
-  $ nomad server members # Check Nomad's server members
-  $ nomad node-status # Check Nomad's client nodes
-  $ nomad init # Create a skeletion job file to deploy a Redis Docker container
+      $ vagrant ssh server-1
+      $ nomad server members
+      $ nomad node status
 
-  # Use the CLI to deploy a Redis Docker container
-  $ nomad plan example.nomad # Run a nomad plan on the example job
-  $ nomad run example.nomad # Run the example job
-  $ nomad status # Check that the job is running
-  $ nomad status example # Check job details
-  $ nomad stop example # Stop the example job
-  $ nomad status # Check that the job is stopped
-
-  # Use the API to deploy a Redis Docker container
-  $ nomad run -output example.nomad > example.json # Convert the example Nomad HCL job file to JSON
-  $ curl -X POST -d @example.json http://127.0.0.1:4646/v1/job/example/plan | jq '.' # Run a nomad plan on the example job
-  $ curl -X POST -d @example.json http://127.0.0.1:4646/v1/job/example | jq '.' # Run the example job
-  $ curl -X GET http://127.0.0.1:4646/v1/jobs | jq '.' # Check that the job is running
-  $ curl -X GET http://127.0.0.1:4646/v1/job/example | jq '.' # Check job details
-  $ curl -X DELETE http://127.0.0.1:4646/v1/job/example | jq '.' # Stop the example job
-  $ curl -X GET http://127.0.0.1:4646/v1/jobs | jq '.' # Check that the job is stopped
-
-Visit the Nomad UI: http://#{private_ip}:#{nomad_host_port}
-#{consul_install ? 'Visit the Consul UI: http://'+ private_ip + ':' + consul_host_port.to_s : ''}
-#{vault_install ? 'Visit the Vault UI: http://' + private_ip + ':' + vault_host_port.to_s : ''}
-#{wetty_install ? 'Visit the Web Terminal (u: ' + wetty_user + '/p: ' + wetty_password + '): http://' + private_ip + ':' + wetty_host_port.to_s : ''}
-
-Don't forget to tear your VM down after.
-
-  $ vagrant destroy
-"
+    Tear it down with: vagrant destroy -f
+  MSG
 end

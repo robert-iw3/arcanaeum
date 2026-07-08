@@ -2,11 +2,11 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: csv-logs
-  namespace: {{namespace}}
+  namespace: default
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: {{storage_class}}
+  storageClassName: standard
   resources:
     requests:
-      storage: {{log_storage_size}}
+      storage: 10Gi

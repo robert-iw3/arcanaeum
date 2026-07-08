@@ -23,7 +23,7 @@ volumes:
   opensearch-backup4:
 
 networks:
-  default:
+  opensearch:
     external: false
 
 services:

@@ -73,7 +73,7 @@ services:
       retries: 3
 
   postgresql:
-    image: docker.io/bitnami/postgresql:16
+    image: docker.io/bitnami/postgresql:latest
     container_name: postgres-hanko
     hostname: postgres-hanko.dev.io
     security_opt:
@@ -167,7 +167,7 @@ services:
       retries: 3
 
   backups:
-    image: docker.io/bitnami/postgresql:16
+    image: docker.io/bitnami/postgresql:latest
     container_name: postgres2-hanko
     hostname: postgres2-hanko.dev.io
     security_opt:

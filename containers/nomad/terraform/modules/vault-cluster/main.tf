@@ -30,7 +30,7 @@ resource "aws_security_group" "vault_sg" {
 }
 
 resource "aws_iam_role" "vault_role" {
-  name = "${var.cluster_name}-vault-role"
+  name  = "${var.cluster_name}-vault-role"
   count = var.vault_enabled ? 1 : 0
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -45,8 +45,8 @@ resource "aws_iam_role" "vault_role" {
 }
 
 resource "aws_iam_role_policy" "vault_policy" {
-  name = "${var.cluster_name}-vault-policy"
-  role = aws_iam_role.vault_role[0].id
+  name  = "${var.cluster_name}-vault-policy"
+  role  = aws_iam_role.vault_role[0].id
   count = var.vault_enabled ? 1 : 0
   policy = jsonencode({
     Version = "2012-10-17"
@@ -64,23 +64,23 @@ resource "aws_iam_role_policy" "vault_policy" {
 }
 
 resource "aws_iam_instance_profile" "vault_profile" {
-  name = "${var.cluster_name}-vault-profile"
-  role = aws_iam_role.vault_role[0].name
+  name  = "${var.cluster_name}-vault-profile"
+  role  = aws_iam_role.vault_role[0].name
   count = var.vault_enabled ? 1 : 0
 }
 
 resource "aws_launch_template" "vault_lt" {
-  name = "${var.cluster_name}-vault-lt"
-  count = var.vault_enabled ? 1 : 0
-  image_id = var.ami_id
+  name          = "${var.cluster_name}-vault-lt"
+  count         = var.vault_enabled ? 1 : 0
+  image_id      = var.ami_id
   instance_type = var.instance_type
   iam_instance_profile {
     name = aws_iam_instance_profile.vault_profile[0].name
   }
   vpc_security_group_ids = [aws_security_group.vault_sg[0].id]
+  key_name               = var.ssh_key_name
   user_data = base64encode(templatefile("${path.module}/user-data-vault.sh", {
     cluster_name = var.cluster_name
-    vault_token  = var.vault_token
   }))
   block_device_mappings {
     device_name = "/dev/sda1"
@@ -92,7 +92,7 @@ resource "aws_launch_template" "vault_lt" {
   tag_specifications {
     resource_type = "instance"
     tags = {
-      Name = "${var.cluster_name}-vault"
+      Name           = "${var.cluster_name}-vault"
       ConsulAutoJoin = "auto-join"
     }
   }

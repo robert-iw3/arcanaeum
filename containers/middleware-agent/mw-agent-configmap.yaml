@@ -22,9 +22,9 @@ data:
       batch: {}
     exporters:
       otlp:
-        endpoint: "{{ .Values.mwTarget }}"
+        endpoint: "${env:MW_TARGET}"
         headers:
-          Authorization: "{{ .Values.mwApiKey }}"
+          Authorization: "${env:MW_API_KEY}"
     service:
       pipelines:
         metrics:

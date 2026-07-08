@@ -23,7 +23,7 @@ def validate_env():
 
 def main():
     parser = argparse.ArgumentParser(description="Automation script for deploying LiteLLM setup")
-    parser.add_argument('--platform', choices=['docker', 'podman', 'kubernetes', 'ansible'], required=True, help="Deployment platform")
+    parser.add_argument('--platform', choices=['docker', 'podman', 'kubernetes'], required=True, help="Deployment platform")
     args = parser.parse_args()
 
     try:
@@ -37,9 +37,6 @@ def main():
         elif args.platform == 'kubernetes':
             logger.info("Deploying to Kubernetes...")
             subprocess.run(['kubectl', 'apply', '-f', 'k8s/'], check=True)
-        elif args.platform == 'ansible':
-            logger.info("Deploying with Ansible...")
-            subprocess.run(['ansible-playbook', 'ansible/playbook.yml'], check=True)
     except subprocess.CalledProcessError as e:
         logger.error(f"Deployment failed: {e}")
         exit(1)

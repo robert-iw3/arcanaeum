@@ -1,7 +1,7 @@
 ---
 services:
   caddy:
-    image: caddy:2.8
+    image: caddy:2.11.4
     restart: unless-stopped
     ports:
       - 127.0.0.1:3000:80
@@ -26,7 +26,7 @@ services:
           memory: 512M
 
   litellm:
-    image: ghcr.io/berriai/litellm:main-v1.76.1
+    image: ghcr.io/berriai/litellm:main-v1.91.0
     restart: unless-stopped
     volumes:
       - ./litellm_config.yaml:/app/litellm_config.yaml
@@ -66,7 +66,7 @@ services:
         max-file: "3"
 
   postgres:
-    image: postgres:17
+    image: postgres:18
     restart: unless-stopped
     shm_size: 128mb
     volumes:
@@ -88,7 +88,7 @@ services:
           memory: 1G
 
   ollama:
-    image: ollama/ollama:0.11.8
+    image: ollama/ollama:0.31.1
     restart: unless-stopped
     volumes:
       - ollama:/root/.ollama
@@ -117,7 +117,7 @@ services:
       retries: 3
 
   open-webui:
-    image: ghcr.io/open-webui/open-webui:0.6.10
+    image: ghcr.io/open-webui/open-webui:0.10.2
     restart: unless-stopped
     init: true
     volumes:
@@ -183,7 +183,7 @@ services:
           memory: 512M
 
   redis:
-    image: redis:7.2
+    image: redis:8.8.0
     restart: unless-stopped
     networks:
       - redis
@@ -199,13 +199,13 @@ services:
           memory: 256M
 
   prometheus:
-    image: prom/prometheus:v2.53.0
+    image: prom/prometheus:v3.13.0
     restart: unless-stopped
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     ports:
-      - 127.0.0.1:${PROMETHEUS_PORT}:9090
+      - 127.0.0.1:${PROMETHEUS_PORT:-9090}:9090
     networks:
       - caddy
     healthcheck:

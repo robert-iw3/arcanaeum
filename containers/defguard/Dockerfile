@@ -1,11 +1,11 @@
-FROM node:20-alpine AS web
+FROM node:24-alpine AS web
 WORKDIR /app
 COPY web/package.json web/pnpm-lock.yaml web/.npmrc .
 RUN npm i -g pnpm && pnpm install --frozen-lockfile --prod
 COPY web/ .
 RUN pnpm run generate-translation-types && pnpm build && rm -rf node_modules
 
-FROM rust:1.80-slim-bookworm AS chef
+FROM rust:1.96.1-slim-bookworm AS chef
 WORKDIR /build
 RUN cargo install cargo-chef && rustup component add rustfmt
 RUN apt-get update && apt-get install -y protobuf-compiler libprotobuf-dev && rm -rf /var/lib/apt/lists/*

@@ -1,4 +1,4 @@
-FROM docker.elastic.co/beats/filebeat-oss:8.10.4
+FROM docker.elastic.co/beats/filebeat-oss:9.4.3
 
 ARG DEFAULT_UID=1000
 ARG DEFAULT_GID=1000

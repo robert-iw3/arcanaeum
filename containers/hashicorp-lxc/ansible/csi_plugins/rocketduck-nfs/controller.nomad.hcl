@@ -1,6 +1,6 @@
 variable "version" {
   type = string
-  default = "0.4.0"
+  default = "1.1.0"
 }
 
 job "storage-controller" {

@@ -1,9 +1,12 @@
-FROM docker.io/alpine:3.23
+ARG ALPINE_VERSION=3.24
+FROM docker.io/alpine:${ALPINE_VERSION}
+
+ARG TSHARK_VERSION=4.6.6-r0
 
 RUN \
     apk add --no-cache \
         coreutils \
-        tshark=4.4.6-r0; \
+        tshark=${TSHARK_VERSION}; \
     mkdir /data
 
 COPY --chmod=755 capture.sh .

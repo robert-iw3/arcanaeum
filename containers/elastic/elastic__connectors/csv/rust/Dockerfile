@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1
-FROM docker.io/rust:1.80-alpine AS builder
+FROM docker.io/rust:1.96.1-alpine3.22 AS builder
 WORKDIR /usr/src/csv-connector
 COPY . .
 RUN apk add --no-cache musl-dev
 RUN cargo build --release
 
-FROM docker.io/alpine:3.23
+FROM docker.io/alpine:3.24
 LABEL org.opencontainers.image.name='CSV-Connector' \
       org.opencontainers.image.description='Connector for forwarding CSV logs to Splunk and Elasticsearch' \
       org.opencontainers.image.maintainer='RW'

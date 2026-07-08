@@ -1,10 +1,9 @@
 ## base #############################################################################################
-FROM otel/opentelemetry-collector-contrib:0.129.1 AS col
-FROM otel/opentelemetry-collector-opampsupervisor:0.128.0 AS supervisor
-FROM hairyhenderson/gomplate:v4.3.3-alpine AS gomplate
+FROM otel/opentelemetry-collector-contrib:0.156.0 AS col
+FROM otel/opentelemetry-collector-opampsupervisor:0.156.0 AS supervisor
+FROM hairyhenderson/gomplate:v5.1.0-alpine AS gomplate
 
-# From: https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/aa5c3aa4c7ec174361fcaf908de8eaca72263078/cmd/opampsupervisor/Dockerfile#L18
-FROM alpine:latest@sha256:4d889c14e7d5a73929ab00be2ef8ff22437e7cbc545931e52554a7b00e123d8b AS base
+FROM alpine:latest@sha256:79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f AS base
 
 ARG USER_UID=10001
 ARG USER_GID=10001

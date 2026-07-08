@@ -7,7 +7,6 @@ import pandas as pd
 from datetime import datetime
 from pathlib import Path
 import ansible_runner
-from jinja2 import Environment, FileSystemLoader
 import subprocess
 import yamllint.config
 from tqdm import tqdm
@@ -129,6 +128,9 @@ class GoTestWAFDeployer:
 
     def check_image_version(self):
         """Check if GoTestWAF image exists, build if missing"""
+        if self.args.deploy_type == 'kubernetes':
+            logger.info("Kubernetes deploy type: assuming gotestwaf image is already available in-cluster, skipping local build")
+            return
         cmd = 'docker' if self.args.deploy_type == 'docker' else 'podman'
         try:
             result = subprocess.run([cmd, 'images', '-q', 'gotestwaf'], capture_output=True, text=True, timeout=30)
@@ -144,33 +146,29 @@ class GoTestWAFDeployer:
             logger.error(f"Failed to check/build image: {str(e)}")
             raise
 
-    def generate_ansible_playbook(self):
-        """Generate Ansible playbook using Jinja2 template"""
-        try:
-            env = Environment(loader=FileSystemLoader('.'))
-            template = env.get_template('deploy_gotestwaf.yml.j2')
+    def ansible_extravars(self):
+        """Build the extravars passed to the static deploy_gotestwaf.yml playbook."""
+        return {
+            'deploy_type': self.args.deploy_type,
+            'urls': self.urls,
+            'output_dir': str(self.output_dir),
+            'container_cmd': (
+                'docker' if self.args.deploy_type == 'docker'
+                else 'podman' if self.args.deploy_type == 'podman'
+                else 'kubectl'
+            ),
+            'parallel': self.parallel,
+            'batch_size': self.batch_size,
+            'retries': self.retries,
+            'timeout': self.timeout,
+        }
 
-            playbook_content = template.render(
-                deploy_type=self.args.deploy_type,
-                urls=self.urls,
-                output_dir=str(self.output_dir),
-                container_cmd='docker' if self.args.deploy_type == 'docker' else 'podman' if self.args.deploy_type == 'podman' else 'kubectl',
-                parallel=self.parallel,
-                batch_size=self.batch_size,
-                retries=self.retries,
-                timeout=self.timeout
-            )
-
-            playbook_path = 'deploy_gotestwaf.yml'
-            with open(playbook_path, 'w') as f:
-                f.write(playbook_content)
-
-            self.validate_yaml(playbook_path)
-            self.validate_ansible_playbook(playbook_path)
-            return playbook_path
-        except Exception as e:
-            logger.error(f"Failed to generate Ansible playbook: {str(e)}")
-            raise
+    def validate_playbook(self):
+        """Validate the static Ansible playbook's syntax before running it"""
+        playbook_path = 'deploy_gotestwaf.yml'
+        self.validate_yaml(playbook_path)
+        self.validate_ansible_playbook(playbook_path)
+        return playbook_path
 
     def run_ansible_playbook(self, playbook_path):
         """Execute Ansible playbook using ansible-runner"""
@@ -182,6 +180,7 @@ class GoTestWAFDeployer:
             result = ansible_runner.run(
                 private_data_dir='.',
                 playbook=playbook_path,
+                extravars=self.ansible_extravars(),
                 quiet=False,
                 timeout=self.timeout
             )
@@ -277,7 +276,7 @@ class GoTestWAFDeployer:
             if self.args.dry_run:
                 logger.info("Performing dry run")
                 self.check_image_version()
-                self.generate_ansible_playbook()
+                self.validate_playbook()
                 if self.args.deploy_type in ['docker', 'podman']:
                     self.validate_docker_compose()
                 return
@@ -286,7 +285,7 @@ class GoTestWAFDeployer:
             self.check_image_version()
             if self.args.deploy_type in ['docker', 'podman']:
                 self.validate_docker_compose()
-            playbook_path = self.generate_ansible_playbook()
+            playbook_path = self.validate_playbook()
             self.run_ansible_playbook(playbook_path)
 
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')

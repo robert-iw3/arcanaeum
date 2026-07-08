@@ -9,7 +9,7 @@ metadata:
   name: bitbucket
   namespace: bitbucket
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: bitbucket
@@ -23,7 +23,7 @@ spec:
         runAsUser: 1001
       initContainers:
       - name: vault-agent
-        image: vault:1.13.0
+        image: vault:2.0.3
         env:
         - name: VAULT_ADDR
           value: "http://vault:8200"
@@ -42,7 +42,7 @@ spec:
           mountPath: /vault/secrets
       containers:
       - name: bitbucket
-        image: docker.io/atlassian/bitbucket:8.19
+        image: docker.io/atlassian/bitbucket:10.3.1
         env:
         - name: JVM_MINIMUM_MEMORY
           valueFrom:
@@ -127,7 +127,7 @@ spec:
           periodSeconds: 10
           timeoutSeconds: 5
       - name: bitbucket-exporter
-        image: python:3.9-slim
+        image: python:3.13-slim
         command:
         - python
         - /app/bitbucket-exporter.py
@@ -311,7 +311,7 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: bitbucket
-  minReplicas: 2
+  minReplicas: 1
   maxReplicas: 5
   metrics:
   - type: Resource

@@ -1,5 +1,6 @@
 import pytest
 import os
+import glob
 import yaml
 import subprocess
 import json
@@ -65,22 +66,27 @@ def test_load_config_invalid_format(tmp_path):
     with pytest.raises(KubeBenchError, match="Invalid report format"):
         KubeBenchOrchestrator(str(config_path))
 
-def test_sanitize_path_valid(tmp_path):
-    orchestrator = KubeBenchOrchestrator(str(tmp_path / 'config.yaml'))
+def test_sanitize_path_valid(sample_config):
+    orchestrator = KubeBenchOrchestrator(sample_config)
     path = orchestrator.sanitize_path("/tmp/test-reports")
     assert path == os.path.abspath("/tmp/test-reports")
 
-def test_sanitize_path_invalid(tmp_path):
-    orchestrator = KubeBenchOrchestrator(str(tmp_path / 'config.yaml'))
+def test_sanitize_path_expands_home(sample_config):
+    orchestrator = KubeBenchOrchestrator(sample_config)
+    path = orchestrator.sanitize_path("~/.kube/config")
+    assert path == os.path.abspath(os.path.expanduser("~/.kube/config"))
+
+def test_sanitize_path_invalid(sample_config):
+    orchestrator = KubeBenchOrchestrator(sample_config)
     with pytest.raises(KubeBenchError, match="Invalid characters in path"):
         orchestrator.sanitize_path("/tmp/test/../../etc/passwd")
 
-def test_validate_endpoint_valid():
-    orchestrator = KubeBenchOrchestrator('config.yaml')
+def test_validate_endpoint_valid(sample_config):
+    orchestrator = KubeBenchOrchestrator(sample_config)
     orchestrator.validate_endpoint("cluster1.example.com")  # Should not raise
 
-def test_validate_endpoint_invalid():
-    orchestrator = KubeBenchOrchestrator('config.yaml')
+def test_validate_endpoint_invalid(sample_config):
+    orchestrator = KubeBenchOrchestrator(sample_config)
     with pytest.raises(KubeBenchError, match="Invalid endpoint"):
         orchestrator.validate_endpoint("cluster1;rm -rf /")
 
@@ -93,7 +99,7 @@ def test_run_scan_success(mock_run, sample_config, tmp_path):
     result = orchestrator.run_scan({'endpoint': 'cluster1.example.com', 'timeout': 300})
     assert result['returncode'] == 0
     assert result['stdout'] == '{"checks": [{"id": "1.1.1", "status": "PASS"}]}'
-    assert os.path.exists(os.path.join(orchestrator.reports_dir, 'kube_bench_cluster1.example.com_'))
+    assert glob.glob(os.path.join(orchestrator.reports_dir, 'kube_bench_cluster1.example.com_*'))
 
 @patch('subprocess.run')
 def test_run_scan_timeout(mock_run, sample_config):
@@ -152,22 +158,32 @@ def test_generate_aggregate_report(sample_config, tmp_path):
         assert summary['failed'] == 1
     assert oct(os.stat(report_path).st_mode & 0o777) == '0o640'
 
-@patch('builtins.open', new_callable=mock_open, read_data=b'test_binary')
-def test_verify_binary_signature_valid(mock_file, sample_config):
-    orchestrator = KubeBenchOrchestrator(sample_config, binary_signature=hmac.new(b'secret_key', b'test_binary', hashlib.sha256).hexdigest())
-    orchestrator.verify_binary_signature('/usr/local/bin/kube-bench')  # Should not raise
+def test_verify_binary_signature_valid(sample_config, monkeypatch):
+    monkeypatch.setenv('KUBE_BENCH_HMAC_KEY', 'test-hmac-key')
+    orchestrator = KubeBenchOrchestrator(sample_config, binary_signature=hmac.new(b'test-hmac-key', b'test_binary', hashlib.sha256).hexdigest())
+    with patch('builtins.open', new_callable=mock_open, read_data=b'test_binary'):
+        orchestrator.verify_binary_signature('/usr/local/bin/kube-bench')  # Should not raise
 
-@patch('builtins.open', new_callable=mock_open, read_data=b'test_binary')
-def test_verify_binary_signature_invalid(mock_file, sample_config):
+def test_verify_binary_signature_invalid(sample_config, monkeypatch):
+    monkeypatch.setenv('KUBE_BENCH_HMAC_KEY', 'test-hmac-key')
     orchestrator = KubeBenchOrchestrator(sample_config, binary_signature='invalid_signature')
-    with pytest.raises(KubeBenchError, match="Binary signature verification failed"):
+    with patch('builtins.open', new_callable=mock_open, read_data=b'test_binary'):
+        with pytest.raises(KubeBenchError, match="Binary signature verification failed"):
+            orchestrator.verify_binary_signature('/usr/local/bin/kube-bench')
+
+def test_verify_binary_signature_missing_key(sample_config, monkeypatch):
+    monkeypatch.delenv('KUBE_BENCH_HMAC_KEY', raising=False)
+    orchestrator = KubeBenchOrchestrator(sample_config, binary_signature='some_signature')
+    with pytest.raises(KubeBenchError, match="KUBE_BENCH_HMAC_KEY is not set"):
         orchestrator.verify_binary_signature('/usr/local/bin/kube-bench')
 
 def test_build_command_docker(sample_config):
     orchestrator = KubeBenchOrchestrator(sample_config)
     cmd = orchestrator.build_command("cluster1.example.com")
     assert cmd[0] == 'docker'
-    assert '--security-opt=apparmor=kube_bench_profile' in cmd
+    assert '--security-opt' in cmd
+    assert 'apparmor=kube_bench_profile' in cmd
+    assert '-it' not in cmd
     assert '--benchmark' in cmd
     assert 'cis-1.8' in cmd
 
@@ -180,7 +196,9 @@ def test_build_command_podman(sample_config):
     orchestrator = KubeBenchOrchestrator(sample_config)
     cmd = orchestrator.build_command("cluster1.example.com")
     assert cmd[0] == 'podman'
-    assert '--selinux=label=type:kube_bench_t' in cmd
+    assert '--selinux' in cmd
+    assert 'label=type:kube_bench_t' in cmd
+    assert '-it' not in cmd
 
 def test_build_command_kubernetes(sample_config):
     with open(sample_config, 'r') as f:

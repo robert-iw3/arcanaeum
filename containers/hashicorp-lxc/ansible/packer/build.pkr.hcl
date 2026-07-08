@@ -14,7 +14,7 @@ variable "ssh_key_file" {
 
 variable "ubuntu_version" {
   type    = string
-  default = "jammy"
+  default = "noble"
 }
 
 variable "cni_plugins_version" {

@@ -2,7 +2,7 @@
 volumes:
   backstage-postgres:
     driver: local
-  backstage-postgres-backup:
+  backstage-postgres-backups:
     driver: local
 
 networks:
@@ -98,14 +98,13 @@ services:
       - -c
       - |
         sleep 30m
-        && while true; do
-        pg_dump
-        -h postgres-backstage.dev.io
-        -p 5432
-        -d "${POSTGRESQL_DATABASE}"
-        -U "${POSTGRESQL_USERNAME} | gzip > /srv/backstage-postgres/backups/backstage-postgres-backup-$$(date "+%Y-%m-%d_%H-%M").gz
-        && find /srv/backstage-postgres/backups -type f -mtime +7 | xargs rm -f;
-        sleep 24h; done
+        while true; do
+          pg_dump -h postgres-backstage.dev.io -p 5432 -d "${POSTGRESQL_DATABASE}" -U "${POSTGRESQL_USERNAME}" | gzip > /srv/backstage-postgres/backups/backstage-postgres-backup-$(date "+%Y-%m-%d_%H-%M").gz || {
+            echo "Backup failed at $(date)"; exit 1;
+          }
+          find /srv/backstage-postgres/backups -type f -mtime +7 -delete
+          sleep 24h
+        done
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - backstage-postgres:/bitnami/postgresql:z

@@ -85,5 +85,17 @@ variable "ssh_key_name" {
 variable "nomad_version" {
   description = "Nomad version to install"
   type        = string
-  default     = "1.9.2"
+  default     = "2.0.3"
+}
+
+variable "consul_enabled" {
+  description = "Whether to deploy the Consul cluster"
+  type        = bool
+  default     = true
+}
+
+variable "vault_enabled" {
+  description = "Whether to deploy the Vault cluster"
+  type        = bool
+  default     = true
 }

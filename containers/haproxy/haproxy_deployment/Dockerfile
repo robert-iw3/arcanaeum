@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # haproxy: a free, very fast and reliable reverse-proxy offering high availability, load balancing, and proxying for TCP and HTTP-based applications.
-FROM docker.io/alpine:3.23
+FROM docker.io/alpine:3.24
 
 # runtime dependencies
 RUN \
@@ -24,9 +24,9 @@ RUN set -eux; \
 	mkdir /var/lib/haproxy; \
 	chown haproxy:haproxy /var/lib/haproxy
 
-ENV HAPROXY_VERSION 3.0.8
-ENV HAPROXY_URL https://www.haproxy.org/download/3.0/src/haproxy-3.0.8.tar.gz
-ENV HAPROXY_SHA256 930ae2c33058e1f497fe62cdaacffab6cab6a91e31ba011a9a2f9fe6c5c4aebc
+ENV HAPROXY_VERSION 3.4.2
+ENV HAPROXY_URL https://www.haproxy.org/download/3.4/src/haproxy-3.4.2.tar.gz
+ENV HAPROXY_SHA256 b1330dbb0d6e6bc4a72c4708a6a9e585579cd1156dfe5763c26305105bc12907
 
 RUN set -eux; \
 	\

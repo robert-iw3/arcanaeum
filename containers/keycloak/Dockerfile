@@ -2,8 +2,8 @@
 # keycloak: Add authentication to applications and secure services with minimum effort.
 
 ARG repo="docker.io" \
-    base_image="alpine:3.23" \
-    image_hash="4d889c14e7d5a73929ab00be2ef8ff22437e7cbc545931e52554a7b00e123d8b"
+    base_image="alpine:3.24" \
+    image_hash="79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f"
 
 FROM ${repo}/${base_image}@sha256:${image_hash} AS base
 
@@ -12,11 +12,11 @@ LABEL org.opencontainers.image.name='Keycloak' \
     org.opencontainers.image.usage='https://www.keycloak.org/guides' \
     org.opencontainers.image.url='https://www.keycloak.org/' \
     org.opencontainers.image.licenses='Apache License 2.0' \
-    org.opencontainers.image.schema-version='26.4.4'
+    org.opencontainers.image.schema-version='26.6.4'
 
 ARG BUILD_DATE
 ARG VCS_REF
-ARG OPENSSL_VERSION=3.5.0
+ARG OPENSSL_VERSION=3.5.7
 
 RUN \
     apk add --no-cache \
@@ -50,7 +50,7 @@ RUN \
 
 FROM base AS download
 
-ARG VER=26.4.4
+ARG VER=26.6.4
 
 WORKDIR /src
 
@@ -90,4 +90,4 @@ USER keycloak
 WORKDIR /home/keycloak
 HEALTHCHECK --timeout=3s --start-period=60s --retries=5 \
    CMD curl -fs http://localhost:8080/health/ready || curl -fsk https://localhost:8443/health/ready || exit 1
-ENTRYPOINT ["/opt/keycloak/bin/kcand.sh", "start", "--optimized", "--https-port=8443", "--db-pool-max-size=20"]
+ENTRYPOINT ["/opt/keycloak/bin/kc.sh", "start", "--optimized", "--https-port=8443", "--db-pool-max-size=20"]

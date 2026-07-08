@@ -68,14 +68,6 @@ services:
     hostname: pgbouncer.dev.io
     volumes:
       - "{{ gitea_compose_dir }}/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro"
-    environment:
-      PGBOUNCER_AUTH_TYPE: md5
-      PGBOUNCER_POOL_MODE: transaction
-      PGBOUNCER_MAX_CLIENT_CONN: 500
-      PGBOUNCER_DEFAULT_POOL_SIZE: 50
-      PGBOUNCER_RESERVE_POOL_SIZE: 10
-      PGBOUNCER_SERVER_LIFETIME: 3600
-      PGBOUNCER_SERVER_IDLE_TIMEOUT: 600
     ports:
       - 6432:6432
     healthcheck:

@@ -27,7 +27,7 @@ spec:
       mountPath: /data
       readOnly: true
     ports:
-    - containerPort: 53 piazzacontainerPort: 53
+    - containerPort: 53
       protocol: UDP
     - containerPort: 53
       protocol: TCP

@@ -1,4 +1,4 @@
-FROM alpine:3.20 AS builder
+FROM alpine:3.24 AS builder
 #
 # Include dist
 COPY dist/ /root/dist/
@@ -45,7 +45,7 @@ RUN pyinstaller ipphoney.py \
 		--hidden-import output_plugins \
 		--hidden-import output_plugins.jsonlog
 #
-FROM alpine:3.20
+FROM alpine:3.24
 RUN apk --no-cache -U upgrade
 COPY --from=builder /opt/ipphoney/dist/ /opt/
 COPY --from=builder /opt/ipphoney/responses/ /opt/ipphoney/responses/

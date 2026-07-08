@@ -2,10 +2,10 @@
 # json-connector: Sends JSON logs to Splunk and/or Elasticsearch
 
 ARG repo="docker.io"
-ARG base_image="rust:1.80-alpine"
-ARG image_hash="f1a87fd82b7f2a2b9a7e6a07a5b3e99a1d0b8b6c7e4a0c4f7e8b2c1d9f3a5b6"
+ARG base_image="rust:1.96.1-alpine3.22"
+ARG image_hash="8b5aee3b8fb41756d8447a47f96edc87a21f1e0c2b5ad2f3059542637d6c9b93"
 
-FROM ${repo}/${base_image}
+FROM ${repo}/${base_image}@sha256:${image_hash}
 
 LABEL org.opencontainers.image.name='JSON-Connector' \
     org.opencontainers.image.description='Connector for forwarding JSON logs to Splunk and Elasticsearch' \

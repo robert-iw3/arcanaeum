@@ -1,7 +1,7 @@
-FROM docker.io/debian:11
+FROM docker.io/debian:13
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV HBASE_VERSION 2.6.2
+ENV HBASE_VERSION 2.6.6
 ENV HBASE_URL https://dlcdn.apache.org/hbase/${HBASE_VERSION}/hbase-${HBASE_VERSION}-bin.tar.gz
 ENV HBASE_PREFIX=/opt/hbase
 ENV HBASE_CONF_DIR=/etc/hbase

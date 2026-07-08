@@ -86,7 +86,8 @@ services:
         condition: service_healthy
     security_opt: no-new-privileges:true
     restart: unless-stopped
-    networks: s3
+    networks:
+      - s3
 
   minio-createbucket:
     image: docker.io/minio/mc
@@ -102,7 +103,8 @@ services:
     security_opt: no-new-privileges:true
     restart: unless-stopped
     env_file: .env
-    networks: s3
+    networks:
+      - s3
     environment:
       MINIO_ROOT_USER: ${MINIO_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_PASS}

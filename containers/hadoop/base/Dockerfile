@@ -1,8 +1,8 @@
-FROM docker.io/debian:11
+FROM docker.io/debian:13
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    HADOOP_VERSION=3.4.1 \
-    HADOOP_URL=https://dlcdn.apache.org/hadoop/common/hadoop-3.4.1/hadoop-3.4.1.tar.gz \
+    HADOOP_VERSION=3.5.0 \
+    HADOOP_URL=https://dlcdn.apache.org/hadoop/common/hadoop-3.5.0/hadoop-3.5.0.tar.gz \
     HADOOP_HOME=/opt/hadoop-$HADOOP_VERSION \
     HADOOP_CONF_DIR=/etc/hadoop \
     MULTIHOMED_NETWORK=1 \
@@ -25,7 +25,7 @@ RUN \
     curl -O https://dist.apache.org/repos/dist/release/hadoop/common/KEYS; \
     gpg --import KEYS; \
     curl -fSL "$HADOOP_URL" -o /tmp/hadoop.tar.gz; \
-    curl -fSL "https://downloads.apache.org/hadoop/common/hadoop-3.4.1/hadoop-3.4.1.tar.gz.asc" -o /tmp/hadoop.tar.gz.asc; \
+    curl -fSL "https://downloads.apache.org/hadoop/common/hadoop-$HADOOP_VERSION/hadoop-$HADOOP_VERSION.tar.gz.asc" -o /tmp/hadoop.tar.gz.asc; \
     gpg --verify /tmp/hadoop.tar.gz.asc; \
     tar -xvf /tmp/hadoop.tar.gz -C /opt/; \
     rm /tmp/hadoop.tar.gz*; \

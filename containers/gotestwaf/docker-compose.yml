@@ -6,13 +6,13 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - {{ output_dir }}:/app/reports
-    command: ["/app/gotestwaf", "--url={{ item }}", "--noEmailReport"]
+      - ${OUTPUT_DIR:-./reports}:/app/reports
+    command: ["/app/gotestwaf", "--url=${TARGET_URL}", "--noEmailReport"]
     deploy:
       mode: replicated
-      replicas: {{ parallel }}
+      replicas: 1
     healthcheck:
-      test: ["CMD", "ps", "aux", "|", "grep", "gotestwaf", "|", "grep", "-v", "grep"]
+      test: ["CMD-SHELL", "ps aux | grep gotestwaf | grep -v grep"]
       interval: 10s
       timeout: 5s
       retries: 3

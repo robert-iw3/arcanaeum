@@ -2,7 +2,7 @@
 # backstage: an open platform for building developer portals.
 ARG repo="quay.io/almalinuxorg" \
     base_image="10-minimal" \
-    image_hash="90ebfbc522494d47532cf87a3332fcccf12a5b922026722a02a26e823718ff19"
+    image_hash="bec1954031f1655b66902589bee9b9a104fc66a3eeae9e924cf24efee6aa9a00"
 
 FROM ${repo}/${base_image}@sha256:${image_hash}
 
@@ -27,7 +27,7 @@ RUN \
         npm \
         wget; \
     \
-    npm install -g npm@10.2.5; \
+    npm install -g npm@11.18.0; \
     npm install -g yarn; \
     echo "backstage" | npx --yes @backstage/create-app@latest; \
     \

@@ -90,7 +90,7 @@ services:
 
   server:
     <<: *common-vars-apps
-    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-2025.10.1}
+    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-2026.5.3}
     container_name: authentik-server
     hostname: authentik-server.dev.io
     command: server
@@ -138,7 +138,7 @@ services:
 
   worker:
     <<: *common-vars-apps
-    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-2025.10.1}
+    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-2026.5.3}
     container_name: authentik-worker
     hostname: authentik-worker.dev.io
     command: worker

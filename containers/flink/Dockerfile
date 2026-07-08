@@ -25,9 +25,9 @@ RUN \
   rm -rf "$GNUPGHOME" /usr/local/bin/gosu.asc; \
   chmod +x /usr/local/bin/gosu
 
-ENV FLINK_TGZ_URL=https://dlcdn.apache.org/flink/flink-2.0.0/flink-2.0.0-bin-scala_2.12.tgz \
-    FLINK_ASC_URL=https://downloads.apache.org/flink/flink-2.0.0/flink-2.0.0-bin-scala_2.12.tgz.asc \
-    GPG_KEY=F8E419AA0B60C28879E876859DFF40967ABFC5A4 \
+ENV FLINK_TGZ_URL=https://dlcdn.apache.org/flink/flink-2.3.0/flink-2.3.0-bin-scala_2.12.tgz \
+    FLINK_ASC_URL=https://downloads.apache.org/flink/flink-2.3.0/flink-2.3.0-bin-scala_2.12.tgz.asc \
+    GPG_KEY=E11F792053638C56C98ACFADB5B638DCA5F94E4A \
     CHECK_GPG=true
 
 RUN \

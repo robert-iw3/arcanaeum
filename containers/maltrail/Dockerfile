@@ -1,4 +1,9 @@
-FROM docker.io/ubuntu:jammy
+# syntax=docker/dockerfile:1
+ARG repo="docker.io" \
+    base_image="ubuntu:noble" \
+    image_hash="52df9b1ee71626e0088f7d400d5c6b5f7bb916f8f0c82b474289a4ece6cf3faf"
+
+FROM ${repo}/${base_image}@sha256:${image_hash}
 
 ENV TINI_VERSION v0.19.0
 ENV TINI_URL https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini
@@ -35,8 +40,4 @@ RUN \
 EXPOSE 8337/udp
 EXPOSE 8338/tcp
 
-ENTRYPOINT [ "/usr/bin/tini", \
-                "--", \
-                "python /opt/maltrail/server.py", \
-                "python /opt/maltrail/sensor.py", \
-                "cron", "tail -f /var/log/cron.log" ]
+ENTRYPOINT [ "/usr/bin/tini", "--", "/bin/sh", "-c", "cron && tail -f /var/log/cron.log" ]

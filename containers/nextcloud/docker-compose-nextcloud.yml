@@ -6,6 +6,7 @@ volumes:
   nextcloud-data-backups:
   nextcloud-postgres-backups:
   traefik-certificates:
+  redis:
 
 networks:
   nextcloud:
@@ -163,7 +164,7 @@ services:
       - 'traefik.http.middlewares.authelia.forwardAuth.trustForwardHeader=true'
       - 'traefik.http.middlewares.authelia.forwardAuth.authResponseHeaders=Remote-User,Remote-Groups,Remote-Name,Remote-Email'
     depends_on:
-      postgres:
+      postgresql:
         condition: service_healthy
       traefik:
         condition: service_healthy
@@ -212,7 +213,7 @@ services:
       - "traefik.http.routers.nextcloud.middlewares=compresstraefik"
       - "traefik.http.middlewares.compresstraefik.compress=true"
     depends_on:
-      postgres:
+      postgresql:
         condition: service_healthy
       traefik:
         condition: service_healthy

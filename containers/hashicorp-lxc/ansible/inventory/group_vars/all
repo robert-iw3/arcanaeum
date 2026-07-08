@@ -6,7 +6,7 @@ ansible_ssh_common_args: -o StrictHostKeyChecking=no
 ansible_become: true
 
 gateway_address: '10.99.0.1'
-ubuntu_version: jammy
+ubuntu_version: noble
 external_domain: 10.99.0.1.nip.io
 apps_subdomain: apps
 hashicorp_gpg_url: https://apt.releases.hashicorp.com/gpg

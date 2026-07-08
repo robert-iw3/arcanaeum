@@ -30,14 +30,13 @@ LLM Gateway for model access, logging, and usage tracking across 100+ LLMs in Op
    ```
 3. Deploy using the desired platform:
    ```bash
-   python deploy.py --platform [docker|podman|kubernetes|ansible]
+   python deploy.py --platform [docker|podman|kubernetes]
    ```
 4. Access the Caddy webserver at `http://localhost:3000` (or your configured `FQDN`).
 
 ### Deployment Details
 - **Docker/Podman**: Uses `docker-compose.yml` for container orchestration.
 - **Kubernetes**: Applies YAMLs in `k8s/` directory, including deployments and ingress.
-- **Ansible**: Uses `ansible/playbook.yml` to deploy via Docker Compose.
 
 ### Monitoring
 - Prometheus metrics are available at `http://localhost:9090` (or configured `PROMETHEUS_PORT`).

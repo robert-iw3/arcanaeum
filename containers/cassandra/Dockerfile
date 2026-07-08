@@ -3,7 +3,9 @@ FROM docker.io/debian:13
 ENV MAX_HEAP_SIZE 4G
 ENV HEAP_NEWSIZE 800M
 
-RUN \
+ARG CASSANDRA_VERSION=5.0.8
+
+RUN set -e; \
     apt-get update; \
     apt-get install -y \
         curl \
@@ -22,11 +24,12 @@ RUN \
     cd /tmp/; \
     curl -O https://downloads.apache.org/cassandra/KEYS; \
     gpg --import KEYS; \
-    wget --progress=bar:force -O - \
-        https://dlcdn.apache.org/cassandra/5.0.4/apache-cassandra-5.0.4-bin.tar.gz \
-        | tar xzf - --strip-components=1 -C "/opt/cassandra"; \
-    wget https://downloads.apache.org/cassandra/5.0.4/apache-cassandra-5.0.4-bin.tar.gz.asc; \
-    gpg --verify apache-cassandra-5.0.4-bin.tar.gz.asc; \
+    wget --progress=bar:force -O apache-cassandra-${CASSANDRA_VERSION}-bin.tar.gz \
+        https://dlcdn.apache.org/cassandra/${CASSANDRA_VERSION}/apache-cassandra-${CASSANDRA_VERSION}-bin.tar.gz; \
+    wget https://downloads.apache.org/cassandra/${CASSANDRA_VERSION}/apache-cassandra-${CASSANDRA_VERSION}-bin.tar.gz.asc; \
+    gpg --verify apache-cassandra-${CASSANDRA_VERSION}-bin.tar.gz.asc apache-cassandra-${CASSANDRA_VERSION}-bin.tar.gz; \
+    tar xzf apache-cassandra-${CASSANDRA_VERSION}-bin.tar.gz --strip-components=1 -C "/opt/cassandra"; \
+    rm apache-cassandra-${CASSANDRA_VERSION}-bin.tar.gz*; \
     ln -s /opt/cassandra/bin/cqlsh /usr/local/bin/cqlsh; \
     mkdir /opt/cassandra/conf
 

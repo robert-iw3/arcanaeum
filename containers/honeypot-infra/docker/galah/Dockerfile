@@ -1,4 +1,4 @@
-FROM golang:1.23-alpine AS builder
+FROM golang:1.26.4-alpine3.24 AS builder
 RUN <<EOF
 apk --no-cache -U upgrade
 apk --no-cache -U add build-base git
@@ -15,7 +15,7 @@ go mod download
 go build -o galah ./cmd/galah
 EOF
 #
-FROM alpine:3.20
+FROM alpine:3.24
 RUN apk --no-cache -U upgrade && \
     apk --no-cache -U add openssl
 COPY --from=builder /opt/galah/ /opt/galah/

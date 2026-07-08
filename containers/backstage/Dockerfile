@@ -1,15 +1,17 @@
 # syntax=docker/dockerfile:1
 ARG repo="docker.io"
-ARG base_image="node:18-alpine3.22"
-ARG image_hash="3f14a1b07f3a6f8b6b6f5a7a0f6b3b0e2c2b8f8e9e5f6a0b8c2e2d6f3c4e5a6"
+ARG base_image="node:24-alpine3.24"
+ARG image_hash="4ba75f835bb8802193e4c114572113d4b26f95f6f094f4b5229d2a77773e0afc"
 
 FROM ${repo}/${base_image}@sha256:${image_hash} AS builder
 
 WORKDIR /app
 
+ARG NPM_VERSION=11.18.0
+
 RUN \
     apk add --no-cache python3 git; \
-    npm install -g npm@10.2.5 yarn; \
+    npm install -g npm@${NPM_VERSION} yarn; \
     echo "backstage" | npx --yes @backstage/create-app@latest; \
     yarn --cwd /app/backstage add pg
 

@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM python:3.12-slim
+FROM python:3.14-slim
 LABEL org.opencontainers.image.name='Parquet-Connector' \
       org.opencontainers.image.description='Python connector for processing Parquet files and forwarding to Elastic' \
       org.opencontainers.image.maintainer='RW'

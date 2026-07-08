@@ -84,6 +84,16 @@ resource "aws_iam_role_policy" "nomad_policy" {
           "autoscaling:DescribeAutoScalingGroups"
         ]
         Resource = "*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = "secretsmanager:GetSecretValue"
+        Resource = var.secrets_arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = "kms:Decrypt"
+        Resource = "*"
       }
     ]
   })
@@ -95,19 +105,20 @@ resource "aws_iam_instance_profile" "nomad_profile" {
 }
 
 resource "aws_launch_template" "nomad_lt" {
-  name = "${var.cluster_name}-nomad-lt"
-  image_id = var.ami_id
+  name          = "${var.cluster_name}-nomad-lt"
+  image_id      = var.ami_id
   instance_type = var.client_enabled ? var.instance_type : var.instance_type
   iam_instance_profile {
     name = aws_iam_instance_profile.nomad_profile.name
   }
   vpc_security_group_ids = [aws_security_group.nomad_sg.id]
-  key_name = var.ssh_key_name
+  key_name               = var.ssh_key_name
   user_data = base64encode(templatefile("${path.module}/user-data-${var.client_enabled ? "client" : "server"}.sh", {
     cluster_name     = var.cluster_name
-    nomad_version     = var.nomad_version
-    nomad_acl_token  = var.nomad_acl_token
-    nomad_gossip_key = var.nomad_gossip_key
+    nomad_version    = var.nomad_version
+    secrets_arn      = var.secrets_arn
+    aws_region       = var.aws_region
+    desired_capacity = var.desired_capacity
     podman_enabled   = var.podman_enabled
     client_enabled   = var.client_enabled
   }))
@@ -121,9 +132,9 @@ resource "aws_launch_template" "nomad_lt" {
   tag_specifications {
     resource_type = "instance"
     tags = {
-      Name = "${var.cluster_name}-${var.client_enabled ? "client" : "server"}"
+      Name           = "${var.cluster_name}-${var.client_enabled ? "client" : "server"}"
       ConsulAutoJoin = "auto-join"
-      NomadType = var.client_enabled ? "client" : "server"
+      NomadType      = var.client_enabled ? "client" : "server"
     }
   }
 }

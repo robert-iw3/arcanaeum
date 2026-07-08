@@ -12,41 +12,38 @@ This Ansible role deploys a secure, production-ready minmal HashiCorp Nomad clus
 ## Structure
 
 ```console
-project_root/
+ansible/
 ├── roles/
 │   └── nomad/
-│       ├── defaults/
-│       │   └── main.yml                # Default variables for the role
+│       ├── defaults/main.yml             # Default variables for the role
+│       ├── handlers/main.yml             # Restart Nomad handler
 │       ├── tasks/
-│       │   ├── main.yml                # Main tasks for Nomad deployment
-│       │   ├── prepare_host.yml        # Host preparation tasks (Podman, system settings)
-│       │   ├── certificates.yml        # TLS certificate generation tasks
-│       │   └── vault.yml               # Vault integration tasks
-│       ├── templates/
-│       │   ├── nomad.hcl.j2              # Nomad configuration template
-│       │   ├── nomad.service.j2          # Systemd service template for Nomad
-│       │   ├── nomad-acl.hcl.j2          # Nomad ACL configuration template
-│       │   ├── nomad-acl-policy.hcl.j2   # Nomad ACL policy template
-│       │   ├── nomad-vault-policy.hcl.j2 # Vault policy template for Nomad
-│       │   └── logrotate.nomad.j2        # Logrotate configuration for Nomad logs
-├── playbooks/
-│   └── nomad.yml                      # Playbook to deploy Nomad servers and clients
-├── .gitlab-ci.yml                     # CI/CD pipeline configuration for GitLab
-└── README.md                          # Usage instructions for the role
+│       │   ├── main.yml                  # Install, configure, bootstrap ACLs, validate
+│       │   ├── prepare_host.yml          # Podman, kernel/firewall, ulimits, subuid/subgid
+│       │   ├── certificates.yml          # Shared-CA mTLS generation and distribution
+│       │   └── vault.yml                 # Vault client install/config
+│       └── templates/
+│           ├── nomad.hcl.j2              # Main agent configuration
+│           ├── nomad.service.j2          # Systemd unit
+│           ├── nomad-acl.hcl.j2          # ACL enablement stanza
+│           ├── nomad-acl-policy.hcl.j2   # Default ACL policy
+│           ├── nomad-sentinel.hcl.j2     # Sentinel policy
+│           ├── nomad-vault-policy.hcl.j2 # Vault policy for Nomad's own token
+│           └── logrotate.nomad.j2        # Log rotation config
+├── playbooks/nomad.yml                   # Applies the role to nomad_servers/nomad_clients
+├── .gitlab-ci.yml                        # ansible-lint + syntax-check pipeline
+└── readme.md
 ```
 
 ## Usage Steps
 
-1. **Prepare Ansible Vault (Optional)**:
-   - If using Vault integration, create a Vault password file (e.g., `vault_pass.txt`):
+1. **Supply required secrets (no defaults are shipped)**:
+   - `nomad_gossip_key` is mandatory whenever `nomad_gossip_encryption_enabled` (default `true`); generate one with `nomad operator gossip keyring generate` or `openssl rand -base64 32` and every server must use the same value.
+   - `nomad_vault_token` is mandatory whenever `nomad_vault_enabled` is `true`.
+   - Store both with ansible-vault:
      ```bash
-     echo 'your-vault-password' > vault_pass.txt
+     ansible-vault encrypt_string 'value' --name nomad_gossip_key
      ```
-   - Alternatively, encrypt the Vault token:
-     ```bash
-     ansible-vault encrypt_string 'your-vault-token-here' --name nomad_vault_token
-     ```
-   - Update `roles/nomad/defaults/main.yml` with the encrypted token.
 
 2. **Set Up Inventory**:
    - Create an Ansible inventory file (e.g., `inventory.yml`):
@@ -92,7 +89,7 @@ project_root/
 
 Customize the deployment by overriding variables in `roles/nomad/defaults/main.yml`:
 
-- `nomad_version`: Nomad version (default: `1.9.2`)
+- `nomad_version`: Nomad version (default: `2.0.3`)
 - `nomad_server_enabled`: Enable server mode (default: `false`)
 - `nomad_client_enabled`: Enable client mode (default: `false`)
 - `nomad_bootstrap_expect`: Number of expected servers for bootstrap (default: `3`)

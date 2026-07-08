@@ -18,8 +18,8 @@ x-common-vars-apps: &common-vars-apps
     - .env
 
 services:
-  <<: *common-vars-apps
   zoo1:
+    <<: *common-vars-apps
     image: docker.io/confluentinc/cp-zookeeper:latest-ubi8
     hostname: zoo1
     container_name: zoo1

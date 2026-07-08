@@ -87,7 +87,7 @@ spec:
         fsGroup: 65535
       initContainers:
       - name: cert-generation
-        image: hashicorp/consul:1.21.5
+        image: hashicorp/consul:2.0.1
         command: ["/bin/sh", "-c"]
         args:
           - |
@@ -105,7 +105,7 @@ spec:
           runAsGroup: 65535
       containers:
       - name: consul
-        image: hashicorp/consul:1.21.5
+        image: hashicorp/consul:2.0.1
         resources:
           requests:
             memory: "256Mi"

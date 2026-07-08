@@ -22,7 +22,7 @@ x-common-vars-apps: &common-vars-apps
 services:
   postgresql:
     <<: *common-vars-apps
-    image: docker.io/library/postgres:16-alpine
+    image: docker.io/library/postgres:18-alpine
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
       start_period: 20s
@@ -52,7 +52,7 @@ services:
 
   server:
     <<: *common-vars-apps
-    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-2024.12.3}
+    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-2026.5.3}
     container_name: authentik-server
     command: server
     environment:
@@ -75,7 +75,7 @@ services:
 
   worker:
     <<: *common-vars-apps
-    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-2024.12.3}
+    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-2026.5.3}
     container_name: authentik-worker
     command: worker
     environment:

@@ -508,28 +508,15 @@ data:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: opensearch-data
-  namespace: opensearch
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 50Gi # Adjust size based on needs
-  storageClassName: standard # Replace with appropriate storage class
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
   name: opensearch-backup
   namespace: opensearch
 spec:
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteMany
   resources:
     requests:
       storage: 50Gi # Adjust size based on needs
-  storageClassName: standard # Replace with appropriate storage class
+  storageClassName: standard-rwx # Replace with a ReadWriteMany-capable storage class (e.g. NFS, EFS)
 
 ---
 apiVersion: v1
@@ -579,6 +566,16 @@ spec:
   selector:
     matchLabels:
       app: opensearch
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: standard # Replace with appropriate storage class
+        resources:
+          requests:
+            storage: 50Gi # Adjust size based on needs
   template:
     metadata:
       labels:
@@ -603,9 +600,44 @@ spec:
           command: ["sysctl", "-w", "vm.max_map_count=262144"]
           securityContext:
             privileged: true
+        - name: select-node-certs
+          image: busybox
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              ordinal="${HOSTNAME##*-}"
+              certnum=$((ordinal + 1))
+              cp /secrets-src/node${certnum}-key.pem /node-certs/node-key.pem
+              cp /secrets-src/node${certnum}.pem /node-certs/node.pem
+          volumeMounts:
+            - name: secrets
+              mountPath: /secrets-src
+              readOnly: true
+            - name: node-certs
+              mountPath: /node-certs
       containers:
         - name: opensearch
           image: opensearchproject/opensearch:latest
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              ordinal="${HOSTNAME##*-}"
+              if [ "$ordinal" = "0" ] || [ "$ordinal" = "1" ]; then
+                heap=4g
+              else
+                heap=16g
+              fi
+              export OPENSEARCH_JAVA_OPTS="-server -Xms${heap} -Xmx${heap} -Xss256k -XX:-HeapDumpOnOutOfMemoryError -Djava.security.egd=file:/dev/./urandom -Dlog4j.formatMsgNoLookups=true -Dcom.sun.jndi.ldap.object.disableEndpointIdentification=true"
+              case "$HOSTNAME" in
+                opensearch-1) roles=cluster_manager ;;
+                opensearch-2|opensearch-3) roles=data,ingest ;;
+                *) roles= ;;
+              esac
+              exec env "node.roles=${roles}" ./opensearch-docker-entrypoint.sh opensearch
           resources:
             requests:
               cpu: "1"
@@ -624,19 +656,6 @@ spec:
               value: "true"
             - name: MAX_LOCKED_MEMORY
               value: unlimited
-            - name: OPENSEARCH_JAVA_OPTS
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-                value: >-
-                  -server
-                  -Xms${metadata.name == 'opensearch-0' || metadata.name == 'opensearch-1' ? '4g' : '16g'}
-                  -Xmx${metadata.name == 'opensearch-0' || metadata.name == 'opensearch-1' ? '4g' : '16g'}
-                  -Xss256k
-                  -XX:-HeapDumpOnOutOfMemoryError
-                  -Djava.security.egd=file:/dev/./urandom
-                  -Dlog4j.formatMsgNoLookups=true
-                  -Dcom.sun.jndi.ldap.object.disableEndpointIdentification=true
             - name: DISABLE_INSTALL_DEMO_CONFIG
               value: "true"
             - name: DISABLE_SECURITY_PLUGIN
@@ -651,12 +670,6 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-            - name: node.roles
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-                value: >-
-                  ${metadata.name == 'opensearch-1' ? 'cluster_manager' : metadata.name == 'opensearch-2' || metadata.name == 'opensearch-3' ? 'data,ingest' : ''}
             - name: logger.level
               value: WARN
             - name: PUID
@@ -706,12 +719,12 @@ spec:
             - name: secrets
               mountPath: /usr/share/opensearch/config/admin.pem
               subPath: admin.pem
-            - name: secrets
+            - name: node-certs
               mountPath: /usr/share/opensearch/config/node-key.pem
-              subPath: node${metadata.name == 'opensearch-0' ? '1' : metadata.name == 'opensearch-1' ? '2' : metadata.name == 'opensearch-2' ? '3' : '4'}-key.pem
-            - name: secrets
+              subPath: node-key.pem
+            - name: node-certs
               mountPath: /usr/share/opensearch/config/node.pem
-              subPath: node${metadata.name == 'opensearch-0' ? '1' : metadata.name == 'opensearch-1' ? '2' : metadata.name == 'opensearch-2' ? '3' : '4'}.pem
+              subPath: node.pem
             - name: secrets
               mountPath: /usr/share/opensearch/config/root-ca.pem
               subPath: root-ca.pem
@@ -731,9 +744,6 @@ spec:
             initialDelaySeconds: 60
             periodSeconds: 10
       volumes:
-        - name: data
-          persistentVolumeClaim:
-            claimName: opensearch-data
         - name: backup
           persistentVolumeClaim:
             claimName: opensearch-backup
@@ -743,6 +753,8 @@ spec:
         - name: secrets
           secret:
             name: opensearch-secrets
+        - name: node-certs
+          emptyDir: {}
 
 ---
 apiVersion: apps/v1

@@ -1,6 +1,6 @@
 ### elasticvue build is currently broken, issue has been opened https://github.com/cars10/elasticvue/issues/215
 ### in the meantime we are using the older dist, if not resolved we need to find a different solution
-FROM node:22.5.1-alpine AS builder
+FROM node:26.4.0-alpine3.24 AS builder
 #
 # Prep and build Elasticvue
 RUN apk -U --no-cache add git && \

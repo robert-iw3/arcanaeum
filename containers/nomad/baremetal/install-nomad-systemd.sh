@@ -1,30 +1,30 @@
 #!/bin/bash
-set -x
+# Installs the Nomad systemd unit from this repository's own vendored copy
+# instead of fetching it from the network at install time.
 
-echo "Running"
+set -euo pipefail
 
-# Detect package management system.
-DNF=$(which dnf 2>/dev/null)
-APT_GET=$(which apt-get 2>/dev/null)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if [[ ! -z ${DNF} ]]; then
+if command -v dnf &>/dev/null; then
   SYSTEMD_DIR="/etc/systemd/system"
   echo "Installing systemd services for RHEL/CentOS"
-elif [[ ! -z ${APT_GET} ]]; then
+elif command -v apt-get &>/dev/null; then
   SYSTEMD_DIR="/lib/systemd/system"
   echo "Installing systemd services for Debian/Ubuntu"
 else
   echo "Service not installed due to OS detection failure"
-  exit 1;
+  exit 1
 fi
 
-sudo curl --silent -Lo ${SYSTEMD_DIR}/nomad.service https://raw.githubusercontent.com/hashicorp/guides-configuration/master/nomad/init/systemd/nomad.service
-sudo curl --silent -Lo ${SYSTEMD_DIR}/consul-online.service https://raw.githubusercontent.com/hashicorp/guides-configuration/master/consul/init/systemd/consul-online.service
-sudo curl --silent -Lo ${SYSTEMD_DIR}/consul-online.target https://raw.githubusercontent.com/hashicorp/guides-configuration/master/consul/init/systemd/consul-online.target
-sudo curl --silent -Lo ${SYSTEMD_DIR}/consul-online.sh https://raw.githubusercontent.com/hashicorp/guides-configuration/master/consul/init/systemd/consul-online.sh
-sudo chmod 0664 ${SYSTEMD_DIR}/{nomad*,consul*}
+sudo cp "${SCRIPT_DIR}/nomad.service" "${SYSTEMD_DIR}/nomad.service"
+sudo cp "${SCRIPT_DIR}/init/systemd/nomad-online.target" "${SYSTEMD_DIR}/nomad-online.target"
+sudo cp "${SCRIPT_DIR}/init/systemd/nomad-online.service" "${SYSTEMD_DIR}/nomad-online.service"
+sudo install -m 0755 "${SCRIPT_DIR}/init/systemd/nomad-online.sh" /usr/bin/nomad-online.sh
+sudo chmod 0644 "${SYSTEMD_DIR}/nomad.service" "${SYSTEMD_DIR}/nomad-online.target" "${SYSTEMD_DIR}/nomad-online.service"
 
-sudo systemctl enable nomad
+sudo systemctl daemon-reload
+sudo systemctl enable nomad nomad-online.service
 sudo systemctl start nomad
 
 echo "Complete"

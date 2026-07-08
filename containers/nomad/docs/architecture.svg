@@ -1,0 +1,163 @@
+<svg viewBox="0 0 1200 860" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8A8A93"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="860" fill="#16161B"/>
+
+  <text x="600" y="42" fill="#FFFFFF" font-size="24" font-weight="600" text-anchor="middle">Nomad Multi-Host Cluster Architecture</text>
+  <text x="600" y="66" fill="#8A8A93" font-size="13" text-anchor="middle">deploy.py renders the config for whichever avenue is selected</text>
+
+  <!-- Deployment avenues -->
+  <g>
+    <rect x="60" y="94" width="230" height="60" rx="8" fill="#25252B" stroke="#4A4A52" stroke-width="1.5"/>
+    <text x="175" y="118" fill="#FFFFFF" font-size="14" font-weight="600" text-anchor="middle">Ansible</text>
+    <text x="175" y="138" fill="#8A8A93" font-size="11" text-anchor="middle">bare metal / on-prem VMs</text>
+
+    <rect x="330" y="94" width="230" height="60" rx="8" fill="#25252B" stroke="#4A4A52" stroke-width="1.5"/>
+    <text x="445" y="118" fill="#FFFFFF" font-size="14" font-weight="600" text-anchor="middle">Terraform (AWS)</text>
+    <text x="445" y="138" fill="#8A8A93" font-size="11" text-anchor="middle">multi-region cloud</text>
+
+    <rect x="600" y="94" width="230" height="60" rx="8" fill="#25252B" stroke="#4A4A52" stroke-width="1.5"/>
+    <text x="715" y="118" fill="#FFFFFF" font-size="14" font-weight="600" text-anchor="middle">Vagrant</text>
+    <text x="715" y="138" fill="#8A8A93" font-size="11" text-anchor="middle">libvirt/KVM &amp; vSphere test VMs</text>
+
+    <rect x="870" y="94" width="230" height="60" rx="8" fill="#25252B" stroke="#4A4A52" stroke-width="1.5"/>
+    <text x="985" y="118" fill="#FFFFFF" font-size="14" font-weight="600" text-anchor="middle">Packer</text>
+    <text x="985" y="138" fill="#8A8A93" font-size="11" text-anchor="middle">pre-baked AMI</text>
+  </g>
+
+  <line x1="175" y1="154" x2="500" y2="200" stroke="#8A8A93" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="445" y1="154" x2="530" y2="200" stroke="#8A8A93" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="715" y1="154" x2="620" y2="200" stroke="#8A8A93" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="985" y1="154" x2="700" y2="200" stroke="#8A8A93" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- cluster.yml -->
+  <rect x="460" y="200" width="280" height="46" rx="8" fill="#00CA8E" opacity="0.15" stroke="#00CA8E" stroke-width="1.5"/>
+  <text x="600" y="228" fill="#00CA8E" font-size="13" font-weight="600" text-anchor="middle">cluster.yml → deploy.py</text>
+
+  <line x1="600" y1="246" x2="600" y2="278" stroke="#8A8A93" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Nomad cluster boundary -->
+  <rect x="80" y="280" width="1040" height="270" rx="10" fill="none" stroke="#00CA8E" stroke-width="1.5" stroke-dasharray="6,4"/>
+  <text x="100" y="303" fill="#00CA8E" font-size="13" font-weight="600">Nomad Cluster (region / datacenter)</text>
+
+  <!-- Nomad servers -->
+  <g>
+    <rect x="120" y="330" width="150" height="56" rx="8" fill="#00CA8E" opacity="0.9"/>
+    <text x="195" y="354" fill="#0B0B0C" font-size="13" font-weight="700" text-anchor="middle">Server 1</text>
+    <text x="195" y="371" fill="#0B0B0C" font-size="10" text-anchor="middle">Raft</text>
+
+    <rect x="290" y="330" width="150" height="56" rx="8" fill="#00CA8E" opacity="0.9"/>
+    <text x="365" y="354" fill="#0B0B0C" font-size="13" font-weight="700" text-anchor="middle">Server 2</text>
+    <text x="365" y="371" fill="#0B0B0C" font-size="10" text-anchor="middle">Raft</text>
+
+    <rect x="460" y="330" width="150" height="56" rx="8" fill="#00CA8E" opacity="0.9"/>
+    <text x="535" y="354" fill="#0B0B0C" font-size="13" font-weight="700" text-anchor="middle">Server 3</text>
+    <text x="535" y="371" fill="#0B0B0C" font-size="10" text-anchor="middle">Raft</text>
+  </g>
+  <line x1="270" y1="358" x2="290" y2="358" stroke="#0B0B0C" stroke-width="2"/>
+  <line x1="440" y1="358" x2="460" y2="358" stroke="#0B0B0C" stroke-width="2"/>
+
+  <text x="365" y="410" fill="#8A8A93" font-size="11" text-anchor="middle">bootstrap_expect = N (odd quorum), gossip encryption, ACL enabled</text>
+
+  <!-- Nomad clients -->
+  <g>
+    <rect x="120" y="430" width="150" height="90" rx="8" fill="#00CA8E" opacity="0.35" stroke="#00CA8E" stroke-width="1.5"/>
+    <text x="195" y="458" fill="#FFFFFF" font-size="13" font-weight="600" text-anchor="middle">Client</text>
+    <text x="195" y="476" fill="#EAEAEA" font-size="10" text-anchor="middle">podman (main)</text>
+    <text x="195" y="490" fill="#8A8A93" font-size="10" text-anchor="middle">docker (fallback)</text>
+    <text x="195" y="507" fill="#8A8A93" font-size="9" text-anchor="middle">workloads</text>
+
+    <rect x="290" y="430" width="150" height="90" rx="8" fill="#00CA8E" opacity="0.35" stroke="#00CA8E" stroke-width="1.5"/>
+    <text x="365" y="458" fill="#FFFFFF" font-size="13" font-weight="600" text-anchor="middle">Client</text>
+    <text x="365" y="476" fill="#EAEAEA" font-size="10" text-anchor="middle">podman (main)</text>
+    <text x="365" y="490" fill="#8A8A93" font-size="10" text-anchor="middle">docker (fallback)</text>
+    <text x="365" y="507" fill="#8A8A93" font-size="9" text-anchor="middle">workloads</text>
+
+    <rect x="460" y="430" width="150" height="90" rx="8" fill="#00CA8E" opacity="0.35" stroke="#00CA8E" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <text x="535" y="458" fill="#FFFFFF" font-size="13" font-weight="600" text-anchor="middle">Client N</text>
+    <text x="535" y="476" fill="#EAEAEA" font-size="10" text-anchor="middle">podman (main)</text>
+    <text x="535" y="490" fill="#8A8A93" font-size="10" text-anchor="middle">docker (fallback)</text>
+    <text x="535" y="507" fill="#8A8A93" font-size="9" text-anchor="middle">scales out</text>
+  </g>
+  <line x1="195" y1="386" x2="195" y2="430" stroke="#8A8A93" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <line x1="365" y1="386" x2="365" y2="430" stroke="#8A8A93" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <line x1="535" y1="386" x2="535" y2="430" stroke="#8A8A93" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <text x="640" y="480" fill="#8A8A93" font-size="10">RPC :4647</text>
+
+  <!-- Shared CA note -->
+  <rect x="120" y="330" width="490" height="280" rx="10" fill="none" stroke="none"/>
+  <text x="365" y="536" fill="#8A8A93" font-size="10" text-anchor="middle">mTLS: single shared CA signs every server + client leaf certificate</text>
+
+  <!-- Consul -->
+  <g>
+    <rect x="680" y="330" width="200" height="90" rx="8" fill="#CA2171" opacity="0.9"/>
+    <text x="780" y="360" fill="#FFFFFF" font-size="14" font-weight="700" text-anchor="middle">Consul</text>
+    <text x="780" y="380" fill="#FFF0F5" font-size="10" text-anchor="middle">service discovery</text>
+    <text x="780" y="395" fill="#FFF0F5" font-size="10" text-anchor="middle">cloud auto-join (tag-based)</text>
+  </g>
+  <line x1="610" y1="358" x2="680" y2="358" stroke="#CA2171" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+  <text x="645" y="350" fill="#CA2171" font-size="9" text-anchor="middle">optional</text>
+
+  <!-- Vault -->
+  <g>
+    <rect x="680" y="440" width="200" height="90" rx="8" fill="#25252B" stroke="#FFEC6E" stroke-width="1.5"/>
+    <text x="780" y="470" fill="#FFEC6E" font-size="14" font-weight="700" text-anchor="middle">Vault</text>
+    <text x="780" y="490" fill="#EAEAEA" font-size="10" text-anchor="middle">dynamic secrets</text>
+    <text x="780" y="505" fill="#EAEAEA" font-size="10" text-anchor="middle">create_from_role: nomad-cluster</text>
+  </g>
+  <line x1="610" y1="475" x2="680" y2="475" stroke="#FFEC6E" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Secrets manager (AWS avenue) -->
+  <g>
+    <rect x="920" y="385" width="160" height="90" rx="8" fill="#25252B" stroke="#4A4A52" stroke-width="1.5"/>
+    <text x="1000" y="412" fill="#FFFFFF" font-size="12" font-weight="600" text-anchor="middle">AWS Secrets</text>
+    <text x="1000" y="428" fill="#FFFFFF" font-size="12" font-weight="600" text-anchor="middle">Manager</text>
+    <text x="1000" y="448" fill="#8A8A93" font-size="9" text-anchor="middle">gossip key, ACL token,</text>
+    <text x="1000" y="461" fill="#8A8A93" font-size="9" text-anchor="middle">vault token (KMS-encrypted)</text>
+  </g>
+  <line x1="880" y1="375" x2="920" y2="410" stroke="#8A8A93" stroke-width="1.3" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+  <text x="900" y="385" fill="#8A8A93" font-size="9">terraform avenue</text>
+
+  <!-- Monitoring -->
+  <rect x="80" y="590" width="1040" height="120" rx="10" fill="#25252B" stroke="#4A4A52" stroke-width="1.5"/>
+  <text x="100" y="613" fill="#FFFFFF" font-size="13" font-weight="600">Monitoring</text>
+
+  <rect x="120" y="628" width="220" height="60" rx="8" fill="#1DAEFF" opacity="0.2" stroke="#1DAEFF" stroke-width="1.5"/>
+  <text x="230" y="653" fill="#1DAEFF" font-size="13" font-weight="600" text-anchor="middle">Prometheus</text>
+  <text x="230" y="672" fill="#8A8A93" font-size="10" text-anchor="middle">scrapes servers, clients, Consul, Vault</text>
+
+  <rect x="370" y="628" width="220" height="60" rx="8" fill="#F05A28" opacity="0.2" stroke="#F05A28" stroke-width="1.5"/>
+  <text x="480" y="653" fill="#F05A28" font-size="13" font-weight="600" text-anchor="middle">Grafana</text>
+  <text x="480" y="672" fill="#8A8A93" font-size="10" text-anchor="middle">behind an HTTPS ALB</text>
+
+  <rect x="620" y="628" width="220" height="60" rx="8" fill="#00CA8E" opacity="0.2" stroke="#00CA8E" stroke-width="1.5"/>
+  <text x="730" y="653" fill="#00CA8E" font-size="13" font-weight="600" text-anchor="middle">fluent-bit</text>
+  <text x="730" y="672" fill="#8A8A93" font-size="10" text-anchor="middle">Nomad system job, log shipping</text>
+
+  <rect x="870" y="628" width="220" height="60" rx="8" fill="#8A8A93" opacity="0.15" stroke="#8A8A93" stroke-width="1.5"/>
+  <text x="980" y="653" fill="#EAEAEA" font-size="13" font-weight="600" text-anchor="middle">CloudWatch</text>
+  <text x="980" y="672" fill="#8A8A93" font-size="10" text-anchor="middle">ASG autoscaling alarms</text>
+
+  <line x1="600" y1="550" x2="600" y2="590" stroke="#8A8A93" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Legend -->
+  <g>
+    <rect x="80" y="740" width="14" height="14" fill="#00CA8E"/>
+    <text x="102" y="751" fill="#EAEAEA" font-size="11">Nomad</text>
+
+    <rect x="170" y="740" width="14" height="14" fill="#CA2171"/>
+    <text x="192" y="751" fill="#EAEAEA" font-size="11">Consul</text>
+
+    <rect x="260" y="740" width="14" height="14" fill="#25252B" stroke="#FFEC6E" stroke-width="1.5"/>
+    <text x="282" y="751" fill="#EAEAEA" font-size="11">Vault</text>
+
+    <rect x="340" y="740" width="14" height="14" fill="#1DAEFF" opacity="0.6"/>
+    <text x="362" y="751" fill="#EAEAEA" font-size="11">Observability</text>
+  </g>
+
+  <text x="600" y="800" fill="#8A8A93" font-size="10" text-anchor="middle">Odd server count required for Raft quorum · single shared CA for mTLS · podman is the primary task driver, docker is an optional fallback</text>
+</svg>

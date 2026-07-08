@@ -1,4 +1,8 @@
-FROM docker.io/openjdk:17-jdk-slim
+ARG repo="docker.io" \
+    base_image="eclipse-temurin:17-jdk-jammy" \
+    image_hash="61a9a7bd265855cb9ebdd396f5925b16dbdde01feb9b97a87f7f6008fc39c2b4"
+
+FROM ${repo}/${base_image}@sha256:${image_hash}
 
 RUN apt-get update; \
     apt-get install -y --no-install-recommends \

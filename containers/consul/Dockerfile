@@ -1,8 +1,8 @@
 # consul: uses service identities and traditional networking practices to help organizations securely connect applications running in any environment.
 
 ARG repo="docker.io" \
-    base_image="alpine:3.23" \
-    image_hash="4d889c14e7d5a73929ab00be2ef8ff22437e7cbc545931e52554a7b00e123d8b"
+    base_image="alpine:3.24" \
+    image_hash="79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f"
 
 FROM ${repo}/${base_image}@sha256:${image_hash} AS base
 
@@ -25,7 +25,7 @@ RUN \
 
 FROM base as build-env
 
-ENV CONSUL_VER=1.22.0 \
+ENV CONSUL_VER=2.0.1 \
     CONSUL_GPGKEY=C874011F0AB405110D02105534365D9472D7468F
 
 RUN \
@@ -81,7 +81,7 @@ LABEL \
     org.opencontainers.image.url='https://www.hashicorp.com/products/consul' \
     org.opencontainers.image.vendor='Hashicorp' \
     org.opencontainers.image.licenses='Mozilla Public License 2.0' \
-    org.opencontainers.image.schema-version='1.22.0' \
+    org.opencontainers.image.schema-version='2.0.1' \
     MAINTAINER="@rw"
 
 RUN \

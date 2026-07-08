@@ -53,8 +53,14 @@ variable "ssl_certificate_arn" {
   }
 }
 
-variable "nomad_lb_address" {
-  description = "DNS name of the Nomad load balancer"
+variable "nomad_ips" {
+  description = "IP addresses of Nomad instances"
+  type        = list(string)
+  default     = []
+}
+
+variable "aws_region" {
+  description = "AWS region of the Secrets Manager secret (always the primary region)"
   type        = string
 }
 
@@ -71,7 +77,7 @@ variable "vault_ips" {
 }
 
 variable "secrets_arn" {
-  description = "ARN of the AWS Secrets Manager secret for Grafana password"
+  description = "ARN of the AWS Secrets Manager secret containing the Grafana admin password"
   type        = string
   validation {
     condition     = can(regex("^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]+:secret:[a-zA-Z0-9-/]+$", var.secrets_arn))

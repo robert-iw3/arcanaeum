@@ -124,7 +124,7 @@ vault operator unseal $(grep 'Unseal Key' /etc/vault.d/vault-init.txt | awk '{pr
 vault policy write nomad-cluster /etc/vault.d/nomad-policy.hcl
 
 # Configure Nomad role
-vault auth enable -token=${VAULT_TOKEN} approle
+vault auth enable -token=$${VAULT_TOKEN} approle
 vault write auth/approle/role/nomad-cluster \
     token_policies="nomad-cluster" \
     token_ttl=1h \

@@ -11,9 +11,9 @@ RUN \
         build-essential \
         unzip
 
-ENV VERSION=11.3.2_PUBLIC
-ENV GHIDRA_SHA=99d45035bdcc3d6627e7b1232b7b379905a9fad76c772c920602e2b5d8b2dac2
-ENV GHIDRA_URL=https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.3.2_build/ghidra_11.3.2_PUBLIC_20250415.zip
+ENV VERSION=12.1.2_PUBLIC
+ENV GHIDRA_SHA=b62e81a0390618466c019c60d8c2f796ced2509c4c1aea4a37644a77272cf99d
+ENV GHIDRA_URL=https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.2_build/ghidra_12.1.2_PUBLIC_20260605.zip
 
 RUN \
     apt-get update ; \
@@ -40,7 +40,7 @@ WORKDIR /ghidra/support/gradle/
 RUN gradle buildNatives
 
 ## runtime
-FROM docker.io/alpine:3.23
+FROM docker.io/alpine:3.24
 
 RUN \
     apk add --no-cache openjdk21-jre bash ; \
