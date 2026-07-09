@@ -2,12 +2,12 @@
 # trivy: is a comprehensive and versatile security scanner.
 ARG repo="docker.io" \
     base_image="alpine:latest" \
-    image_hash="4d889c14e7d5a73929ab00be2ef8ff22437e7cbc545931e52554a7b00e123d8b"
+    image_hash="79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f"
 
 FROM ${repo}/${base_image}@sha256:${image_hash} AS build-env
 
 ENV GOPATH=/usr/local/bin/go \
-    VER=0.67.2
+    VER=0.72.0
 
 RUN \
     apk add --no-cache -t .trivy-deps ca-certificates go git wget; \
@@ -35,7 +35,7 @@ LABEL \
     org.opencontainers.image.url='https://www.aquasec.com/products/trivy/' \
     org.opencontainers.image.licenses='Apache License 2.0' \
     org.opencontainers.image.vendor='Aqua Security' \
-    org.opencontainers.image.schema-version='0.67.2' \
+    org.opencontainers.image.schema-version='0.72.0' \
     MAINTAINER="@rw"
 
 RUN \

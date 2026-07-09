@@ -1,4 +1,4 @@
-FROM spark-python-template:4.0.0-hadoop3.3
+FROM spark-python-template:4.1.2-hadoop3
 
 COPY wordcount.py /app/
 

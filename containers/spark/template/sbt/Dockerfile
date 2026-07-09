@@ -1,4 +1,4 @@
-FROM spark-submit:4.0.0-hadoop3.4.1
+FROM spark-submit:4.1.2-hadoop3
 
 ARG SBT_VERSION
 ENV SBT_VERSION=${SBT_VERSION:-1.6.2}

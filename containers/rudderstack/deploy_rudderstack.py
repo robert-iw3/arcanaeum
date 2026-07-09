@@ -94,7 +94,8 @@ def main():
     output_dir.mkdir(exist_ok=True)
 
     context = {
-        'rudder_version': config.get('rudder_version', '1.25.0'),
+        'rudder_version': config.get('rudder_version', '1.80.0'),
+        'transformer_version': config.get('transformer_version', '1.41.1'),
         'image_registry': config.get('image_registry', 'docker.io'),
         'namespace': config.get('namespace', 'rudderstack'),
         'replicas': config.get('replicas', 1),

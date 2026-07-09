@@ -2,7 +2,6 @@ ARG AIRFLOW_VERSION=3.3.0
 FROM docker.io/apache/airflow:${AIRFLOW_VERSION}
 
 USER root
-# Install security updates and additional dependencies
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
@@ -12,5 +11,6 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 USER airflow
-COPY --chown=airflow:airflow ./requirements.txt /opt/airflow/requirements.txt
-RUN pip install --no-cache-dir -r /opt/airflow/requirements.txt
+ARG AIRFLOW_VERSION
+COPY --chown=airflow:0 ./requirements.txt /opt/airflow/requirements.txt
+RUN pip install --no-cache-dir "apache-airflow==${AIRFLOW_VERSION}" -r /opt/airflow/requirements.txt

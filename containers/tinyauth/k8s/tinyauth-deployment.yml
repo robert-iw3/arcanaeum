@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: traefik
-        image: docker.io/traefik:v3.4
+        image: docker.io/traefik:v3.7.7
         args:
           - --api.insecure=true
           - --providers.kubernetescrd

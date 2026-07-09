@@ -94,7 +94,7 @@ def main():
     output_dir.mkdir(exist_ok=True)
 
     context = {
-        'salt_version': config.get('salt_version', '3006.8'),
+        'salt_version': config.get('salt_version', '3006.5'),
         'image_registry': config.get('image_registry', 'docker.io'),
         'namespace': config.get('namespace', 'saltstack'),
         'replicas': config.get('replicas', 1),

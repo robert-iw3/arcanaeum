@@ -6,7 +6,7 @@ ARG repo="quay.io/almalinuxorg" \
 
 FROM ${repo}/${base_image}@sha256:${image_hash} AS builder
 
-ARG SONARQUBE_VERSION="25.11.0.114957"
+ARG SONARQUBE_VERSION="26.6.0.123539"
 ARG SONARQUBE_ZIP_URL="https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-${SONARQUBE_VERSION}.zip"
 
 ENV SONARQUBE_HOME="/opt/sonarqube" \
@@ -82,4 +82,4 @@ LABEL \
     org.opencontainers.image.url='https://www.sonarsource.com/products/sonarqube/' \
     org.opencontainers.image.licenses='GNU Lesser General Public License v3.0' \
     org.opencontainers.image.vendor='Sonar' \
-    org.opencontainers.image.schema-version='25.11.0.114957'
+    org.opencontainers.image.schema-version='26.6.0.123539'

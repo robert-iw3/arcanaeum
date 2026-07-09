@@ -1,349 +1,206 @@
 #!/usr/bin/env python3
-"""
-Python script to toggle Suricata rule actions between 'alert' and 'drop' for user-selected rules or all rules in a directory.
-Includes rollback, concurrency, and rule syntax validation with auto-correction for common issues.
-Example rules: Salt Typhoon/UNC4841 and Docker API malware rulesets.
-Requires Suricata in inline IPS mode (see suricata.yaml).
-"""
-
-import os
+# ==============================================================================
+# toggle_rule_blocking.py -- risk-based rule action controller for Suricata IPS
+#
+# Flips Suricata rule actions (alert <-> drop <-> reject) according to a policy,
+# so the SAME ruleset can run detection-only or actively block, and so blocking
+# can be scoped to a risk tier instead of "all or nothing".
+#
+# Risk model (maps to the rule files shipped in this image):
+#   tier 1  block-known-bad.rules   high confidence     -> drop  (block known bad)
+#   tier 2  suspicious.rules        medium              -> alert (rate_filter escalates)
+#   tier 3  policy.rules            low / informational -> alert
+#   tier 0  allowlist.rules         pass                -> never changed
+#
+# Policies (RULE_ACTION_POLICY):
+#   detect     everything -> alert             (pure IDS; no drops at all)
+#   balanced   tier1 -> drop, tier2/3 -> alert (default; block known-bad only)
+#   aggressive tier1+tier2 -> drop, tier3 -> alert
+#   paranoid   tier1+tier2+tier3 -> drop
+#
+# Additional controls:
+#   --ips-mode ids   forces EVERYTHING to alert regardless of policy (safety: a
+#                    passive sensor must never carry drop actions).
+#   --only-sids / --except-sids   surgical include/exclude lists.
+#   --classtypes      override actions for specific rule classtypes.
+#   --dry-run         show what would change without writing.
+#
+# The script is idempotent and only rewrites the leading action token of each
+# rule line, preserving the rest of the rule byte-for-byte.
+# ==============================================================================
 import argparse
+import os
 import re
-import logging
-import shutil
+import sys
 from pathlib import Path
-import subprocess
-import glob
-import concurrent.futures
-import tempfile
 
-# Configuration
-RULES_DIR = "/etc/suricata/rules/"
-BACKUP_DIR = "/etc/suricata/rules/backup/"
-SURICATA_CONFIG = "/etc/suricata/suricata.yaml"
-LOG_FILE = "/var/log/suricata/toggle_rule_blocking.log"
-MAX_WORKERS = 4  # Adjust based on system resources
+# Rule action verbs Suricata understands (rule starts with one of these).
+ACTIONS = ("alert", "drop", "reject", "rejectsrc", "rejectdst", "rejectboth", "pass")
+RULE_RE = re.compile(r'^\s*(#\s*)?(' + "|".join(ACTIONS) + r')\b(.*)$')
+SID_RE = re.compile(r'\bsid\s*:\s*(\d+)\s*;')
+CLASSTYPE_RE = re.compile(r'\bclasstype\s*:\s*([^;]+);')
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler(LOG_FILE),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+# Tier -> rule files. Each tier may list several files. Tier 1 (high-confidence
+# block-known-bad) includes this image's shipped rulesets — docker API malware
+# and Salt Typhoon / UNC4841 C2 are all high-confidence malicious, so they drop
+# under balanced+ policies. Anything not listed here is treated as the managed
+# feed (classtype-driven). Extend these lists to add your own rule files.
+TIER_FILES = {
+    1: ["block-known-bad.rules", "docker_malware.rules", "salt_typhoon_unc4841.rules"],
+    2: ["suspicious.rules"],
+    3: ["policy.rules"],
+}
+ALLOWLIST_FILE = "allowlist.rules"
 
-def validate_rule_file(rule_file):
-    """Validate that the rule file exists."""
-    rule_path = Path(RULES_DIR) / rule_file
-    if not rule_path.is_file():
-        logger.error(f"Rule file {rule_path} not found.")
-        raise FileNotFoundError(f"Rule file {rule_path} not found.")
-    return rule_path
+# Policy matrix: tier -> action.
+POLICIES = {
+    "detect":     {1: "alert", 2: "alert", 3: "alert"},
+    "balanced":   {1: "drop",  2: "alert", 3: "alert"},
+    "aggressive": {1: "drop",  2: "drop",  3: "alert"},
+    "paranoid":   {1: "drop",  2: "drop",  3: "drop"},
+}
 
-def backup_rule_file(rule_file):
-    """Create a backup of the rule file."""
-    rule_path = Path(RULES_DIR) / rule_file
-    backup_path = Path(BACKUP_DIR) / f"{rule_file}.{os.getpid()}.bak"
-    backup_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy(rule_path, backup_path)
-    logger.info(f"Backed up {rule_path} to {backup_path}")
-    return backup_path
+# For the managed feed (suricata.rules) we key off classtype risk, since it has
+# no tier file. High-confidence malicious classtypes default to drop in
+# balanced+; everything else stays alert.
+HIGH_RISK_CLASSTYPES = {
+    "trojan-activity", "command-and-control", "exploit-kit",
+    "shellcode-detect", "attempted-admin", "web-application-attack",
+    "successful-admin", "malware-cnc",
+}
 
-def restore_rule_file(rule_file):
-    """Restore the rule file from the most recent backup."""
-    rule_path = Path(RULES_DIR) / rule_file
-    backup_files = sorted(glob.glob(os.path.join(BACKUP_DIR, f"{rule_file}.*.bak")))
-    if not backup_files:
-        logger.error(f"No backup found for {rule_file}")
-        return False
 
-    latest_backup = backup_files[-1]
-    shutil.copy(latest_backup, rule_path)
-    logger.info(f"Restored {rule_path} from {latest_backup}")
-    return True
+def desired_action(tier, policy, classtype=None):
+    if tier in POLICIES[policy]:
+        return POLICIES[policy][tier]
+    # Managed feed (no tier): use classtype risk.
+    if classtype and classtype.strip() in HIGH_RISK_CLASSTYPES:
+        return "drop" if policy in ("balanced", "aggressive", "paranoid") else "alert"
+    return "alert"
 
-def correct_rule_syntax(line):
-    """Attempt to correct common rule syntax issues."""
-    original_line = line
-    # Fix missing semicolon at end of rule
-    if not line.rstrip().endswith(";"):
-        line = line.rstrip() + ";"
-        logger.info(f"Added missing semicolon to rule: {line.strip()}")
 
-    # Ensure valid action (alert or drop)
-    line = re.sub(r'^\s*(?:alert|drop)\b', lambda m: m.group(0).lower(), line, flags=re.IGNORECASE)
-    if not re.match(r'^\s*(alert|drop)\s+', line):
-        logger.warning(f"Invalid action in rule, skipping correction: {original_line.strip()}")
-        return original_line
+def rewrite_line(line, new_action):
+    """Replace only the leading action token; keep comment state and the body."""
+    m = RULE_RE.match(line)
+    if not m:
+        return line, False
+    comment, old_action, body = m.group(1) or "", m.group(2), m.group(3)
+    # Never touch 'pass' rules -- those are the allowlist escape hatch.
+    if old_action == "pass":
+        return line, False
+    if old_action == new_action:
+        return line, False
+    # Preserve leading whitespace and any '#'.
+    leading_ws = line[:len(line) - len(line.lstrip())]
+    newline = f"{leading_ws}{comment}{new_action}{body}\n"
+    return newline, True
 
-    # Ensure sid is numeric
-    sid_match = re.search(r'sid:(\d+);', line)
-    if not sid_match:
-        logger.warning(f"Missing or invalid SID in rule, skipping correction: {original_line.strip()}")
-        return original_line
 
-    if original_line != line:
-        logger.info(f"Corrected rule: {line.strip()}")
-    return line
+def get_sid(line):
+    m = SID_RE.search(line)
+    return int(m.group(1)) if m else None
 
-def validate_rule_syntax(rule_file, content_lines):
-    """Validate rule syntax using Suricata's test mode."""
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.rules', delete=False) as temp_file:
-        temp_file.writelines(content_lines)
-        temp_file_path = temp_file.name
 
+def get_classtype(line):
+    m = CLASSTYPE_RE.search(line)
+    return m.group(1) if m else None
+
+
+def process_file(path, tier, policy, ips_mode, only_sids, except_sids, dry_run):
+    changed = 0
     try:
-        result = subprocess.run(
-            ["suricata", "-T", "-c", SURICATA_CONFIG, "-S", temp_file_path],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        logger.info(f"Syntax validation passed for {rule_file}")
-        os.unlink(temp_file_path)
-        return True, None
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Syntax validation failed for {rule_file}: {e.stderr}")
-        os.unlink(temp_file_path)
-        return False, e.stderr
-
-def toggle_rule_action(rule_file, sid, action):
-    """Toggle the rule action (alert/drop) for the specified SID."""
-    if action not in ["alert", "drop"]:
-        logger.error(f"Invalid action: {action}. Must be 'alert' or 'drop'.")
-        raise ValueError(f"Invalid action: {action}")
-
-    rule_path = validate_rule_file(rule_file)
-    backup_rule_file(rule_file)
-
-    with rule_path.open("r") as f:
-        lines = f.readlines()
-
-    sid_pattern = re.compile(rf'(\b{action}\s+.*?sid:{sid};)')
-    found = False
-    new_lines = []
-    for line in lines:
-        if sid_pattern.search(line):
-            new_action = "drop" if action == "alert" else "alert"
-            new_line = sid_pattern.sub(rf"{new_action} \1".replace(f"sid:{sid};", ""), line)
-            new_line = new_line.replace(action, new_action, 1)
-            new_line = correct_rule_syntax(new_line)
-            new_lines.append(new_line)
-            found = True
-            logger.info(f"Toggled SID {sid} in {rule_file} from {action} to {new_action}")
+        text = path.read_text().splitlines(keepends=True)
+    except OSError as e:
+        print(f"[toggle] WARN: cannot read {path}: {e}", file=sys.stderr)
+        return 0
+    out = []
+    for line in text:
+        m = RULE_RE.match(line)
+        if not m or (m.group(2) == "pass"):
+            out.append(line)
+            continue
+        sid = get_sid(line)
+        # Surgical scoping.
+        if only_sids and (sid not in only_sids):
+            out.append(line)
+            continue
+        if except_sids and (sid in except_sids):
+            out.append(line)
+            continue
+        # IDS mode: force alert everywhere (a passive sensor must not drop).
+        if ips_mode == "ids":
+            target = "alert"
         else:
-            new_lines.append(line)
+            target = desired_action(tier, policy, get_classtype(line))
+        newline, did = rewrite_line(line, target)
+        out.append(newline)
+        changed += 1 if did else 0
+    if changed and not dry_run:
+        path.write_text("".join(out))
+    verb = "would change" if dry_run else "changed"
+    if changed:
+        print(f"[toggle] {path.name}: {verb} {changed} rule action(s) "
+              f"(tier={tier if tier else 'feed'}, policy={policy}, mode={ips_mode})")
+    return changed
 
-    if not found:
-        logger.warning(f"SID {sid} not found in {rule_file}")
-        return False
 
-    # Validate syntax before writing
-    is_valid, error = validate_rule_syntax(rule_file, new_lines)
-    if not is_valid:
-        logger.error(f"Aborting modification of {rule_file} due to syntax error: {error}")
-        return False
+def parse_sid_list(s):
+    if not s:
+        return set()
+    out = set()
+    for part in s.replace(",", " ").split():
+        part = part.strip()
+        if part.isdigit():
+            out.add(int(part))
+    return out
 
-    with rule_path.open("w") as f:
-        f.writelines(new_lines)
-    return True
-
-def toggle_all_rules_to_drop(rule_file):
-    """Toggle all 'alert' rules in a single file to 'drop'."""
-    rule_path = validate_rule_file(rule_file)
-    backup_rule_file(rule_file)
-
-    with rule_path.open("r") as f:
-        lines = f.readlines()
-
-    new_lines = []
-    alert_pattern = re.compile(r'^\s*alert\s+')
-    sid_pattern = re.compile(r'sid:(\d+);')
-    modified = False
-    for line in lines:
-        if alert_pattern.match(line):
-            sid_match = sid_pattern.search(line)
-            if sid_match:
-                sid = sid_match.group(1)
-                new_line = line.replace("alert", "drop", 1)
-                new_line = correct_rule_syntax(new_line)
-                new_lines.append(new_line)
-                logger.info(f"Toggled SID {sid} in {rule_path.name} to drop")
-                modified = True
-            else:
-                new_lines.append(line)
-        else:
-            new_lines.append(line)
-
-    if not modified:
-        logger.warning(f"No rules toggled to drop in {rule_file}")
-        return False
-
-    # Validate syntax before writing
-    is_valid, error = validate_rule_syntax(rule_file, new_lines)
-    if not is_valid:
-        logger.error(f"Aborting modification of {rule_file} due to syntax error: {error}")
-        return False
-
-    with rule_path.open("w") as f:
-        f.writelines(new_lines)
-    return True
-
-def process_all_rules_concurrently(directory):
-    """Process all rule files in the directory concurrently to toggle to drop."""
-    rule_files = glob.glob(os.path.join(directory, "*.rules"))
-    if not rule_files:
-        logger.error(f"No .rules files found in {directory}")
-        return False
-
-    modified = False
-    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        future_to_file = {executor.submit(toggle_all_rules_to_drop, Path(rule_file).name): rule_file for rule_file in rule_files}
-        for future in concurrent.futures.as_completed(future_to_file):
-            rule_file = future_to_file[future]
-            try:
-                if future.result():
-                    modified = True
-            except Exception as e:
-                logger.error(f"Error processing {rule_file}: {str(e)}")
-
-    return modified
-
-def validate_suricata_config():
-    """Validate Suricata configuration."""
-    try:
-        result = subprocess.run(
-            ["suricata", "-T", "-c", SURICATA_CONFIG],
-            check=True,
-            capture_output=True,
-            text=True
-        )
-        logger.info("Suricata configuration validated successfully")
-        return True
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Suricata configuration validation failed: {e.stderr}")
-        return False
-
-def reload_suricata():
-    """Reload Suricata to apply rule changes."""
-    try:
-        result = subprocess.run(
-            ["suricatasc", "-c", "reload-rules"],
-            check=True,
-            capture_output=True,
-            text=True
-        )
-        logger.info("Suricata rules reloaded successfully")
-        return True
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Failed to reload Suricata rules: {e.stderr}")
-        return False
-
-def list_available_sids(rule_file):
-    """List available SIDs in a rule file."""
-    rule_path = validate_rule_file(rule_file)
-    sids = []
-    sid_pattern = re.compile(r'sid:(\d+);')
-    with rule_path.open("r") as f:
-        for line in f:
-            match = sid_pattern.search(line)
-            if match:
-                sids.append(match.group(1))
-    return sids
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Toggle Suricata rule actions (alert/drop) for specified SIDs or all rules in directory.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Example usage:
-  List available SIDs: python3 toggle_rule_blocking.py --list
-  Toggle SID to drop: python3 toggle_rule_blocking.py --sid 1000001 --action drop
-  Toggle SID to alert: python3 toggle_rule_blocking.py --sid 1000001 --action alert
-  Toggle all rules to drop: python3 toggle_rule_blocking.py --all-drop
-  Restore from backup: python3 toggle_rule_blocking.py --restore --file salt_typhoon_unc4841.rules
-"""
-    )
-    parser.add_argument(
-        "--sid", type=int, help="Rule SID to toggle (e.g., 1000001)"
-    )
-    parser.add_argument(
-        "--action", choices=["alert", "drop"], help="Target action (alert or drop)"
-    )
-    parser.add_argument(
-        "--list", action="store_true", help="List available SIDs in rule files"
-    )
-    parser.add_argument(
-        "--file", help="Rule file to modify (default: all .rules files in RULES_DIR)"
-    )
-    parser.add_argument(
-        "--all-drop", action="store_true", help="Toggle all rules in RULES_DIR to drop"
-    )
-    parser.add_argument(
-        "--restore", action="store_true", help="Restore rule file from latest backup"
-    )
-    args = parser.parse_args()
-
-    if args.list:
-        rule_files = glob.glob(os.path.join(RULES_DIR, "*.rules"))
-        for rule_file in rule_files:
-            sids = list_available_sids(Path(rule_file).name)
-            logger.info(f"Available SIDs in {Path(rule_file).name}: {', '.join(sids)}")
-        return
-
-    if args.restore:
-        rule_files = [args.file] if args.file else glob.glob(os.path.join(RULES_DIR, "*.rules"))
-        modified = False
-        for rule_file in rule_files:
-            if restore_rule_file(Path(rule_file).name):
-                modified = True
-        if modified and validate_suricata_config():
-            reload_suricata()
-        elif not modified:
-            logger.warning("No rules were restored")
-        else:
-            logger.error("Aborting rule reload due to invalid configuration")
-        return
+    ap = argparse.ArgumentParser(description="Risk-based Suricata rule action toggler.")
+    ap.add_argument("--policy", default=os.environ.get("RULE_ACTION_POLICY", "balanced"),
+                    choices=list(POLICIES.keys()))
+    ap.add_argument("--ips-mode", default=os.environ.get("IPS_MODE", "ids"),
+                    choices=["ids", "ips"])
+    ap.add_argument("--rules-dir", default="/var/lib/suricata/rules")
+    ap.add_argument("--only-sids", default="", help="comma/space list: only toggle these SIDs")
+    ap.add_argument("--except-sids", default="", help="comma/space list: never toggle these SIDs")
+    ap.add_argument("--all-drop", action="store_true",
+                    help="legacy shortcut: force policy=paranoid")
+    ap.add_argument("--dry-run", action="store_true")
+    args = ap.parse_args()
 
     if args.all_drop:
-        if process_all_rules_concurrently(RULES_DIR):
-            if validate_suricata_config():
-                reload_suricata()
-            else:
-                logger.error("Aborting rule reload due to invalid configuration")
-        return
+        args.policy = "paranoid"
 
-    if not args.sid or not args.action:
-        parser.error("Both --sid and --action are required unless --list, --all-drop, or --restore is specified")
+    rules_dir = Path(args.rules_dir)
+    if not rules_dir.is_dir():
+        print(f"[toggle] ERROR: rules dir {rules_dir} not found", file=sys.stderr)
+        return 1
 
-    rule_files = [args.file] if args.file else glob.glob(os.path.join(RULES_DIR, "*.rules"))
-    modified = False
-    for rule_file in rule_files:
-        if toggle_rule_action(Path(rule_file).name, args.sid, args.action):
-            modified = True
-    if modified and validate_suricata_config():
-        reload_suricata()
-    elif not modified:
-        logger.warning("No rules were modified")
-    else:
-        logger.error("Aborting rule reload due to invalid configuration")
+    only_sids = parse_sid_list(args.only_sids)
+    except_sids = parse_sid_list(args.except_sids)
+
+    print(f"[toggle] policy={args.policy} ips_mode={args.ips_mode} dir={rules_dir}"
+          + (" [DRY-RUN]" if args.dry_run else ""))
+
+    total = 0
+    # Tiered operator files (each tier may map to several rule files).
+    for tier, fnames in TIER_FILES.items():
+        for fname in fnames:
+            p = rules_dir / fname
+            if p.exists():
+                total += process_file(p, tier, args.policy, args.ips_mode,
+                                       only_sids, except_sids, args.dry_run)
+    # Managed feed (classtype-driven), if present.
+    feed = rules_dir / "suricata.rules"
+    if feed.exists():
+        total += process_file(feed, None, args.policy, args.ips_mode,
+                              only_sids, except_sids, args.dry_run)
+
+    # allowlist.rules is intentionally never processed (pass rules only).
+    print(f"[toggle] done: {total} rule action(s) {'would change' if args.dry_run else 'changed'}.")
+    return 0
+
 
 if __name__ == "__main__":
-    main()
-
-# Notes:
-# - Requires root privileges to modify rule files, restore backups, and reload Suricata.
-# - Place rule files (e.g., salt_typhoon_unc4841.rules, docker_malware.rules) and supporting files (e.g., salt_typhoon_ips.txt, docker_malware_hashes.txt) in /etc/suricata/rules/ and /etc/suricata/data/.
-# - Run with:
-#   - Toggle all to drop: python3 toggle_rule_blocking.py --all-drop
-#   - Restore backup: python3 toggle_rule_blocking.py --restore [--file <rule_file>]
-#   - List SIDs: python3 toggle_rule_blocking.py --list
-#   - Toggle specific SID: python3 toggle_rule_blocking.py --sid 1000001 --action drop
-# - Uses ThreadPoolExecutor for concurrent processing of rule files.
-# - Validates rule syntax with Suricata's test mode and corrects common issues (e.g., missing semicolons).
-# - Backups are created in /etc/suricata/rules/backup/ before modifying rules.
-# - Logs to /var/log/suricata/toggle_rule_blocking.log for auditing.
-# - Follows Suricata best practices: https://suricata.readthedocs.io/en/latest/rules/index.html
+    sys.exit(main())

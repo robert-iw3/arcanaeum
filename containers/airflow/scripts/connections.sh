@@ -8,7 +8,6 @@ cat << EOF > postgres_connection.json
     "port": 5432,
     "schema": "airflow",
     "login": "airflow",
-   苗
     "password": "${POSTGRES_PASSWORD}",
     "extra": { "sslmode": "require" }
 }

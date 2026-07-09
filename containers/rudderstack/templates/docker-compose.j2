@@ -1,7 +1,7 @@
 ---
 services:
   rudder-postgres:
-    image: postgres:14
+    image: postgres:15
     container_name: rudder-postgres
     environment:
       - POSTGRES_USER=rudder
@@ -68,7 +68,7 @@ services:
     networks:
       - rudder-network
   rudder-transformer:
-    image: {{ image_registry }}/rudderlabs/rudder-transformer:{{ rudder_version }}
+    image: {{ image_registry }}/rudderlabs/rudder-transformer:{{ transformer_version }}
     container_name: rudder-transformer
     environment:
       - LOG_LEVEL=INFO

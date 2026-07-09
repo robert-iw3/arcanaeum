@@ -9,7 +9,7 @@ networks:
 services:
   traefik:
     container_name: traefik
-    image: docker.io/traefik:v3.4
+    image: docker.io/traefik:v3.7.7
     user: "1000:1000" # Run as non-root user
     command:
       - --api.insecure=false # Disable insecure API in production

@@ -1,80 +1,110 @@
-## Using Docker Compose
+## spark
 
-```yml
----
-services:
-  spark-master:
-    image: spark-master:4.0.0-hadoop3.4.1
-    container_name: spark-master
-    ports:
-      - "8080:8080"
-      - "7077:7077"
-    environment:
-      - INIT_DAEMON_STEP=setup_spark
-  spark-worker-1:
-    image: spark-worker:4.0.0-hadoop3.4.1
-    container_name: spark-worker-1
-    depends_on:
-      - spark-master
-    ports:
-      - "8081:8081"
-    environment:
-      - "SPARK_MASTER=spark://spark-master:7077"
-  spark-worker-2:
-    image: spark-worker:4.0.0-hadoop3.4.1
-    container_name: spark-worker-2
-    depends_on:
-      - spark-master
-    ports:
-      - "8082:8081"
-    environment:
-      - "SPARK_MASTER=spark://spark-master:7077"
-  spark-history-server:
-      image: spark-history-server:4.0.0-hadoop3.4.1
-      container_name: spark-history-server
-      depends_on:
-        - spark-master
-      ports:
-        - "18081:18081"
-      volumes:
-        - /tmp/spark-events-local:/tmp/spark-events
+Apache Spark 4.1.2 standalone cluster for large-scale data / ML processing —
+built for high-volume telemetry: an ETL + MLlib pipeline, dynamic-allocation
+autoscaling, and three deployment avenues (single-host compose, multi-host
+Ansible, Kubernetes).
+
+### Images
+
+`build.sh` builds a layered image set off one Spark base (Scala 2.13, Java 17,
+numpy/pandas for PySpark ML):
+
+```console
+spark-base ──┬── spark-master
+             ├── spark-worker
+             ├── spark-history-server
+             └── spark-submit ──┬── spark-python-template ── python-example
+                                ├── spark-maven-template
+                                └── spark-sbt-template
 ```
-Make sure to fill in the `INIT_DAEMON_STEP` as configured in your pipeline.
 
-## Running Docker containers without the init daemon
-### Spark Master
-To start a Spark master:
+```bash
+./build.sh            # build everything
+./build.sh worker     # or a single image
+```
 
-    docker run --name spark-master -h spark-master -d spark-master:4.0.0-hadoop3.4.1
+### Quick start (single host)
 
-### Spark Worker
-To start a Spark worker:
+```bash
+docker compose up -d                    # master + 3 workers + history server
+open http://localhost:8080              # master UI (workers registered)
+open http://localhost:18080             # history server (completed jobs)
+docker compose up -d --scale spark-worker=5   # more compute
+```
 
-    docker run --name spark-worker-1 --link spark-master:spark-master -d spark-worker:4.0.0-hadoop3.4.1
+### The telemetry pipeline (data + ML)
 
-## Launch a Spark application
-Building and running your Spark application on top of the Spark cluster is as simple as extending a template Docker image. Check the template's README for further documentation.
-* [Maven template](template/maven)
-* [Python template](template/python)
-* [Sbt template](template/sbt)
+`pipelines/telemetry_pipeline.py` generates (or reads) high-volume device
+telemetry, does structured per-minute windowed aggregation, and trains an MLlib
+KMeans model to score anomalies — all distributed, all config-driven so the same
+job scales from a laptop to hundreds of executors:
 
-## Kubernetes deployment
-The Spark images can also be used in a Kubernetes enviroment.
+```bash
+docker compose run --rm submit          # runs the pipeline against the cluster
+# or explicitly, at scale:
+docker compose run --rm submit \
+  /spark/bin/spark-submit --master spark://spark-master:7077 \
+  /pipelines/telemetry_pipeline.py --rows 50000000 --devices 5000 --output /tmp/out
+```
 
-To deploy a simple Spark standalone cluster issue
+Point `--input` at parquet/CSV to process real telemetry instead of synthetic
+data. Verified end to end: 500k rows → 86,400 per-minute rollups → 8 anomaly
+clusters, distributed across the workers.
 
-`kubectl apply -f k8s-spark-cluster.yaml`
+### At-scale performance, baked in
 
-This will setup a Spark standalone cluster with one master and a worker on every available node using the default namespace and resources. The master is reachable in the same namespace at `spark://spark-master:7077`.
-It will also setup a headless service so spark clients can be reachable from the workers using hostname `spark-client`.
+`base/spark-defaults.conf` ships production defaults (override per job with
+`--conf`):
 
-Then to use `spark-shell` issue
+- **Adaptive Query Execution** — right-sizes shuffle partitions and handles skew
+  at runtime (the biggest win for skewed telemetry).
+- **Dynamic allocation** — executors scale up under load and release when idle
+  (1→50) with shuffle tracking so shed executors don't lose data. This is Spark's
+  executor autoscaling.
+- Kryo serialization, shuffle/RDD compression, event logging for the history
+  server.
 
-`kubectl run spark-base --rm -it --labels="app=spark-client" --image spark-base:4.0.0-hadoop3.3 -- bash ./spark/bin/spark-shell --master spark://spark-master:7077 --conf spark.driver.host=spark-client`
+### Multi-host deployment (Ansible)
 
-To use `spark-submit` issue for example
+`ansible/` deploys a real distributed cluster across separate machines, each with
+its own IP/hostname. The master advertises its reachable address and workers
+connect to it cross-host:
 
-`kubectl run spark-base --rm -it --labels="app=spark-client" --image spark-base:4.0.0-hadoop3.3 -- bash ./spark/bin/spark-submit --class CLASS_TO_RUN --master spark://spark-master:7077 --deploy-mode client --conf spark.driver.host=spark-client URL_TO_YOUR_APP`
+```bash
+cd ansible
+# edit inventory.ini: one host under [spark_master], N under [spark_workers],
+# each with ansible_host + spark_advertise_host (its private IP)
+ansible-playbook -i inventory.ini deploy-spark.yml
+```
 
-You can use your own image packed with Spark and your application but when deployed it must be reachable from the workers.
-One way to achieve this is by creating a headless service for your pod and then use `--conf spark.driver.host=YOUR_HEADLESS_SERVICE` whenever you submit your application.
+Scale out by adding hosts under `[spark_workers]` and re-running.
+
+### Kubernetes
+
+`k8s-spark-cluster.yaml` runs the master + a worker Deployment with a
+HorizontalPodAutoscaler (3→20 workers on CPU) + history server:
+
+```bash
+kubectl apply -f k8s-spark-cluster.yaml
+kubectl -n spark scale deployment/spark-worker --replicas=10   # or let the HPA do it
+```
+
+### Tests
+
+```bash
+pip install -r tests/requirements.txt && pytest tests/           # config + pipeline logic
+(cd ansible/roles/spark_node && molecule test)                   # live cluster convergence
+```
+
+- `tests/test_spark.py` — cluster-config invariants (single image tag, the
+  `--host` master flag that replaced the removed `--ip`, Scala 2.13 for Spark 4,
+  the autoscaling defaults) and, when pyspark is installed, the pipeline's
+  rollup/synthesis logic in local mode.
+- **molecule** converges the Ansible role in a container and verifies a master +
+  worker register and a Spark job runs to completion.
+
+### Templates & examples
+
+`template/{python,maven,sbt}` scaffold your own Spark apps on top of
+`spark-submit`; `examples/{python,maven}` are runnable references.

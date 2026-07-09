@@ -23,15 +23,15 @@ This guide provides instructions to deploy Suricata using a Python deployment sc
 ├── deploy_suricata.py                  # Main deployment script for Docker, Podman, Kubernetes, Ansible
 ├── deploy_config.yaml                  # Configuration file for Suricata and connector settings
 ├── docker-compose.yml                  # Docker/Podman Compose file for container orchestration
-├── Dockerfile                         # Dockerfile for building Suricata container
+├── Dockerfile                          # Dockerfile for building Suricata container
 ├── Dockerfile.connector                # Dockerfile for building Suricata connector container
-├── entrypoint.sh                      # Entry script for Suricata container
-├── logrotate                          # Log rotation configuration for Suricata logs
-├── suricata_connector.py              # Script for forwarding logs to Splunk/Elasticsearch
-├── suricata-deployment.yaml           # Kubernetes manifest for Suricata deployment
-├── suricata-connector-deployment.yaml # Kubernetes manifest for connector deployment
-├── suricata-pvc.yaml                  # Kubernetes manifest for persistent volume claims
-├── deploy_suricata.yml                # Ansible playbook for automated deployment
+├── entrypoint.sh                       # Entry script for Suricata container
+├── logrotate                           # Log rotation configuration for Suricata logs
+├── suricata_connector.py               # Script for forwarding logs to Splunk/Elasticsearch
+├── suricata-deployment.yaml            # Kubernetes manifest for Suricata deployment
+├── suricata-connector-deployment.yaml  # Kubernetes manifest for connector deployment
+├── suricata-pvc.yaml                   # Kubernetes manifest for persistent volume claims
+├── deploy_suricata.yml                 # Ansible playbook for automated deployment
 ```
 
 ## Deployment Steps
@@ -64,7 +64,7 @@ This guide provides instructions to deploy Suricata using a Python deployment sc
    Edit `deploy_config.yaml`:
    ```yaml
    suricata:
-     version: '8.0.2'
+     version: '8.0.6'
      interface: 'eth0'
      log_dir: '/var/log/suricata'
      rules_dir: '/var/lib/suricata/rules'
@@ -205,12 +205,47 @@ ansible-playbook deploy_suricata.yml -e "config_file=deploy_config.yaml cleanup=
 - **Log Rotation**: Modify `/etc/logrotate.d/suricata`.
 - **Event Types**: Extend `suricata_connector.py` for `dns`, `tls`, etc.
 
+## IDS / IPS mode toggling
+
+The entrypoint selects the data plane from environment variables (defaults =
+passive IDS, so existing deployments are unchanged):
+
+| Variable | Values | Purpose |
+|---|---|---|
+| `IPS_MODE` | `ids` \| `ips` | passive capture vs inline blocking |
+| `INLINE_METHOD` | `afpacket_bridge` \| `nfqueue` | how IPS intercepts traffic |
+| `CAPTURE_INTERFACE` / `BRIDGE_IFACE_B` | iface names | capture (and bridge B) NIC |
+| `RULE_ACTION_POLICY` | `detect` \| `balanced` \| `aggressive` \| `paranoid` | which risk tiers drop vs alert |
+| `NFQ_FAIL_OPEN` | `no` \| `yes` | fail-closed vs fail-open on the netfilter queue |
+
+```bash
+# passive IDS (default)
+docker compose up -d
+
+# inline IPS via NFQUEUE, block high-confidence bad only
+IPS_MODE=ips INLINE_METHOD=nfqueue RULE_ACTION_POLICY=balanced docker compose up -d
+
+# two-NIC inline bridge, paranoid (drop everything matched)
+IPS_MODE=ips INLINE_METHOD=afpacket_bridge CAPTURE_INTERFACE=eth0 BRIDGE_IFACE_B=eth1 \
+  RULE_ACTION_POLICY=paranoid docker compose up -d
+```
+
+On start the entrypoint renders `suricata.yaml` from
+`templates/suricata.yaml.template` for the selected mode, sets up NFQUEUE
+iptables (or the af-packet bridge), and applies the rule action policy via
+`scripts/toggle_rule_blocking.py`. `IPS_MODE=ids` always forces every rule back
+to `alert` — a passive sensor can never carry drop actions.
+
+The risk tiers map to the shipped rulesets: `docker_malware.rules` and
+`salt_typhoon_unc4841.rules` are tier 1 (block-known-bad), so `balanced`+ policies
+flip them to `drop`. Extend `TIER_FILES` in the toggle script to tier your own
+rule files.
+
 ## Custom Rules Configuration
 
 - Place .rules files in ./rules directory
 - Place lookup files in ./files directory
-- Modify `suricata.yaml` to include the custome rules and lookup files.  (Examples are for docker_malware and salt_typhoon_unc4841 rulesets)
-- Uncomment the sections for enabling active inline blocking IPS for rules in the Dockerfile
+- Modify `suricata.yaml` (or the template) to include the custom rules and lookup files. (Examples are for docker_malware and salt_typhoon_unc4841 rulesets)
 
 The `toggle_rule_blocking.py` script will enable active drop for all configured rules in `suricata.yaml`.
 

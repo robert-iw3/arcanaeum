@@ -1,4 +1,4 @@
-FROM docker.io/alpine:3.23
+FROM docker.io/alpine:3.24
 
 LABEL org.opencontainers.image.name='So Now You Know.' \
       org.opencontainers.image.description='Scan code directories for code quality and security checks.' \

@@ -75,6 +75,24 @@ INSERT INTO {tenant_keyspace}.{table['name']} ({cols}) VALUES ({row_str});
         f.write(cql)
     return 'tenant-init.cql'
 
+def render_schema(schema_config_path: str, out_path: str = "schema/generated.cql") -> str:
+    """Render CQL from a declarative schema config (schema/schema.yaml.example),
+    applying per-table performance profiles. Requires jinja2; returns the path.
+    """
+    from jinja2 import Environment, FileSystemLoader
+
+    cfg = load_yaml(schema_config_path)
+    env = Environment(
+        loader=FileSystemLoader("schema/templates"),
+        trim_blocks=True, lstrip_blocks=True,
+    )
+    cql = env.get_template("schema.cql.j2").render(**cfg)
+    with open(out_path, "w") as f:
+        f.write(cql)
+    print(f"Rendered schema -> {out_path}")
+    return out_path
+
+
 def deploy_kubernetes(config: Dict[str, Any]):
     if not check_command('kubectl'):
         print("Error: kubectl not installed.")
@@ -221,7 +239,12 @@ def deploy_ansible(config: Dict[str, Any], db_type: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Deploy ScyllaDB.")
     parser.add_argument('config_file', help='Path to user_config.yaml')
+    parser.add_argument('--schema', help='Render CQL from a declarative schema config (e.g. schema/schema.yaml.example) and exit')
     args = parser.parse_args()
+
+    if args.schema:
+        render_schema(args.schema)
+        sys.exit(0)
 
     config = load_yaml(args.config_file)
     platform = config.get('platform', 'docker')

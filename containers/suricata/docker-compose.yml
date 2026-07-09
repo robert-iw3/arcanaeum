@@ -5,7 +5,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        VERSION: ${SURICATA_VERSION:-8.0.2}
+        VERSION: ${SURICATA_VERSION:-8.0.6}
     hostname: suricata-ids.io
     network_mode: host
     volumes:
@@ -14,7 +14,18 @@ services:
       - suricata-rules:/var/lib/suricata:Z
       - suricata-config:/etc/suricata:Z
     environment:
-      - SURICATA_OPTIONS=${SURICATA_OPTIONS:--i eth0 -vv}
+      # IPS-mode toggling. Defaults = passive IDS (unchanged behaviour).
+      #   IPS_MODE=ips INLINE_METHOD=nfqueue         -> inline NFQUEUE, drops enabled
+      #   IPS_MODE=ips INLINE_METHOD=afpacket_bridge -> two-NIC inline bridge
+      - IPS_MODE=${IPS_MODE:-ids}
+      - INLINE_METHOD=${INLINE_METHOD:-afpacket_bridge}
+      - CAPTURE_INTERFACE=${CAPTURE_INTERFACE:-eth0}
+      - BRIDGE_IFACE_B=${BRIDGE_IFACE_B:-eth1}
+      # Risk-based rule action policy applied at start:
+      # detect | balanced | aggressive | paranoid (see scripts/toggle_rule_blocking.py)
+      - RULE_ACTION_POLICY=${RULE_ACTION_POLICY:-balanced}
+      - NFQ_FAIL_OPEN=${NFQ_FAIL_OPEN:-no}
+      - HOME_NET=${HOME_NET:-[10.0.0.0/8,172.16.0.0/12,192.168.0.0/16]}
     cap_add:
       - NET_ADMIN
       - NET_RAW

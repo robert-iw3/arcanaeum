@@ -1,4 +1,4 @@
-scalaVersion := "2.12.14"
+scalaVersion := "2.13.16"
 libraryDependencies ++= Seq(
-  "org.apache.spark" %% "spark-sql" % "4.0.0" % "provided"
+  "org.apache.spark" %% "spark-sql" % "4.1.2" % "provided"
 )

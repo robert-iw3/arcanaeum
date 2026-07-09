@@ -1,5 +1,9 @@
 ## nomad
 
+<p align="center">
+  <img src="docs/nomad.png" alt="Nomad" width="800" />
+</p>
+
 Production-ready HashiCorp Nomad cluster deployment, supporting multiple hosts, multiple servers, and multiple provisioning avenues from a single config file — plus a pipeline connector that ships containers from CI or a laptop straight into the cluster as running workloads.
 
 <p align="center">

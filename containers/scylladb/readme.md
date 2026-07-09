@@ -1,115 +1,117 @@
-# ScyllaDB
+## scylladb
 
-## Overview
-Deploys ScyllaDB 5.4 Enterprise on Kubernetes, Docker, or Podman. Supports 1 to 100+ tenant keyspaces, with authentication, TLS, RBAC, and audit logging. TLS certificates are dynamically generated for Docker/Podman. Configure via `user_config.yaml`.
+A ScyllaDB deployment ***demo*** for IoT / data-pipeline telemetry: a 3-node
+cluster (RF=3) with a config-driven schema, a REST API any app or frontend
+connects to, an ETL rollup worker, and autoscaling — handling both structured
+readings and unstructured JSON/blob payloads at scale.
 
-## File Structure
-```
-scylladb-deployment/
-├── ansible/
-│   ├── inventory.ini
-│   └── playbooks/
-│       ├── deploy-sharded.yml
-│       └── templates/
-│           ├── docker-compose.yml.j2
-│           ├── ca.cnf.j2
-│           ├── scylla.cnf.j2
-│           └── scylla-cluster.cnf.j2
-├── certs/
-│   ├── ca.pem
-│   ├── scylla.pem
-│   └── scylla-cluster.pem
-├── config/
-│   └── user_config.yaml
-├── deploy_scylladb.py
-├── k8s-scylladb.yaml
-└── README.md
+### What's here
+
+```console
+scylladb/
+├── docker-compose.yml       # 3-node cluster + schema-init + API + ETL (verified end to end)
+├── schema/
+│   ├── telemetry.cql        # IoT telemetry schema, TWCS-tuned for time-series
+│   ├── schema.yaml.example  # config-driven schema for ANY data shape
+│   └── templates/           # Jinja → CQL generator (performance profiles baked in)
+├── api/                     # FastAPI telemetry service (token-aware/DC-aware driver)
+├── etl/                     # rollup worker: raw_events → per-minute aggregates
+├── k8s-scylladb.yaml        # ScyllaDB Operator ScyllaCluster (3 members, scalable)
+├── k8s-telemetry-app.yaml   # API Deployment + HPA autoscaling + ETL, on k8s
+├── ansible/                 # multi-host deploy playbooks
+├── deploy_scylladb.py       # one orchestrator across docker / k8s / ansible
+└── tests/                   # pytests + live end-to-end bulk load test
 ```
 
-## Prerequisites
-- Kubernetes (kubectl), Docker, or Podman with `docker-compose`/`podman-compose`.
-- Ansible and OpenSSL for certificate generation.
-- ScyllaDB Operator (Kubernetes) or image (`scylladb/scylla-enterprise:5.4`).
+### Quick start (docker)
 
-## Configuration
-1. **Configure user_config.yaml**:
-   - Set `platform` (docker, podman, kubernetes, ansible).
-   - Set `num_tenants` (1 for single DB, 100 for enterprise).
-   - Define `tenant_config.keyspaces` for custom keyspaces (optional). E.g.:
-     ```yaml
-     num_tenants: 1  # or 100
-     tenant_config:
-       keyspaces:
-         - name: orders
-           replication:
-             class: SimpleStrategy
-             replication_factor: 3
-           tables:
-             - name: data
-               columns:
-                 - name: order_id
-                   type: uuid
-                 - name: customer_id
-                   type: text
-               partition_key: customer_id
-     ```
-   - Customize TLS: `cert_path`, `ca_cn`, `node_cn`, `san`, `cert_days`. E.g.:
-     ```yaml
-     tls_enabled: true
-     cert_path: ./certs
-     ca_cn: My CA
-     san: dns:scylla.example.com,ip:192.168.1.100
-     ```
-   - Set `tls_enabled: false` for testing (no TLS).
+```bash
+docker compose up -d          # 3 nodes join one at a time, schema loads, API+ETL start
+curl localhost:8000/health    # {"status":"ok"} once the cluster is up
+```
 
-2. **Install Dependencies**:
-   - Kubernetes:
-     ```bash
-     helm repo add scylla https://scylladb.github.io/scylla-operator/
-     helm repo update
-     helm install scylla-operator scylla/scylla-operator --namespace scylla --create-namespace
-     ```
-   - Docker/Podman:
-     ```bash
-     apt-get install -y docker.io docker-compose openssl  # or podman podman-compose
-     ansible-galaxy collection install community.docker
-     ```
+Ingest and query through the API — no CQL knowledge needed:
 
-3. **Deploy**:
-   - Run: `python3 deploy_scylladb.py config/user_config.yaml`
-   - Kubernetes: `kubectl apply -f k8s-scylladb.yaml` (manually provide certs in Secrets).
-   - Docker/Podman: `docker compose -f docker-compose.yml up -d` or `podman-compose up -d`
-   - Ansible: `ansible-playbook -i ansible/inventory.ini ansible/playbooks/deploy-enterprise-sharded.yml --ask-vault-pass`
-   - Certificates are generated in `cert_path` (e.g., `./certs`).
+```bash
+# structured reading + unstructured payload in one call
+curl -XPOST localhost:8000/events -H 'content-type: application/json' -d \
+  '{"device_id":"sensor-42","metric":"temperature","value":21.5,"unit":"C","payload":{"loc":"warehouse"}}'
 
-4. **Verify**:
-   - Connect: `cqlsh --ssl -u admin -p <pass> localhost 9142` (Docker/Podman) or `scylla-cluster.scylla.svc.cluster.local 9142` (Kubernetes).
-   - Check: `DESCRIBE KEYSPACES` (e.g., `orders`, `tenant_1`). Verify: `SELECT * FROM orders.data;`.
+curl localhost:8000/events/sensor-42                  # read back
+curl localhost:8000/metrics/sensor-42/temperature     # ETL-rolled per-minute aggregates
+```
 
-## Extensibility
-- **Single DB**: Set `num_tenants: 1`, define one keyspace in `tenant_config.keyspaces`.
-- **100 DBs**: Set `num_tenants: 100`, define keyspaces or use defaults (e.g., `tenant_N`).
-- Customize TLS via `ca.cnf.j2`, `scylla.cnf.j2`, `scylla-cluster.cnf.j2` in `ansible/playbooks/templates`.
+Endpoints: `POST /events`, `POST /events/bulk`, `GET /events/{device}`,
+`GET /events/{device}/count`, `GET /metrics/{device}/{metric}`,
+`POST /devices`, `GET /devices`, `GET /health`.
 
-## Fault Tolerance
-- 3 nodes/rack, replication factor 3.
-- Kubernetes: HPA scales 3-12 replicas. Operator handles failures.
-- Docker/Podman: Auto-restart, seed nodes ensure cluster formation.
+### Configuration for any data (schema templates)
 
-## Performance
-- Shard-per-core (16 shards, 8-core node) for 1000s QPS.
-- Cache: 12GB (75% of 16GB RAM).
-- Tenant init: ~0.5s for 100 keyspaces.
+`schema/schema.yaml.example` defines keyspaces/tables declaratively; the Jinja
+template renders CQL and applies a **performance profile** per table so tuning is
+never hand-copied:
 
-## Security
-- Auth: PasswordAuthenticator, RBAC per tenant.
-- TLS: Auto-generated certs for client (9142) and internode (7001). Set `tls_enabled: false` for testing.
-- Non-root: UID 999. Perms: 750/400.
-- Audit: Enabled (AUTH, DDL, 5% overhead).
-- Use Vault for passwords in production.
+- `profile: timeseries` → TimeWindowCompactionStrategy with the window auto-sized
+  from the TTL (kept under Scylla's `twcs_max_window_count` of 50), Zstd
+  compression, short `gc_grace`, percentile speculative retry.
+- `profile: registry` → plain table for lookups.
 
-## Notes
-- Monitor: ScyllaDB Manager (port 10001) or Prometheus.
-- Backup: Configure ScyllaDB Manager for backups.
-- Test: Start with `num_tenants=1`, `tls_enabled: false`.
-- Production: Customize `san` in `user_config.yaml` for node hostnames/IPs.
+Model IoT, events, documents, or metrics by editing the YAML — every table can
+carry an unstructured `text` column for arbitrary payloads alongside its typed
+columns.
+
+### At-scale performance, baked in
+
+- **Time-series compaction (TWCS)**: append-only telemetry ages out whole
+  SSTables with the TTL instead of being rewritten — flat write amplification at
+  high ingest, cheap expiry.
+- **Token-aware + DC-aware routing** in the API driver: each request goes
+  straight to a replica owning the partition, staying in the local DC.
+- **`LOCAL_QUORUM`** reads and writes by default: survives a node loss without
+  cross-DC latency.
+- **Bounded partitions**: raw events are partitioned by `(device_id, hour)` so no
+  partition grows unbounded under high-rate streams.
+- **Concurrent bulk ingest** (`/events/bulk`) with prepared statements.
+
+### Autoscaling
+
+- **API tier** (stateless) autoscales on CPU/memory via the HorizontalPodAutoscaler
+  in `k8s-telemetry-app.yaml` (3→20 replicas).
+- **ScyllaDB** (stateful) scales by raising the ScyllaCluster rack `members` in
+  `k8s-scylladb.yaml`; the Scylla Operator adds a node and streams data to it. Add
+  racks for rack-aware placement or datacenters for geo-distribution — the
+  keyspace already uses `NetworkTopologyStrategy`.
+
+### Verified end to end
+
+`tests/load_test.py` drives the live pipeline — small (100), medium (5k), and
+large (50k) synthetic datasets are ingested through the API in bulk, then queried
+back to prove every event was stored (RF-replicated) and is accessible:
+
+```bash
+docker compose up -d
+API_URL=http://localhost:8000 python tests/load_test.py all
+# small/medium/large: PASS — 55,100 events stored and verified
+```
+
+`tests/test_scylladb.py` covers schema-template rendering (incl. the TWCS window
+math), ETL rollup aggregation, and compose/topology invariants:
+
+```bash
+pip install -r tests/requirements.txt && pytest tests/test_scylladb.py
+```
+
+### Multi-host / production
+
+`deploy_scylladb.py` renders the schema from config and drives docker, Kubernetes
+(operator), or Ansible from one `config/user_config.yaml`.
+
+- **Kubernetes**: install the operator, then
+  `kubectl apply -f k8s-scylladb.yaml -f k8s-telemetry-app.yaml`.
+- **Ansible**: `ansible-playbook -i ansible/inventory.ini ansible/playbooks/deploy-sharded.yml`.
+
+### Security
+
+Auth (PasswordAuthenticator + CassandraAuthorizer) is on; supply real
+credentials via the k8s Secret / Vault rather than the demo `cassandra`
+account, and enable TLS (`tls_enabled` + certs) for any non-local deployment.

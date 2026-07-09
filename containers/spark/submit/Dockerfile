@@ -1,4 +1,4 @@
-FROM spark-base:4.0.0-hadoop3.4.1
+FROM spark-base:4.1.2-hadoop3
 
 ENV SPARK_MASTER_NAME spark-master
 ENV SPARK_MASTER_PORT 7077

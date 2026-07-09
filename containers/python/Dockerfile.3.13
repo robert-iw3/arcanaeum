@@ -1,15 +1,15 @@
 # syntax=docker/dockerfile:1
 
 ARG repo="docker.io" \
-    base_image="alpine:3.23" \
-    image_hash="4d889c14e7d5a73929ab00be2ef8ff22437e7cbc545931e52554a7b00e123d8b"
+    base_image="alpine:3.24" \
+    image_hash="79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f"
 
 FROM ${repo}/${base_image}@sha256:${image_hash} AS base
 
 ENV PATH /usr/local/bin:$PATH
 ENV GPG_KEY 7169605F62C751356D054A26A821E680E5FA6305
-ENV PYTHON_VERSION 3.13.2
-ENV PYTHON_SHA256 d984bcc57cd67caab26f7def42e523b1c015bbc5dc07836cf4f0b63fa159eb56
+ENV PYTHON_VERSION 3.13.14
+ENV PYTHON_SHA256 639e43243c620a308f968213df9e00f2f8f62332f7adbaa7a7eeb9783057c690
 
 RUN \
 	apk add --no-cache \

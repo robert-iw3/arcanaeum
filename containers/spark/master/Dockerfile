@@ -1,4 +1,4 @@
-FROM spark-base:4.0.0-hadoop3.4.1
+FROM spark-base:4.1.2-hadoop3
 
 COPY master.sh /
 

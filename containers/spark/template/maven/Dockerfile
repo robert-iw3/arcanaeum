@@ -1,4 +1,4 @@
-FROM spark-submit:4.0.0-hadoop3.4.1
+FROM spark-submit:4.1.2-hadoop3
 
 ENV SPARK_APPLICATION_JAR_NAME application-1.0
 ENV SPARK_APPLICATION_JAR_LOCATION /app/application.jar

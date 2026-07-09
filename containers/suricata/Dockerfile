@@ -27,11 +27,13 @@ RUN \
 	wget \
 	cronie \
 	elfutils-libelf \
+	ethtool \
 	file \
 	findutils \
 	hiredis \
 	hyperscan \
 	iproute \
+	iptables-nft \
 	jansson \
 	lua-libs \
 	libbpf \
@@ -155,6 +157,12 @@ RUN \
 COPY --from=build-env /fakeroot /
 COPY logrotate /etc/logrotate.d/suricata
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+# IPS-mode toggling: the entrypoint renders suricata.yaml per mode (ids/ips,
+# af-packet bridge, NFQUEUE) from this template and applies a risk-based rule
+# action policy via the toggle script.
+COPY templates/suricata.yaml.template /etc/suricata/templates/suricata.yaml.template
+COPY --chmod=755 scripts/toggle_rule_blocking.py /usr/local/bin/toggle_rule_blocking.py
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # bin smoke tests
 RUN \

@@ -1,13 +1,19 @@
 <p align="center">
-  <img src=".eraser/containers.jpeg" />
+  <img src=".eraser/ship_app.png" />
 </p>
 
 ## Containers
 
-This repository contains the source Dockerfiles and supporting configuration scripts required to build and deploy these containers across various workload orchestrators, including Kubernetes, Red Hat OpenShift, HashiCorp Nomad, Docker Compose, and Podman Compose.
+A collection of containerized workloads, each in its own directory with the
+Dockerfile and the configuration needed to build and deploy it. Every workload is
+written to run across common orchestrators — Kubernetes, Red Hat OpenShift, HashiCorp
+Nomad, Docker Compose, and Podman Compose.
 
-For environments utilizing HashiCorp Nomad, the nomad directory includes fully automated deployment workflows and orchestration templates to streamline your implementation (my preferred workload orchestrator).
+Each directory is self-contained: its Dockerfile, compose file, Kubernetes manifests,
+and any deploy scripts or tests live together, so a directory can be used on its own.
 
-Directory completeness directly reflects usage frequency. Core directories are fully featured and production-ready, while secondary directories provide minimal configurations as a starting point.
+Depth varies by how heavily a workload is used. The core ones are fully built out —
+production-grade deployments with multi-node topologies, autoscaling, Ansible roles,
+and test suites — while the rest ship a solid baseline configuration to build on.
 
 @RW
