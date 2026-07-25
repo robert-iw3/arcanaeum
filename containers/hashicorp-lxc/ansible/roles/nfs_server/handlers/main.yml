@@ -1,3 +1,0 @@
----
-- name: Apply exports
-  ansible.builtin.command: exportfs -a

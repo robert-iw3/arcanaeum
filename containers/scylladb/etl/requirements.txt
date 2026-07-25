@@ -1,1 +1,0 @@
-scylla-driver==3.29.2

@@ -1,6 +1,0 @@
-Jul  2 14:02:11 host1 nginx[123]: connect() failed (111: Connection refused) while connecting to upstream
-Jul  2 14:02:12 host1 cron[99]: job 42 completed normally
-2026-07-02T14:02:13.123456+00:00 host1 sshd[5]: Failed password for root from 10.0.0.5 port 22 ssh2
-Jul  2 14:02:14 host1 kernel: WARNING: CPU: 0 PID: 1 at drivers/gpu/thing
-Jul  2 14:02:15 host1 app: FATAL: cannot allocate memory
-this line has no valid timestamp and must be ignored

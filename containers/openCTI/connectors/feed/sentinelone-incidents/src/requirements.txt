@@ -1,4 +1,0 @@
-pycti
-validators
-requests
-pyyaml

@@ -1,1 +1,0 @@
-### https://docs.opensearch.org/latest/security-analytics/usage/rules/

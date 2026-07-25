@@ -1,4 +1,0 @@
-2024-01-10 12:34:56 I #12345 module Example info message.
-2024-01-10 13:45:00 E Error occurred in processing.
-1/10/2024 2:30:00 PM Scan NT AUTHORITY\SYSTEM C:\path\to\file.exe Description Trojan detected.
-2024-01-10 14:00:00.123Z | INFO | Component | Process | 1234 | 5678 | Category | Source | Malware blocked: Trojan named ExampleTrojan.

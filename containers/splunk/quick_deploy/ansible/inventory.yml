@@ -1,7 +1,0 @@
----
-all:
-  hosts:
-    splunk_server:
-      ansible_host: "{{ splunk_server_ip | default('localhost') }}"
-    splunk_uf:
-      ansible_host: "{{ splunk_uf_ip | default('localhost') }}"

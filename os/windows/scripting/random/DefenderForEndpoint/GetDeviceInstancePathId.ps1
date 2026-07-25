@@ -1,2 +1,0 @@
-$csv = ".\DeviceRunStatesByProactiveRemediation_GUID.csv"
-(Import-Csv -Path $csv).PreRemediationDetectionScriptOutput | ForEach-Object { Write-Output "<InstancePathId>$($_.Replace('&','&amp;'))</InstancePathId>" }

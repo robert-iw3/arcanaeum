@@ -1,3 +1,0 @@
-providers:
-  kubernetesCRD:
-    enabled: true

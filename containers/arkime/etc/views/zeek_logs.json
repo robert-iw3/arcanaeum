@@ -1,6 +1,0 @@
-{
-  "name": "Zeek Logs",
-  "expression": "event.provider == zeek",
-  "roles": ["arkimeUser"],
-  "users" : [ ]
-}

@@ -1,3 +1,0 @@
-cert = "cert.pem"
-key = "key.pem"
-tls_listen_address = "0.0.0.0:5061"

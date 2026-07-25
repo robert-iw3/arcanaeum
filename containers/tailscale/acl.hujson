@@ -1,9 +1,0 @@
-{
-  "grants": [
-    {
-      "action": "accept",
-      "src": ["autogroup:member"],
-      "dst": ["autogroup:internet:*"]
-    }
-  ]
-}

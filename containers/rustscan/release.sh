@@ -1,1 +1,0 @@
-cargo publish && cargo build --release && git add Cargo.lock && git commit -m 'Updating lock file' && gpsup

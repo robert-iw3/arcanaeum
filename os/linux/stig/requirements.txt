@@ -1,3 +1,0 @@
-python-lxml
-python-xmltodict
-python-passlib

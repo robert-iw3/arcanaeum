@@ -1,6 +1,0 @@
-apiVersion: v2
-name: nessus
-description: Deployment of nessus
-type: application
-version: 1.0.0
-appVersion: "latest"

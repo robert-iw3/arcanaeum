@@ -1,6 +1,0 @@
-{
-  "name": "Zeek conn.log",
-  "expression": "event.provider == zeek && event.dataset == conn",
-  "roles": ["arkimeUser"],
-  "users" : [ ]
-}

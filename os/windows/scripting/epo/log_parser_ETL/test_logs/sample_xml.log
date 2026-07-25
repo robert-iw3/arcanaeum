@@ -1,2 +1,0 @@
-<log><timestamp>2024-01-10 17:00:00</timestamp><severity>INFO</severity><module>module3</module><message>XML example message</message></log>
-<log><timestamp>2024-01-10 18:00:00</timestamp><severity>ERROR</severity><module>module4</module><message>Error in XML</message></log>
