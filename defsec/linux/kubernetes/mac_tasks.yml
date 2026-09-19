@@ -1,0 +1,56 @@
+---
+- name: Configure Mandatory Access Controls (AppArmor or SELinux)
+  block:
+    - name: Check if SELinux is available
+      command: sestatus
+      register: selinux_status
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Enable SELinux if available
+      block:
+        - name: Ensure SELinux is in enforcing mode
+          command: setenforce 1
+          when: selinux_status.rc == 0
+
+        - name: Configure SELinux policy to enforcing
+          lineinfile:
+            path: /etc/selinux/config
+            regexp: '^SELINUX='
+            line: 'SELINUX=enforcing'
+            state: present
+
+        - name: Ensure SELinux Kubernetes policy is installed
+          package:
+            name: selinux-policy-targeted
+            state: present
+          when: ansible_os_family == 'RedHat'
+
+      when: selinux_status.rc == 0
+
+    - name: Check if AppArmor is available
+      command: apparmor_status
+      register: apparmor_status
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Enable AppArmor if available
+      block:
+        - name: Ensure AppArmor is enabled
+          systemd:
+            name: apparmor
+            state: started
+            enabled: yes
+          when: apparmor_status.rc == 0
+
+        - name: Apply AppArmor profiles for Kubernetes components
+          command: aa-enforce /etc/apparmor.d/*
+          when: apparmor_status.rc == 0
+          changed_when: true
+
+      when: apparmor_status.rc == 0 and selinux_status.rc != 0
+
+    - name: Warn if neither SELinux nor AppArmor is available
+      debug:
+        msg: "Warning: Neither SELinux nor AppArmor is available. Mandatory Access Controls not configured."
+      when: selinux_status.rc != 0 and apparmor_status.rc != 0

@@ -1,0 +1,13 @@
+{
+  "tde_enabled": true,
+  "force_encryption": true,
+  "server_audit_enabled": true,
+  "ole_automation_disabled": true,
+  "remote_access_disabled": true,
+  "contained_db_auth": false,
+  "gmsa_service_account": true,
+  "extended_protection": "Required",
+  "data_classification": true,
+  "tls_version": "1.2",
+  "backup_encrypted": true
+}

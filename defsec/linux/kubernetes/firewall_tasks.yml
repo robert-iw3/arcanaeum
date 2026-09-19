@@ -1,0 +1,66 @@
+- name: Configure firewalld
+  block:
+    - name: Ensure firewalld is installed
+      package:
+        name: firewalld
+        state: present
+
+    - name: Ensure firewalld is enabled and running
+      systemd:
+        name: firewalld
+        state: started
+        enabled: yes
+
+    - name: Configure firewalld to allow Kubernetes control plane ports
+      firewalld:
+        port: "{{ item }}"
+        permanent: yes
+        state: enabled
+        immediate: yes
+      loop:
+        - 6443/tcp  # Kubernetes API server
+        - 2379-2380/tcp  # etcd server client API
+        - 10250/tcp  # Kubelet API
+        - 10259/tcp  # kube-scheduler
+        - 10257/tcp  # kube-controller-manager
+
+    - name: Configure firewalld to allow worker node ports
+      firewalld:
+        port: "{{ item }}"
+        permanent: yes
+        state: enabled
+        immediate: yes
+      loop:
+        - 10250/tcp  # Kubelet API
+        - 30000-32767/tcp  # NodePort Services (default range)
+
+    - name: Allow SSH for management
+      firewalld:
+        service: ssh
+        permanent: yes
+        state: enabled
+        immediate: yes
+
+    - name: Set firewalld to drop all other traffic
+      firewalld:
+        zone: public
+        permanent: yes
+        state: enabled
+        immediate: yes
+        masquerade: no
+        rich_rule: "rule family='ipv4' drop"
+      when: ansible_os_family == 'RedHat'
+
+    - name: Enable firewalld logging for dropped packets
+      lineinfile:
+        path: /etc/firewalld/firewalld.conf
+        regexp: '^LogDenied='
+        line: 'LogDenied=all'
+        state: present
+      notify: reload firewalld
+
+  handlers:
+    - name: reload firewalld
+      systemd:
+        name: firewalld
+        state: reloaded

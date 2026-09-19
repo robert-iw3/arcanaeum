@@ -1,0 +1,10 @@
+[package]
+name = "nexus_integrity"
+version = "1.0.0"
+edition = "2024"
+authors = ["Robert Weber"]
+
+[dependencies]
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"

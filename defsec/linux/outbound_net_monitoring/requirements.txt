@@ -1,0 +1,3 @@
+filelock
+psutil
+python-json-logger

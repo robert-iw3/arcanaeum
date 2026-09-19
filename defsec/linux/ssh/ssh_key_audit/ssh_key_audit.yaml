@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ssh-key-audit
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ssh-key-audit
+  template:
+    metadata:
+      labels:
+        app: ssh-key-audit
+    spec:
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        fsGroup: 0
+      containers:
+        - name: ssh-key-audit
+          image: ssh-key-audit:latest
+          command: ["python3", "/ssh_key_audit.py", "--json", "--verbose"]
+          securityContext:
+            capabilities:
+              add: ["DAC_READ_SEARCH"]
+          volumeMounts:
+            - name: passwd
+              mountPath: /etc/passwd
+              readOnly: true
+            - name: home
+              mountPath: /home
+            - name: log-dir
+              mountPath: /var/log
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "250m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+      volumes:
+        - name: passwd
+          hostPath:
+            path: /etc/passwd
+        - name: home
+          hostPath:
+            path: /home
+        - name: log-dir
+          emptyDir: {}

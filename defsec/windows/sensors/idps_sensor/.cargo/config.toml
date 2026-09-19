@@ -1,0 +1,8 @@
+# Workspace cargo config.
+# Disable HTTP/2 multiplexing: cargo's sparse-registry HTTP/2 transfers fail on some
+# networks with "[56] Failed receiving HTTP2 data" / timeouts. HTTP/1.1 is far more reliable.
+[http]
+multiplexing = false
+
+[net]
+retry = 10

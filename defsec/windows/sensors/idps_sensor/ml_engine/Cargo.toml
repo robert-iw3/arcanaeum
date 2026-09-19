@@ -1,0 +1,26 @@
+[package]
+name = "idpssensor_ml"
+version = "1.0.0"
+edition = "2024"
+authors = ["Robert Weber"]
+
+[lib]
+name = "idpssensor_ml"
+crate-type = ["cdylib"]
+
+# NOTE: release profile is defined in the workspace root Cargo.toml (member profiles are ignored).
+
+[dependencies]
+# --- Telemetry transmission (async WAL -> Parquet -> gateway), mirrors c2_sensor ---
+tokio = { version = "1", features = ["full"] }
+transmission = { path = "../transmission" }
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rusqlite = { version = "0.31", features = ["bundled"] }
+linfa = "0.7"
+linfa-clustering = "0.7"
+linfa-nn = "0.7"
+ndarray = "0.15"
+rand = "0.8"
+regex = "1.10"

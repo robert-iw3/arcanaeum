@@ -1,0 +1,33 @@
+---
+apparmor:
+  enabled: true
+  target_mode: "enforce"            # final mode
+  learning_hours: 48
+
+# Applications to dynamically profile (add more as needed, this is an example)
+applications:
+  - name: nginx
+    binary: "/usr/sbin/nginx"
+    ports: [80, 443]
+    custom_rules:
+      - "network inet tcp,"
+      - "deny /etc/shadow r,"
+
+  - name: my_custom_app
+    binary: "/opt/myapp/bin/server"
+    custom_rules:
+      - "capability net_bind_service,"
+      - "deny /proc/*/mem rwk,"
+
+# Global tunables & extra profiles
+global_tunables:
+  - "/etc/apparmor.d/tunables/home"
+
+# Custom file access rules (applied to all profiles)
+extra_rules: []
+
+optimization:
+  enable_noise_reduction: true      # auto-deny common noisy access
+  multi_pass_refinement: 3          # aa-logprof refinement loops
+  minimize_profiles: true
+  aggressive_pruning: true          # remove overly broad rules

@@ -1,0 +1,142 @@
+# Use provisioning files (e.g., add to or create new yaml file in /etc/grafana/provisioning/alerting/sql-rules.yml for auto-load).
+# In Grafana: Go to Alerting > Alert rules > New rule. Select Prometheus data source, paste expr, set evaluation (e.g., every 1m), pending/for durations, labels/annotations as above. Link to the dashboard panels for context.
+# Notifications: Configure in Grafana Alerting > Contact points (e.g., email on critical severity).
+# Testing: In Grafana, use "Test rule" to simulate; adjust thresholds based on your env (e.g., lower for dev).
+# Interoperability: Rules query the exact metrics from the script (e.g., sql_cpu_usage_pct). Add to the dashboard via "Add panel > Alert" or provisioning.
+groups:
+  - name: SQL_Health_Alerts
+    rules:
+      - alert: HighBlockedSessions
+        expr: sql_blocked_sessions > 5  # Threshold: >5 blocked sessions
+        for: 5m  # Pending duration
+        labels:
+          severity: warning
+        annotations:
+          summary: "High number of blocked sessions ({{ $value }})"
+          description: "Blocked sessions exceed threshold. Investigate queries."
+
+      - alert: HighCPUUsage
+        expr: sql_cpu_usage_pct > 80  # Threshold: >80%
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High CPU usage ({{ $value }}%)"
+          description: "CPU usage is critically high. Check for expensive queries or resource contention."
+
+      - alert: LowAvailableMemory
+        expr: sql_available_memory_mb < 1024  # Threshold: <1GB
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low available memory ({{ $value }} MB)"
+          description: "Available physical memory is low. Risk of paging; optimize memory usage."
+
+      - alert: LowPageLifeExpectancy
+        expr: sql_page_life_expectancy < 300  # Threshold: <5 min (300s)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low page life expectancy ({{ $value }} s)"
+          description: "Buffer cache turnover high. Increase memory or tune queries."
+
+      - alert: HighTempDBUsage
+        expr: sql_tempdb_usage_pct > 80  # Threshold: >80%
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High TempDB usage ({{ $value }}%)"
+          description: "TempDB space critically high. Risk of spills; add files or monitor sorts/hashes."
+
+      - alert: HighIndexFragmentation
+        expr: sql_avg_index_frag_pct > 30  # Threshold: >30%
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High index fragmentation ({{ $value }}%)"
+          description: "Indexes fragmented. Schedule rebuild/reorganize."
+
+      - alert: HighDeadlocks
+        expr: rate(sql_deadlocks_total[5m]) > 1  # Threshold: >1 per 5min
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High deadlocks rate ({{ $value }}/5m)"
+          description: "Frequent deadlocks. Review transactions and isolation levels."
+
+      - alert: HighTopWaitTime
+        expr: sql_top_wait_time_ms > 100000  # Threshold: >100s (100,000ms)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High top wait time ({{ $value }} ms)"
+          description: "Dominant wait type exceeding threshold. Investigate waits."
+
+      - alert: LowDBFreeSpace
+        expr: sql_db_free_space_mb < 1024  # Threshold: <1GB per DB
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low free space in {{ $labels.db_name }} ({{ $value }} MB)"
+          description: "Database free space low. Risk of growth failures."
+
+      - alert: HighRecentErrors
+        expr: sql_recent_errors_24h > 5  # Threshold: >5 errors in 24h
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High recent errors ({{ $value }} in 24h)"
+          description: "Recent errors/failures detected. Check SQL error log."
+
+      - alert: HighFailedJobs
+        expr: sql_failed_jobs_24h > 0  # Threshold: Any failures
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Failed jobs in 24h ({{ $value }})"
+          description: "Agent jobs failing. Review job history."
+
+      - alert: HighUnbackedDBs
+        expr: sql_unbacked_dbs_24h > 0  # Threshold: Any unbacked
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Unbacked databases ({{ $value }} in 24h)"
+          description: "Databases without recent backups. Risk of data loss."
+
+      - alert: OldBackups
+        expr: sql_backup_age_hours > 24  # Threshold: >24 hours old
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Old backup for {{ $labels.db_name }} ({{ $value }} hours)"
+          description: "Backup overdue. Schedule backups."
+
+      - alert: JobFailures
+        expr: sql_agent_job_status == 0  # 0=Failed
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Job {{ $labels.job_name }} failed (status {{ $value }})"
+          description: "Agent job failed last run. Check history."
+
+      - alert: StaleJobs
+        expr: sql_agent_job_last_run_seconds_ago > 3600  # >1 hour since last run
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Stale job {{ $labels.job_name }} ({{ $value }} sec ago)"
+          description: "Job hasn't run recently. Check schedule/enabled status."

@@ -1,0 +1,12 @@
+[Unit]
+Description=AIDE daily check
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/aide --check
+ExecStartPost=/usr/local/bin/aide-ship-to-siem.py
+Nice=19
+IOSchedulingClass=idle
+StandardOutput=append:/var/log/aide/aide.log
+StandardError=append:/var/log/aide/aide.log

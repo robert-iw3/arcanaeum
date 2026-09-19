@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: apparmor-guardian
+spec:
+  selector:
+    matchLabels:
+      app: apparmor-guardian
+  template:
+    spec:
+      hostPID: true
+      securityContext:
+        runAsUser: 0
+      containers:
+        - name: guardian
+          image: apparmor-guardian:latest
+          command: ["python3", "/configure_apparmor.py", "--mode=setup"]
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: host-root
+              mountPath: /host
+            - name: apparmor-security
+              mountPath: /sys/kernel/security
+            - name: apparmor-profiles
+              mountPath: /etc/apparmor.d
+            - name: var-log
+              mountPath: /var/log
+      volumes:
+        - name: host-root
+          hostPath:
+            path: /
+        - name: apparmor-security
+          hostPath:
+            path: /sys/kernel/security
+        - name: apparmor-profiles
+          hostPath:
+            path: /etc/apparmor.d
+        - name: var-log
+          hostPath:
+            path: /var/log

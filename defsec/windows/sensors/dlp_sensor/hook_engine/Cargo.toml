@@ -1,0 +1,25 @@
+[package]
+name = "data_sensor_hook"
+version = "0.2.0"
+edition = "2021"
+authors = ["Robert Weber"]
+description = "Ring-3 Interceptor / In-Band Inspector API Hook"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+minhook-sys = "0.1.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10.8"
+hex = "0.4.3"
+lazy_static = "1.4.0"
+regex = "1.10.3"
+winapi = { version = "0.3", features = ["minwindef", "libloaderapi"] }
+windows-sys = { version = "0.52", features = [
+    "Win32_System_LibraryLoader",
+    "Win32_Foundation",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading"
+] }

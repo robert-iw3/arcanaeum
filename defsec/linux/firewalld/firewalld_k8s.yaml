@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: firewalld-config
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: firewalld-config
+  template:
+    metadata:
+      labels:
+        app: firewalld-config
+    spec:
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        fsGroup: 0
+      containers:
+        - name: firewalld-config
+          image: firewalld-config:latest
+          command: ["python3", "/configure_firewalld.py", "--json", "--verbose"]
+          securityContext:
+            capabilities:
+              add: ["NET_ADMIN", "DAC_OVERRIDE"]
+          volumeMounts:
+            - name: firewalld-config
+              mountPath: /etc/firewalld
+            - name: rsyslog-config
+              mountPath: /etc/rsyslog.d
+            - name: fail2ban-config
+              mountPath: /etc/fail2ban
+            - name: log-dir
+              mountPath: /var/log
+            - name: backup-dir
+              mountPath: /var/backups
+            - name: sysctl-config
+              mountPath: /etc/sysctl.conf
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "500m"
+            limits:
+              memory: "512Mi"
+              cpu: "1"
+      volumes:
+        - name: firewalld-config
+          hostPath:
+            path: /etc/firewalld
+        - name: rsyslog-config
+          hostPath:
+            path: /etc/rsyslog.d
+        - name: fail2ban-config
+          hostPath:
+            path: /etc/fail2ban
+        - name: log-dir
+          emptyDir: {}
+        - name: backup-dir
+          emptyDir: {}
+        - name: sysctl-config
+          hostPath:
+            path: /etc/sysctl.conf

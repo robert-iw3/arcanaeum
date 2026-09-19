@@ -1,0 +1,27 @@
+[package]
+name = "transmission"
+version = "0.0.1"
+edition = "2024"
+authors = ["Robert Weber"]
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+rust-ini = "0.21"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+reqwest = { version = "0.11", features = ["rustls-tls"], default-features = false }
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "tls-rustls"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+arrow = "50.0"
+parquet = { version = "50.0", features = ["arrow", "zstd"] }
+# mimalloc as the global allocator. Unlike jemalloc, its C is built via the `cc`
+# crate (cl.exe), so it compiles cleanly on x86_64-pc-windows-msvc as well as *nix.
+mimalloc = "0.1"
+# Pinned: arrow-arith 50 ships a ChronoDateExt::quarter polyfill that collides with
+# Datelike::quarter added in later chrono (E0034). 0.4.31 is arrow 50's baseline.
+# (Removing this pin requires upgrading arrow/parquet past 50.)
+chrono = { version = "=0.4.31", features = ["serde"] }
+# Shared nexus HMAC integrity stamper (canonical order verified against core_ingress)
+# Vendored locally so the edr_sensor workspace builds standalone (no sibling repo required).
+nexus_integrity = { path = "../vendor/nexus_integrity" }
+hex = "0.4"
